@@ -1,0 +1,222 @@
+/* =====================================================================
+   消息层 —— 画布节点与 ChatView 共用。四类角色 + 两种密度 + Markdown/代码块。
+   全部引用 tokens.css 语义 token，绝不写死色值。
+   ===================================================================== */
+
+.m {
+  max-width: 100%;
+  color: var(--text);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.m--comfortable {
+  --m-fs: 14px;
+  --m-lh: 1.65;
+}
+.m--compact {
+  --m-fs: 12.5px;
+  --m-lh: 1.6;
+}
+
+/* 用户：靠右气泡 */
+.m--user {
+  align-self: flex-end;
+}
+.m--user .m__plain {
+  display: inline-block;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 8px 12px;
+  font-size: var(--m-fs);
+  line-height: var(--m-lh);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.m--compact.m--user .m__plain {
+  padding: 7px 11px;
+  border-radius: var(--r-md);
+}
+
+/* 助手：全宽靠左，Markdown */
+.m--assistant {
+  align-self: stretch;
+}
+
+/* 错误：mono + 错误色左边框 */
+.m--error {
+  align-self: stretch;
+}
+.m--error .m__plain {
+  display: block;
+  color: var(--err);
+  font-family: var(--font-mono);
+  font-size: calc(var(--m-fs) - 1.5px);
+  border-left: 2px solid var(--err);
+  padding-left: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 预留：工具消息 */
+.m--tool .m__plain {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: calc(var(--m-fs) - 1.5px);
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+/* ---- Markdown 正文 ---- */
+.m__md {
+  font-size: var(--m-fs);
+  line-height: var(--m-lh);
+  color: var(--text);
+  word-break: break-word;
+}
+.m__md > * + * {
+  margin-top: 0.6em;
+}
+.m__md p {
+  margin: 0;
+}
+.m__md ul,
+.m__md ol {
+  margin: 0;
+  padding-left: 1.4em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+}
+.m__md li {
+  margin: 0;
+}
+.m__md blockquote {
+  margin: 0;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--muted);
+}
+.m__md a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.m__md a:hover {
+  text-decoration: underline;
+}
+.m__md h1,
+.m__md h2,
+.m__md h3,
+.m__md h4 {
+  margin: 0;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.m__md h1 {
+  font-size: 1.3em;
+}
+.m__md h2 {
+  font-size: 1.18em;
+}
+.m__md h3 {
+  font-size: 1.08em;
+}
+.m__md hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.4em 0;
+}
+.m__md table {
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+.m__md th,
+.m__md td {
+  border: 1px solid var(--border);
+  padding: 4px 9px;
+  text-align: left;
+}
+.m__md th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+.m__md img {
+  max-width: 100%;
+  border-radius: var(--r-sm);
+}
+
+/* 行内 code */
+.inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--inline-code-bg);
+  color: var(--inline-code-text);
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+}
+
+/* 流式光标 */
+.m__caret {
+  display: inline-block;
+  width: 6px;
+  height: 1em;
+  margin-left: 2px;
+  translate: 0 2px;
+  background: var(--accent);
+  animation: blink 1s steps(2) infinite;
+}
+
+/* ---- 代码块 ---- */
+.codeblock {
+  margin: 0;
+  border: 1px solid var(--code-border);
+  border-radius: var(--r-md);
+  background: var(--code-bg);
+  overflow: hidden;
+}
+.codeblock__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 4px 12px;
+  border-bottom: 1px solid var(--code-border);
+  background: color-mix(in srgb, var(--code-text) 5%, transparent);
+}
+.codeblock__lang {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  letter-spacing: 0.3px;
+}
+.codeblock__copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 3px 7px;
+  cursor: pointer;
+}
+.codeblock__copy:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--code-text) 8%, transparent);
+}
+.codeblock__pre {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--code-text);
+  tab-size: 2;
+}
+/* 紧凑密度（画布节点）：代码块限高，内部滚动，避免撑爆节点 */
+.m--compact .codeblock__pre {
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: 11.5px;
+}

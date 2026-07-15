@@ -1,0 +1,464 @@
+/* =====================================================================
+   Component styles — "安静的技术工作室" · 白色为主 + 半透明材质 + 石墨青绿
+   All values reference SEMANTIC tokens from tokens.css (never raw hex).
+   ===================================================================== */
+@import "./tokens.css";
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+}
+body {
+  font-family: var(--font-ui);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* =====================================================================
+   App shell: translucent sidebar over a faux wallpaper, solid canvas.
+   ===================================================================== */
+.app {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  position: relative;
+}
+
+.wallpaper {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--wallpaper);
+}
+
+/* --- sidebar (the vibrancy surface) --- */
+.sidebar {
+  width: 240px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--sidebar-glass);
+  backdrop-filter: blur(40px) saturate(1.5);
+  -webkit-backdrop-filter: blur(40px) saturate(1.5);
+  border-right: 1px solid var(--border);
+  padding: 14px 10px 10px;
+  gap: 2px;
+}
+
+.sb-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px 12px;
+}
+.sb-mark {
+  width: 15px;
+  height: 15px;
+  border-radius: 5px;
+  background: var(--accent);
+  flex: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+.sb-word {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+.sb-word small {
+  color: var(--faint);
+  font-weight: 450;
+  font-size: 11px;
+  margin-left: 5px;
+}
+
+.sb-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+  user-select: none;
+}
+.sb-item:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
+}
+.sb-item.active {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+  font-weight: 500;
+}
+.sb-item svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  stroke: currentColor;
+}
+.sb-item .badge {
+  margin-left: auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.sb-label {
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 14px 9px 6px;
+  font-weight: 500;
+}
+.sb-ws {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.sb-ws:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
+}
+.sb-ws .sq {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.sb-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 8px 4px;
+  border-top: 1px solid var(--border);
+}
+.sb-ava {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  flex: none;
+}
+.sb-name {
+  font-size: 12px;
+  color: var(--text);
+}
+.sb-name small {
+  display: block;
+  color: var(--faint);
+  font-size: 10.5px;
+}
+.theme-toggle {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+.theme-toggle:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.theme-toggle svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+}
+
+/* --- main / canvas --- */
+.main {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  background: var(--bg);
+}
+.react-flow {
+  background: transparent;
+}
+
+/* =====================================================================
+   Canvas node card = "index plate": hairline, mono call-sign, teal ring.
+   ===================================================================== */
+.card {
+  width: 344px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--text);
+  transition: box-shadow 0.16s, border-color 0.16s;
+}
+.card:hover {
+  box-shadow: var(--shadow-float);
+}
+.card--fresh {
+  animation: pop 0.32s cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.98) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* selection = teal ring + soft wash, not a heavy border or glow */
+.react-flow__node.selected .card {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow-float);
+}
+
+.card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.card__head::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--accent);
+  flex: none;
+}
+.chev {
+  background: none;
+  border: none;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0;
+  width: 12px;
+}
+.title {
+  font-weight: 550;
+  font-size: 12.5px;
+}
+.model {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.2px;
+}
+.spacer {
+  flex: 1;
+}
+.tokens {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.preview {
+  padding: 9px 14px 13px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card__body {
+  position: relative;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* seed quote = "specimen tag" */
+.seed {
+  border-left: 2px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.seed__q {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.seed__from {
+  font-family: var(--font-mono);
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.2px;
+}
+
+.empty {
+  color: var(--faint);
+  font-size: 12px;
+  padding: 4px 2px;
+}
+.msg {
+  line-height: 1.62;
+  font-size: 12.5px;
+}
+.msg--user {
+  align-self: flex-start;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  padding: 8px 11px;
+  border-radius: var(--r-md);
+  color: var(--text);
+  max-width: 100%;
+}
+.msg--assistant {
+  color: var(--text);
+  opacity: 0.92;
+  padding: 1px 2px;
+}
+.msg::selection,
+.seed__q::selection {
+  background: var(--accent-soft);
+}
+
+/* selection toolbar */
+.seltb {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  display: flex;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  padding: 4px;
+  box-shadow: var(--shadow-float);
+  z-index: 20;
+  white-space: nowrap;
+}
+.seltb button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 5px 9px;
+  font-size: 11.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+.seltb button.ghost {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border-strong);
+  font-weight: 450;
+}
+.seltb::after {
+  content: "";
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 8px;
+  height: 8px;
+  background: var(--surface);
+  border-right: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.card__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+.ask {
+  flex: 1;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 7px 10px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  font-family: var(--font-ui);
+}
+.ask:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ask::placeholder {
+  color: var(--faint);
+}
+.mount {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.mount input {
+  accent-color: var(--accent);
+}
+
+/* handles */
+.react-flow__handle.h {
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.react-flow__node:hover .react-flow__handle.h {
+  opacity: 1;
+}
+
+/* edges = thin dimension lines; labels quiet mono */
+.react-flow__edge-path {
+  stroke: var(--edge);
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: var(--accent);
+}
+.react-flow__edge-text {
+  fill: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.react-flow__edge-textbg {
+  fill: var(--surface);
+}
+
+/* minimap padding */
+.react-flow__minimap {
+  bottom: 16px;
+  right: 16px;
+}

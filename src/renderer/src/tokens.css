@@ -1,0 +1,119 @@
+/* =====================================================================
+   TOKENS — Loom。两层抽象：Primitives → Semantic。组件只认语义层。
+   配色参考 OpenAI Codex：干净蓝 accent + 中性白/深底。换主题只重映射语义层。
+   ===================================================================== */
+:root {
+  --font-ui: "Geist", "PingFang SC", "Noto Sans SC", system-ui, -apple-system,
+    sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+
+  /* ---- Tier 1 · Primitives（中性 + Codex 蓝）---- */
+  --c-white: #ffffff;
+  --c-n-50: #f5f5f5;
+  --c-n-100: #ececec;
+  --c-ink: #141414;
+  --c-ink-2: #6b6b6b;
+  --c-ink-3: #9a9a9a;
+
+  --c-dbg: #181818; /* Codex 深底 */
+  --c-d-1: #202020;
+  --c-d-2: #272727;
+  --c-mist: #f4f4f4;
+  --c-mist-2: #a0a0a0;
+  --c-mist-3: #6f6f6f;
+
+  --c-blue: #0169cc; /* Codex 亮色 accent */
+  --c-blue-h: #0157ac;
+  --c-blue-lt: #339cff; /* Codex 深色 accent */
+  --c-blue-lt-h: #57b0ff;
+
+  --c-green: #1f9d63;
+  --c-green-d: #56c48a;
+  --c-amber: #c98a1a;
+  --c-amber-d: #d3a24a;
+  --c-red: #d64b45;
+  --c-red-d: #e0685f;
+}
+
+/* ---- Tier 2 · Semantic（LIGHT）---- */
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: var(--c-white);
+  --surface: var(--c-white);
+  --surface-2: var(--c-n-50);
+  --sidebar-glass: rgba(255, 255, 255, 0.6);
+  --text: var(--c-ink);
+  --muted: var(--c-ink-2);
+  --faint: var(--c-ink-3);
+  --border: rgba(0, 0, 0, 0.09);
+  --border-strong: rgba(0, 0, 0, 0.15);
+  --accent: var(--c-blue);
+  --accent-hover: var(--c-blue-h);
+  --accent-soft: rgba(1, 105, 204, 0.1);
+  --edge: rgba(20, 20, 20, 0.34); /* 画布连线（默认态），选中/悬停走 accent */
+  --ok: var(--c-green);
+
+  /* 代码块 / 行内 code / 语法高亮（消息层）—— 明暗各一套，组件只认这些 */
+  --code-bg: #f6f7f9;
+  --code-border: rgba(0, 0, 0, 0.09);
+  --code-text: #24292f;
+  --inline-code-bg: rgba(1, 105, 204, 0.09);
+  --inline-code-text: #0550ae;
+  --syntax-keyword: #cf222e;
+  --syntax-string: #0a3069;
+  --syntax-number: #0550ae;
+  --syntax-comment: #6e7781;
+  --syntax-function: #8250df;
+  --syntax-punctuation: #57606a;
+  --syntax-variable: #953800;
+  --warn: var(--c-amber);
+  --err: var(--c-red);
+  --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.05), 0 10px 28px rgba(0, 0, 0, 0.09);
+}
+
+/* ---- Tier 2 · Semantic（DARK · Codex #181818）---- */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: var(--c-dbg);
+  --surface: var(--c-d-1);
+  --surface-2: var(--c-d-2);
+  --sidebar-glass: rgba(24, 24, 24, 0.55);
+  --text: var(--c-mist);
+  --muted: var(--c-mist-2);
+  --faint: var(--c-mist-3);
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --accent: var(--c-blue-lt);
+  --accent-hover: var(--c-blue-lt-h);
+  --accent-soft: rgba(51, 156, 255, 0.16);
+  --edge: rgba(255, 255, 255, 0.32); /* 画布连线（默认态），选中/悬停走 accent */
+  --ok: var(--c-green-d);
+
+  /* 代码块 / 行内 code / 语法高亮（暗色，GitHub-dark 系，与 Codex 深底协调） */
+  --code-bg: #1b1b1b;
+  --code-border: rgba(255, 255, 255, 0.1);
+  --code-text: #e6edf3;
+  --inline-code-bg: rgba(51, 156, 255, 0.15);
+  --inline-code-text: #a5d6ff;
+  --syntax-keyword: #ff7b72;
+  --syntax-string: #a5d6ff;
+  --syntax-number: #79c0ff;
+  --syntax-comment: #8b949e;
+  --syntax-function: #d2a8ff;
+  --syntax-punctuation: #a0a0a0;
+  --syntax-variable: #ffa657;
+  --warn: var(--c-amber-d);
+  --err: var(--c-red-d);
+  --shadow-float: 0 14px 34px rgba(0, 0, 0, 0.5);
+}

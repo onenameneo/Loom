@@ -1,0 +1,425 @@
+/* =====================================================================
+   画布 · 节点卡片样式 —— 「索引卡片」：发丝描边、mono 呼号、青蓝选中环。
+   全部引用 tokens.css 的语义 token，绝不写死色值。外壳/侧栏见 shell.css。
+   ===================================================================== */
+
+.canvas-wrap {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+.react-flow {
+  background: transparent;
+}
+
+/* 头部：对话/画布 模式指示 + 展开画布按钮 */
+.ws-mode {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--faint);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  padding: 2px 8px;
+  -webkit-app-region: no-drag;
+}
+.head-btn {
+  -webkit-app-region: no-drag;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  padding: 3px 11px;
+  cursor: pointer;
+}
+.head-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+/* =====================================================================
+   对话优先视图（ChatView）—— 居中长栏聊天，「聊天 = 单节点画布」。
+   ===================================================================== */
+.chatview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+}
+.chatview .scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+.chatview .thread {
+  position: relative;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 24px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.cv-empty {
+  margin: 14vh auto 0;
+  text-align: center;
+  color: var(--faint);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+.cv-empty .mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+/* 消息渲染统一走共用消息层（src/renderer/src/message/），此处不再各写一套 */
+.chatview .thinking {
+  align-self: stretch;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.chatview .thinking .dot {
+  color: var(--accent);
+}
+.chatview .composer {
+  flex: none;
+  padding: 12px 24px 20px;
+  background: linear-gradient(to top, var(--bg) 60%, transparent);
+}
+.chatview .composer .box {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 8px 8px 8px 14px;
+  box-shadow: var(--shadow-float);
+}
+.chatview .composer textarea {
+  flex: 1;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  max-height: 160px;
+  padding: 4px 0;
+}
+.chatview .composer textarea::placeholder {
+  color: var(--faint);
+}
+.chatview .composer .send {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border: none;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.chatview .composer .send:disabled {
+  background: var(--surface-2);
+  color: var(--faint);
+  cursor: default;
+  border: 1px solid var(--border);
+}
+.chatview .composer .send svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+}
+
+/* ---- 节点卡片 ---- */
+.card {
+  width: 344px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--text);
+  transition: box-shadow 0.16s, border-color 0.16s;
+}
+.card:hover {
+  box-shadow: var(--shadow-float);
+}
+.card--fresh {
+  animation: pop 0.32s cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.98) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.react-flow__node.selected .card {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow-float);
+}
+
+/* 只有标题栏是拖拽手柄；其余区域正常交互（配合节点 dragHandle=".card__head"）。
+   特异性要压过 React Flow 自带的 .react-flow__node.draggable{cursor:grab}。 */
+.canvas-wrap .react-flow__node.draggable {
+  cursor: default;
+}
+.card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: grab;
+}
+.card__head:active {
+  cursor: grabbing;
+}
+/* 恢复正文可选中（React Flow 默认给节点 user-select:none，会废掉划词岔出） */
+.card__body,
+.card__body * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+.card__body {
+  cursor: auto;
+}
+.card__head::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--accent);
+  flex: none;
+}
+.chev {
+  background: none;
+  border: none;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0;
+  width: 12px;
+}
+.card .title {
+  font-weight: 550;
+  font-size: 12.5px;
+}
+.card .model {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.2px;
+}
+.card .spacer {
+  flex: 1;
+}
+.card .tokens {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.preview {
+  padding: 9px 14px 13px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card__body {
+  position: relative;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* seed 引文 = 「标本签」 */
+.seed {
+  border-left: 2px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  padding: 7px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.seed__q {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.seed__from {
+  font-family: var(--font-mono);
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.2px;
+}
+
+.card .empty {
+  color: var(--faint);
+  font-size: 12px;
+  padding: 4px 2px;
+}
+/* 消息渲染已迁到共用消息层（src/renderer/src/message/）；节点只保留划选高亮。 */
+.m ::selection,
+.m::selection,
+.seed__q::selection {
+  background: var(--accent-soft);
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+.card .thinking {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.card .thinking .dot {
+  color: var(--accent);
+}
+
+/* 划词工具条 */
+.seltb {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  display: flex;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  padding: 4px;
+  box-shadow: var(--shadow-float);
+  z-index: 20;
+  white-space: nowrap;
+}
+.seltb button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 5px 9px;
+  font-size: 11.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+.seltb button.ghost {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border-strong);
+  font-weight: 450;
+}
+.seltb::after {
+  content: "";
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 8px;
+  height: 8px;
+  background: var(--surface);
+  border-right: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.card__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+.ask {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 7px 10px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  font-family: var(--font-ui);
+}
+.ask:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ask:disabled {
+  opacity: 0.6;
+}
+.ask::placeholder {
+  color: var(--faint);
+}
+.mount {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.mount input {
+  accent-color: var(--accent);
+}
+
+/* handles / edges / minimap */
+.react-flow__handle.h {
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.react-flow__node:hover .react-flow__handle.h {
+  opacity: 1;
+}
+.react-flow__edge-path {
+  stroke: var(--edge);
+  stroke-width: 2;
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+.react-flow__edge-text {
+  fill: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.react-flow__edge-textbg {
+  fill: var(--surface);
+}
+.react-flow__minimap {
+  bottom: 16px;
+  right: 16px;
+}
