@@ -105,8 +105,9 @@ Electron · React · React Flow(@xyflow/react) · TypeScript · pi-mono(`@marioz
 - **P0 · 骨架**（已完成）：Electron + React + pi 打通，单节点聊天，套上 DESIGN.md。
 - **P1 · App Shell + 持久化基座**（openspec: `app-shell`）：两面侧栏导航 + 会话管理 + 设置(接入/外观) + 窗口 chrome + SQLite 基座。先立骨架。
 - **P2 · 画布引擎**（openspec: `canvas-branching-context`）：React Flow 画布 + 片段分支（含手动挂载）+ **自定义 convertToLlm 上下文引擎**，插进 shell 会话面、用 shell 存储。
-- **P3 · 观察哨**：Claude Code hooks + Codex 日志 tail + 事件总线 + 系统通知（被动）。
+- **P3 · 工作站（原「观察哨」，已完成）**（openspec: `agent-monitor`）：被动感知本地在跑的 Codex/Claude Code。实现走**进程表扫描**（`ps` 枚举 + 启发式过滤 + `lsof` 取 cwd + 快照 diff + 系统通知），**只读进程元数据、不读会话内容**。比原设想（hooks/日志 tail）更轻、零侵入。
 - **P4 · 能力层**：工具/MCP + 记忆（gbrain CLI）+ 打磨。
+- **P5 · 本地 agent 驱动（构想，待定）**：在 Loom 里**主动驱动**本地 Codex/Claude Code 对话——不是接管已在跑的 TUI（做不到），而是由主进程 `spawn` 一个 **headless 协议**子进程收发结构化流：Claude Code 走 `--input/--output-format stream-json`（或官方 Agent SDK）、Codex 走 `codex app-server`（JSON-RPC）；用 **ACP**（Zed 的 Agent Client Protocol）做跨 agent 统一层。此后「节点大脑」可选 pi 或外部 agent，Loom 从思考台升级为**多 agent 编排台**。硬骨头：认证走 CLI 自身登录（不用我们的 key）、**工具批准 UI**（agent 会真读写文件/跑命令，`--permission-prompt-tool stdio`）、每会话绑目录 + 子进程生命周期。MVP：先接**一个** agent（倾向 Codex app-server）+ 目录绑定 + 流式渲染 + 权限弹窗，跑通再抽象 ACP、接第二个。（证据：工作站扫到的 VSCode `claude … --output-format stream-json` 与被过滤的 `codex app-server` 正是这两条协议。）
 
 ## 项目要沉淀的能力
 扩展真实 agent runtime 的上下文管线（分支上下文）· 本地 agent 可观测性（ACP 调研 → hooks/日志）· 向量记忆（gbrain）· MCP/工具 · 干净的 Electron 安全架构 · 自建设计系统（双层 token）。
