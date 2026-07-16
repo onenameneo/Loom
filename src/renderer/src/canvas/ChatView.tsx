@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { NodeBudget, NodeMsg } from "../env";
+import { IconSplit } from "../icons";
 import { Message } from "../message/Message";
 import { Composer, type ComposerImage } from "../composer/Composer";
 
@@ -215,6 +216,7 @@ export default function ChatView({
   function onScroll() {
     const el = scrollRef.current;
     if (!el) return;
+    setTb(null);
     setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
   }
 
@@ -267,8 +269,10 @@ export default function ChatView({
           )}
           {tb && (
             <div className="seltb" style={{ left: tb.x, top: tb.y }} onMouseDown={(e) => e.preventDefault()}>
-              <button onClick={doBranch}>⑂ 岔出分支</button>
-              <button className="ghost" onClick={() => setTb(null)}>取消</button>
+              <button onClick={doBranch}>
+                <span><IconSplit size={13} /> 岔出分支</span>
+                <small>{tb.text.length > 40 ? `${tb.text.slice(0, 40)}…` : tb.text}</small>
+              </button>
             </div>
           )}
         </div>

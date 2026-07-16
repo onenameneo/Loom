@@ -3,6 +3,7 @@ import { Handle, NodeResizer, Position } from "@xyflow/react";
 import { Check, Settings, Trash2 } from "lucide-react";
 import type { NodeBudget, NodeMsg } from "../env";
 import { Composer, type ComposerImage } from "../composer/Composer";
+import { IconArrowUpRight, IconChevronRight, IconSplit } from "../icons";
 import { Message } from "../message/Message";
 import { BranchContext } from "./branch";
 
@@ -13,7 +14,7 @@ type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq
 // 订阅本 nodeId 的流式事件；头部显示 token 预算（含/不含祖先）与挂载开关。
 export function ChatThreadNode(props: any) {
   const { id, data } = props;
-  const onBranch = useContext(BranchContext);
+  const branch = useContext(BranchContext);
   const bodyRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(1);
 
@@ -25,7 +26,6 @@ export function ChatThreadNode(props: any) {
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [input, setInput] = useState(() => localStorage.getItem(`loom:draft:${id}`) ?? "");
-  const [collapsed, setCollapsed] = useState(false);
   const [mount, setMount] = useState<boolean>(!!data.mountAncestors);
   const [budget, setBudget] = useState<NodeBudget | null>(null);
   const [tb, setTb] = useState<{ text: string; x: number; y: number } | null>(null);
@@ -125,12 +125,20 @@ export function ChatThreadNode(props: any) {
       return;
     }
     const r = range.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) {
+      setTb(null);
+      return;
+    }
     const box = bodyRef.current.getBoundingClientRect();
-    setTb({ text, x: r.left - box.left + r.width / 2, y: r.top - box.top - 6 });
+    setTb({
+      text,
+      x: r.left - box.left + bodyRef.current.scrollLeft + r.width / 2,
+      y: r.top - box.top + bodyRef.current.scrollTop - 8,
+    });
   }, []);
 
   const doBranch = () => {
-    if (tb && onBranch) onBranch(id, tb.text);
+    if (tb) branch?.onBranch(id, tb.text);
     setTb(null);
     window.getSelection()?.removeAllRanges();
   };
@@ -226,28 +234,40 @@ export function ChatThreadNode(props: any) {
   function onBodyScroll() {
     const el = bodyRef.current;
     if (!el) return;
+    setTb(null);
     setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
   }
 
+  const seedText = String(data.seed?.text ?? "");
+  const seedPreview = seedText.length > 42 ? `${seedText.slice(0, 42)}…` : seedText;
   const tokens = budget ? (mount ? budget.withAncestors : budget.withoutAncestors) : null;
   const tokenLabel =
     tokens == null ? "—" : tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : `${tokens}`;
   const streaming = busy && msgs[msgs.length - 1]?.role === "assistant";
-  const lastText = msgs.length ? msgs[msgs.length - 1].text : data.seed?.text ?? "";
+  const hasChildren = Boolean(data.hasChildren);
+  const treeCollapsed = Boolean(data.isTreeCollapsed);
+  const collapsedCount = Number(data.collapsedCount ?? 0);
 
   return (
-    <div className={`card ${data.fresh ? "card--fresh" : ""} ${collapsed ? "card--collapsed" : ""}`}>
+    <div className={`card ${data.fresh ? "card--fresh" : ""}`}>
       <NodeResizer
         minWidth={288}
         minHeight={220}
-        isVisible={Boolean(props.selected) && !collapsed}
+        isVisible={Boolean(props.selected)}
         lineClassName="rz-line"
         handleClassName="rz-handle"
       />
       <div className="card__head">
-        <button className="chev nodrag" onClick={() => setCollapsed((c) => !c)} title={collapsed ? "展开" : "折叠"}>
-          {collapsed ? "▸" : "▾"}
-        </button>
+        {hasChildren && (
+          <button
+            className={`tree-toggle nodrag ${treeCollapsed ? "is-collapsed" : ""}`}
+            onClick={() => data.onToggleCollapse?.(id)}
+            title={treeCollapsed ? "展开子树" : "折叠子树"}
+          >
+            <IconChevronRight size={13} />
+            {treeCollapsed && collapsedCount > 0 && <span>+{collapsedCount}</span>}
+          </button>
+        )}
         {editingTitle ? (
           <input
             className="title-edit nodrag"
@@ -297,15 +317,24 @@ export function ChatThreadNode(props: any) {
         </div>
       )}
 
-      {collapsed && <div className="preview">{lastText || "（空）"}</div>}
-
-      {!collapsed && (
-        <div className="card__body nodrag nowheel" ref={bodyRef} onMouseUp={onMouseUp} onScroll={onBodyScroll}>
+      <div
+        className="card__body nodrag nowheel"
+        ref={bodyRef}
+        onMouseUp={onMouseUp}
+        onScroll={onBodyScroll}
+        onBlur={() => setTb(null)}
+      >
           {data.seed && (
-            <div className="seed">
-              <span className="seed__q">“{data.seed.text}”</span>
-              <span className="seed__from">↗ 来自 {data.seed.from}</span>
-            </div>
+            <button
+              className="seed seed--chip nodrag"
+              type="button"
+              onClick={() => branch?.onFocusNode?.(data.seed.parent, { flash: true })}
+              title="跳到来源节点"
+            >
+              <span className="seed__from">来自 {data.seed.from}</span>
+              <span className="seed__q">“{seedPreview}”</span>
+              <IconArrowUpRight size={13} />
+            </button>
           )}
 
           {msgs.length === 0 && !thinking && (
@@ -333,8 +362,10 @@ export function ChatThreadNode(props: any) {
 
           {tb && (
             <div className="seltb" style={{ left: tb.x, top: tb.y }} onMouseDown={(e) => e.preventDefault()}>
-              <button onClick={doBranch}>⑂ 岔出分支</button>
-              <button className="ghost" onClick={() => setTb(null)}>就地追问</button>
+              <button onClick={doBranch}>
+                <span><IconSplit size={13} /> 岔出分支</span>
+                <small>{tb.text.length > 40 ? `${tb.text.slice(0, 40)}…` : tb.text}</small>
+              </button>
             </div>
           )}
           {!autoScroll && (
@@ -351,29 +382,26 @@ export function ChatThreadNode(props: any) {
               ↓ 回到最新
             </button>
           )}
-        </div>
-      )}
+      </div>
 
-      {!collapsed && (
-        <div className="card__foot nodrag">
-          <Composer
-            nodeId={id}
-            value={input}
-            onChange={setInput}
-            busy={busy}
-            placeholder={busy ? "回复中…" : msgs.length ? "继续追问…" : data.seed ? "顺着这个往下问…" : "开始一段思考…"}
-            mount={mount}
-            canRegenerate={msgs.some((m) => m.role === "user") && !busy}
-            onSubmit={submit}
-            onStop={stop}
-            onToggleMount={toggleMount}
-            onOpenPersona={() => setPersonaOpen(true)}
-            onClearNode={clearNode}
-            onRegenerate={regenerate}
-            onSetModel={setModel}
-          />
-        </div>
-      )}
+      <div className="card__foot nodrag">
+        <Composer
+          nodeId={id}
+          value={input}
+          onChange={setInput}
+          busy={busy}
+          placeholder={busy ? "回复中…" : msgs.length ? "继续追问…" : data.seed ? "顺着这个往下问…" : "开始一段思考…"}
+          mount={mount}
+          canRegenerate={msgs.some((m) => m.role === "user") && !busy}
+          onSubmit={submit}
+          onStop={stop}
+          onToggleMount={toggleMount}
+          onOpenPersona={() => setPersonaOpen(true)}
+          onClearNode={clearNode}
+          onRegenerate={regenerate}
+          onSetModel={setModel}
+        />
+      </div>
 
       <Handle type="target" position={Position.Left} className="h" />
       <Handle type="source" position={Position.Right} className="h" />

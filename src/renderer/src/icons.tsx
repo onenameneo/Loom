@@ -1,7 +1,9 @@
 // 图标统一走 lucide-react（best practice）。这里做一层薄封装：
 // 固定 strokeWidth 以贴合 DESIGN.md 的克制线条，名字保持稳定，替换零成本。
 import {
+  ArrowUpRight,
   ArrowUp,
+  ChevronRight,
   Code2,
   Command,
   Cpu,
@@ -13,6 +15,7 @@ import {
   Radar,
   RefreshCw,
   Settings,
+  Split,
   Sun,
   Workflow,
   type LucideProps,
@@ -35,6 +38,9 @@ export const IconCommand = mk(Command);
 export const IconCpu = mk(Cpu);
 export const IconRefresh = mk(RefreshCw);
 export const IconEraser = mk(Eraser);
+export const IconSplit = mk(Split);
+export const IconArrowUpRight = mk(ArrowUpRight);
+export const IconChevronRight = mk(ChevronRight);
 
 // 备用：保留原 Eye 供他处使用
 export const IconWatch = mk(Eye);

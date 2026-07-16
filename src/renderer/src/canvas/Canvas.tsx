@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   BackgroundVariant,
   MiniMap,
+  Panel,
   ReactFlow,
   type ReactFlowInstance,
   useEdgesState,
@@ -12,6 +13,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { CanvasNodeDto } from "../env";
+import { IconRefresh } from "../icons";
 import { ChatThreadNode } from "./ChatThreadNode";
 import { BranchContext } from "./branch";
 
@@ -96,6 +98,11 @@ function edgesFrom(dtos: CanvasNodeDto[]): Edge[] {
     }));
 }
 
+function classNames(...items: Array<string | false | null | undefined>) {
+  const value = items.filter(Boolean).join(" ");
+  return value || undefined;
+}
+
 export default function Canvas({
   workspaceId,
   model,
@@ -113,17 +120,191 @@ export default function Canvas({
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [hoverId, setHoverId] = useState<string | null>(null);
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const titleRef = useRef(new Map<string, string>());
   const flowRef = useRef<ReactFlowInstance | null>(null);
+  const flashTimerRef = useRef<number | null>(null);
+
+  const pathIds = useCallback((targetId: string) => {
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const nodeIds = new Set<string>();
+    const edgeIds = new Set<string>();
+    let current = byId.get(targetId);
+    while (current) {
+      nodeIds.add(current.id);
+      const parentId = (current.data as any)?.parentId;
+      if (!parentId || !byId.has(parentId)) break;
+      edgeIds.add(`e-${parentId}-${current.id}`);
+      current = byId.get(parentId);
+    }
+    return { nodeIds, edgeIds };
+  }, [nodes]);
+
+  const childrenOf = useMemo(() => {
+    const map = new Map<string, string[]>();
+    const ids = new Set(nodes.map((n) => n.id));
+    for (const node of nodes) {
+      const parentId = (node.data as any)?.parentId;
+      if (typeof parentId === "string" && ids.has(parentId)) {
+        (map.get(parentId) ?? map.set(parentId, []).get(parentId)!).push(node.id);
+      }
+    }
+    return map;
+  }, [nodes]);
+
+  const descendantCounts = useMemo(() => {
+    const count = new Map<string, number>();
+    const visit = (id: string): number => {
+      const kids = childrenOf.get(id) ?? [];
+      const total = kids.reduce((sum, childId) => sum + 1 + visit(childId), 0);
+      count.set(id, total);
+      return total;
+    };
+    for (const node of nodes) visit(node.id);
+    return count;
+  }, [childrenOf, nodes]);
+
+  const hiddenNodeIds = useMemo(() => {
+    const hidden = new Set<string>();
+    const mark = (id: string) => {
+      for (const childId of childrenOf.get(id) ?? []) {
+        hidden.add(childId);
+        mark(childId);
+      }
+    };
+    for (const id of collapsed) mark(id);
+    return hidden;
+  }, [childrenOf, collapsed]);
+
+  const ancestorIds = useCallback(
+    (id: string) => {
+      const byId = new Map(nodes.map((n) => [n.id, n]));
+      const ids: string[] = [];
+      let current = byId.get(id);
+      while (current) {
+        const parentId = (current.data as any)?.parentId;
+        if (!parentId || !byId.has(parentId)) break;
+        ids.push(parentId);
+        current = byId.get(parentId);
+      }
+      return ids;
+    },
+    [nodes],
+  );
+
+  const onToggleCollapse = useCallback((id: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectedNodeId = useMemo(
+    () => nodes.find((n) => n.selected)?.id ?? null,
+    [nodes],
+  );
+
+  const highlightTargetId = selectedNodeId ?? hoverId;
+  const highlightPath = useMemo(
+    () => (highlightTargetId ? pathIds(highlightTargetId) : null),
+    [highlightTargetId, pathIds],
+  );
+
+  const displayNodes = useMemo<Node[]>(
+    () =>
+      nodes.filter((node) => !hiddenNodeIds.has(node.id)).map((node) => {
+        const onPath = highlightPath?.nodeIds.has(node.id) ?? false;
+        const dimmed = Boolean(highlightPath) && !onPath;
+        const collapsedCount = descendantCounts.get(node.id) ?? 0;
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            hasChildren: collapsedCount > 0,
+            isTreeCollapsed: collapsed.has(node.id),
+            collapsedCount,
+            onToggleCollapse,
+          },
+          className: classNames(
+            node.className,
+            onPath && "is-onpath",
+            dimmed && "is-dimmed",
+            flashId === node.id && "is-flash",
+          ),
+        };
+      }),
+    [collapsed, descendantCounts, flashId, hiddenNodeIds, highlightPath, nodes, onToggleCollapse],
+  );
+
+  const displayEdges = useMemo<Edge[]>(
+    () =>
+      edges.filter((edge) => !hiddenNodeIds.has(edge.source) && !hiddenNodeIds.has(edge.target)).map((edge) => {
+        const onPath = highlightPath?.edgeIds.has(edge.id) ?? false;
+        const dimmed = Boolean(highlightPath) && !onPath;
+        return {
+          ...edge,
+          className: classNames(edge.className, onPath && "is-onpath", dimmed && "is-dimmed"),
+        };
+      }),
+    [edges, hiddenNodeIds, highlightPath],
+  );
 
   const removeIds = useCallback(
     (ids: string[]) => {
       const dead = new Set(ids);
       setNodes((nds) => nds.filter((n) => !dead.has(n.id)));
       setEdges((eds) => eds.filter((e) => !dead.has(e.source) && !dead.has(e.target)));
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) next.delete(id);
+        return next;
+      });
       for (const id of ids) titleRef.current.delete(id);
     },
     [setNodes, setEdges],
+  );
+
+  const focusNode = useCallback(
+    (id: string, opts?: { flash?: boolean }) => {
+      const collapsedAncestors = ancestorIds(id).filter((ancestorId) => collapsed.has(ancestorId));
+      if (collapsedAncestors.length) {
+        setCollapsed((prev) => {
+          const next = new Set(prev);
+          for (const ancestorId of collapsedAncestors) next.delete(ancestorId);
+          return next;
+        });
+      }
+      setNodes((nds) => {
+        const target = nds.find((n) => n.id === id);
+        if (target && flowRef.current) {
+          flowRef.current.setCenter(target.position.x + CARD_W / 2, target.position.y + 120, {
+            zoom: 1,
+            duration: 260,
+          });
+        }
+        return nds.map((n) => ({ ...n, selected: n.id === id }));
+      });
+      if (opts?.flash) {
+        if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+        setFlashId(id);
+        flashTimerRef.current = window.setTimeout(() => {
+          setFlashId((current) => (current === id ? null : current));
+          flashTimerRef.current = null;
+        }, 1200);
+      }
+    },
+    [ancestorIds, collapsed, setNodes],
+  );
+
+  useEffect(
+    () => () => {
+      if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+    },
+    [],
   );
 
   const actions = useCallback(
@@ -180,18 +361,9 @@ export default function Canvas({
 
   useEffect(() => {
     if (!focusNodeId) return;
-    setNodes((nds) => {
-      const target = nds.find((n) => n.id === focusNodeId);
-      if (target && flowRef.current) {
-        flowRef.current.setCenter(target.position.x + CARD_W / 2, target.position.y + 120, {
-          zoom: 1,
-          duration: 260,
-        });
-      }
-      return nds.map((n) => ({ ...n, selected: n.id === focusNodeId }));
-    });
+    focusNode(focusNodeId);
     onFocused?.();
-  }, [focusNodeId, onFocused, setNodes]);
+  }, [focusNode, focusNodeId, onFocused]);
 
   const onBranch = useCallback(
     async (sourceId: string, seedText: string) => {
@@ -240,14 +412,34 @@ export default function Canvas({
     [workspaceId, model, setNodes, setEdges, actions, onTreeChange],
   );
 
+  const tidyLayout = useCallback(() => {
+    const dtos = nodes.map((node) => ({
+      id: node.id,
+      workspaceId: String((node.data as any)?.workspaceId ?? workspaceId),
+      parentId: (node.data as any)?.parentId,
+      title: String((node.data as any)?.title ?? ""),
+      seed: (node.data as any)?.seed,
+      mountAncestors: Boolean((node.data as any)?.mountAncestors),
+      systemPrompt: (node.data as any)?.systemPrompt,
+      model: (node.data as any)?.model,
+      messages: ((node.data as any)?.messages ?? []) as CanvasNodeDto["messages"],
+    }));
+    const pos = layout(dtos);
+    setNodes((nds) => nds.map((node) => ({ ...node, position: pos[node.id] ?? node.position })));
+  }, [nodes, setNodes, workspaceId]);
+
+  const branchContext = useMemo(() => ({ onBranch, onFocusNode: focusNode }), [focusNode, onBranch]);
+
   return (
-    <BranchContext.Provider value={onBranch}>
+    <BranchContext.Provider value={branchContext}>
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={displayNodes}
+        edges={displayEdges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onNodeMouseEnter={(_, node) => setHoverId(node.id)}
+        onNodeMouseLeave={() => setHoverId(null)}
         onInit={(instance) => {
           flowRef.current = instance;
         }}
@@ -258,6 +450,11 @@ export default function Canvas({
         maxZoom={1.6}
         proOptions={{ hideAttribution: true }}
       >
+        <Panel position="top-right" className="canvas-tools">
+          <button className="canvas-tool-btn nodrag" type="button" onClick={tidyLayout} title="整理布局">
+            <IconRefresh size={14} /> 整理布局
+          </button>
+        </Panel>
         <Background
           variant={BackgroundVariant.Dots}
           gap={26}
