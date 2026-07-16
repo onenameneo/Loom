@@ -226,7 +226,7 @@ export class SqliteStore implements Store {
 
   updateNode(
     id: string,
-    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: string }>,
+    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: string; color: string }>,
   ): void {
     const current = this.getNode(id);
     if (!current) return;
@@ -243,6 +243,11 @@ export class SqliteStore implements Store {
       const model = patch.model?.trim() ?? "";
       if (model) meta.model = model;
       else delete meta.model;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "color")) {
+      const color = patch.color?.trim() ?? "";
+      if (color) meta.color = color;
+      else delete meta.color;
     }
     this.db
       .prepare("UPDATE nodes SET title = ?, seed = ?, mount_ancestors = ?, meta = ?, updated_at = ? WHERE id = ?")
@@ -312,6 +317,7 @@ export class SqliteStore implements Store {
     const meta = decode<Record<string, unknown>>(row.meta, {});
     const systemPrompt = typeof meta.systemPrompt === "string" ? meta.systemPrompt : undefined;
     const model = typeof meta.model === "string" ? meta.model : undefined;
+    const color = typeof meta.color === "string" ? meta.color : undefined;
     return {
       id: row.id,
       workspaceId: row.workspace_id,
@@ -320,6 +326,7 @@ export class SqliteStore implements Store {
       seed: decode(row.seed, undefined),
       systemPrompt,
       model,
+      color,
       mountAncestors: Boolean(row.mount_ancestors),
       messages: this.listMessages(row.id),
     };

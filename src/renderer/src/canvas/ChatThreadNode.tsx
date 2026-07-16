@@ -1,6 +1,6 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Handle, NodeResizer, Position } from "@xyflow/react";
-import { Check, Settings, Trash2 } from "lucide-react";
+import { Check, Trash2 } from "lucide-react";
 import type { NodeBudget, NodeMsg } from "../env";
 import { Composer, type ComposerImage } from "../composer/Composer";
 import { IconArrowUpRight, IconChevronRight, IconSplit } from "../icons";
@@ -9,6 +9,9 @@ import { BranchContext } from "./branch";
 
 type Role = "user" | "assistant" | "error";
 type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown };
+
+// macOS Finder 式颜色标签（存语义名，渲染走 --label-* token，明暗自适配）。
+const NODE_COLORS = ["gray", "red", "orange", "yellow", "green", "blue", "purple"] as const;
 
 // 画布节点 = 一个活的 pi 对话线程（「索引卡片」）。发消息走 window.api.canvas，
 // 订阅本 nodeId 的流式事件；头部显示 token 预算（含/不含祖先）与挂载开关。
@@ -35,6 +38,9 @@ export function ChatThreadNode(props: any) {
   const [personaOpen, setPersonaOpen] = useState(false);
   const [persona, setPersona] = useState(String(data.systemPrompt ?? ""));
   const [nodeModel, setNodeModel] = useState<string | undefined>(data.model);
+  const [colorOpen, setColorOpen] = useState(false);
+  const colorRef = useRef<HTMLDivElement>(null);
+  const color = typeof data.color === "string" ? data.color : "";
 
   useEffect(() => {
     setMsgs(toMsgs(data.messages ?? []));
@@ -42,6 +48,15 @@ export function ChatThreadNode(props: any) {
     setPersona(String(data.systemPrompt ?? ""));
     setNodeModel(data.model);
   }, [data.messages, data.title, data.systemPrompt, data.model, toMsgs]);
+
+  useEffect(() => {
+    if (!colorOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (!colorRef.current?.contains(e.target as Node)) setColorOpen(false);
+    };
+    window.addEventListener("pointerdown", onDown);
+    return () => window.removeEventListener("pointerdown", onDown);
+  }, [colorOpen]);
 
   const refreshBudget = useCallback(async () => {
     if (!window.api) return;
@@ -258,48 +273,84 @@ export function ChatThreadNode(props: any) {
         handleClassName="rz-handle"
       />
       <div className="card__head">
+        <div className="node-color nodrag" ref={colorRef}>
+          <button
+            className={`color-dot ${color ? "is-set" : ""}`}
+            style={color ? { background: `var(--label-${color})` } : undefined}
+            title="颜色标签"
+            onClick={() => setColorOpen((v) => !v)}
+          />
+          {colorOpen && (
+            <div className="color-pop">
+              <button
+                className="color-swatch is-none"
+                title="无色"
+                onClick={() => {
+                  data.onSetColor?.(id, "");
+                  setColorOpen(false);
+                }}
+              >
+                {!color && <Check size={11} />}
+              </button>
+              {NODE_COLORS.map((c) => (
+                <button
+                  key={c}
+                  className="color-swatch"
+                  style={{ background: `var(--label-${c})` }}
+                  title={c}
+                  onClick={() => {
+                    data.onSetColor?.(id, c);
+                    setColorOpen(false);
+                  }}
+                >
+                  {color === c && <Check size={11} />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="head-main">
+          {editingTitle ? (
+            <input
+              className="title-edit nodrag"
+              value={title}
+              autoFocus
+              onChange={(e) => setTitle(e.target.value)}
+              onBlur={saveTitle}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveTitle();
+                if (e.key === "Escape") {
+                  setTitle(String(data.title ?? ""));
+                  setEditingTitle(false);
+                }
+              }}
+            />
+          ) : (
+            <button className="title title-btn nodrag" onDoubleClick={() => setEditingTitle(true)} onClick={() => data.onSelect?.(id)}>
+              {title}
+            </button>
+          )}
+          <div className="head-meta">
+            {nodeModel && <span className="model" title={nodeModel}>{nodeModel}</span>}
+            <span className="tokens" title={budget?.estimated ? "将发送的估算 token（字符估算，随挂载祖先变化）" : undefined}>
+              {budget?.estimated ? "~" : ""}
+              {tokenLabel} tok
+            </span>
+          </div>
+        </div>
+        {!data.isRoot && (
+          <button className="head-icon danger nodrag" title="删除分支" onClick={() => data.onDelete?.(id)}>
+            <Trash2 size={13} />
+          </button>
+        )}
         {hasChildren && (
           <button
             className={`tree-toggle nodrag ${treeCollapsed ? "is-collapsed" : ""}`}
             onClick={() => data.onToggleCollapse?.(id)}
-            title={treeCollapsed ? "展开子树" : "折叠子树"}
+            title={treeCollapsed ? `展开子树（${collapsedCount}）` : "折叠子树"}
           >
-            <IconChevronRight size={13} />
-            {treeCollapsed && collapsedCount > 0 && <span>+{collapsedCount}</span>}
-          </button>
-        )}
-        {editingTitle ? (
-          <input
-            className="title-edit nodrag"
-            value={title}
-            autoFocus
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={saveTitle}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") saveTitle();
-              if (e.key === "Escape") {
-                setTitle(String(data.title ?? ""));
-                setEditingTitle(false);
-              }
-            }}
-          />
-        ) : (
-          <button className="title title-btn nodrag" onDoubleClick={() => setEditingTitle(true)} onClick={() => data.onSelect?.(id)}>
-            {title}
-          </button>
-        )}
-        {nodeModel && <span className="model">{nodeModel}</span>}
-        <span className="spacer" />
-        <span className="tokens" title={budget?.estimated ? "将发送的估算 token（字符估算，随挂载祖先变化）" : undefined}>
-          {budget?.estimated ? "~" : ""}
-          {tokenLabel} tok
-        </span>
-        <button className="head-icon nodrag" title="节点 persona" onClick={() => setPersonaOpen((v) => !v)}>
-          <Settings size={13} />
-        </button>
-        {!data.isRoot && (
-          <button className="head-icon danger nodrag" title="删除分支" onClick={() => data.onDelete?.(id)}>
-            <Trash2 size={13} />
+            <IconChevronRight size={14} />
+            {treeCollapsed && collapsedCount > 0 && <span className="tree-count">{collapsedCount}</span>}
           </button>
         )}
       </div>

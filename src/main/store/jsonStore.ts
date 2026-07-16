@@ -120,7 +120,7 @@ export class JsonStore implements Store {
   }
   updateNode(
     _id: string,
-    _patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: string }>,
+    _patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: string; color: string }>,
   ): void {}
   deleteNode(_id: string): void {}
   appendMessages(_nodeId: string, _msgs: PersistedMessage[]): void {}

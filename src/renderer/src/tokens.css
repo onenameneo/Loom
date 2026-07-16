@@ -79,7 +79,18 @@
   --syntax-variable: #953800;
   --warn: var(--c-amber);
   --err: var(--c-red);
+
+  /* 节点颜色标签（macOS Finder 式，克制去饱和；明暗各一套，仅用于状态点/标签） */
+  --label-gray: #9aa0a6;
+  --label-red: #df5f57;
+  --label-orange: #e08a3c;
+  --label-yellow: #d3a91f;
+  --label-green: #52a06a;
+  --label-blue: #3b8ee0;
+  --label-purple: #9a7cd2;
+
   --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.05), 0 10px 28px rgba(0, 0, 0, 0.09);
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.04), 0 3px 10px rgba(0, 0, 0, 0.045);
 }
 
 /* ---- Tier 2 · Semantic（DARK · Codex #181818）---- */
@@ -115,5 +126,15 @@
   --syntax-variable: #ffa657;
   --warn: var(--c-amber-d);
   --err: var(--c-red-d);
+
+  /* 节点颜色标签（暗色略提亮，保证在深底可辨） */
+  --label-gray: #a8adb3;
+  --label-red: #ec7a72;
+  --label-orange: #eb9a54;
+  --label-yellow: #e0be4e;
+  --label-green: #6bc08c;
+  --label-blue: #5aa8f0;
+  --label-purple: #b19ae0;
   --shadow-float: 0 14px 34px rgba(0, 0, 0, 0.5);
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.28), 0 3px 10px rgba(0, 0, 0, 0.32);
 }

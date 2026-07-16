@@ -210,21 +210,20 @@
     transform: none;
   }
 }
-/* 选中 = 四周完全均匀的 accent 光晕（0 偏移，不偏底），不用描边环/圆点 */
+/* 选中 = 纯扩散 accent 外光晕（无环、无边框），像一层蓝色阴影 */
 .react-flow__node.selected .card {
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent),
-    0 0 20px 2px color-mix(in srgb, var(--accent) 42%, transparent);
+  box-shadow: 0 0 22px 4px color-mix(in srgb, var(--accent) 30%, transparent);
 }
-.react-flow__node.is-onpath .card {
-  border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
-  box-shadow:
-    0 0 0 1px var(--accent-soft),
-    0 0 18px 1px var(--accent-soft);
+/* 节点被选中时会获得焦点：压掉全局 focus 描边（那条蓝色线框），只留上面的光晕 */
+.react-flow__node:focus,
+.react-flow__node:focus-visible {
+  outline: none;
 }
+/* 祖先路径高亮：不给节点描蓝边（那会和「选中光晕」撞、且看起来像多选）；
+   路径感由「连线走 accent + 无关节点淡化」承载，节点本身保持常态。 */
 .react-flow__node.is-dimmed {
-  opacity: 0.42;
-  filter: saturate(0.62);
+  opacity: 0.4;
+  filter: saturate(0.6);
 }
 .react-flow__node.is-flash .card {
   animation: node-flash 1.2s ease-out;
@@ -253,9 +252,23 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   cursor: grab;
+}
+/* 标题栏主体 = 两行：第一行标题，第二行小字（模型 · token） */
+.head-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.head-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
 }
 .card__head:active {
   cursor: grabbing;
@@ -269,40 +282,85 @@
 .card__body {
   cursor: auto;
 }
-.card__head::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
-  background: var(--accent);
+/* 节点颜色标签（macOS Finder 式）：头部左侧圆点 + 取色浮层 */
+.node-color {
+  position: relative;
   flex: none;
+  display: flex;
+  align-items: center;
 }
+.color-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--r-pill);
+  border: 1.5px solid var(--border-strong);
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  transition: box-shadow 0.14s, transform 0.14s;
+}
+.color-dot.is-set {
+  border-color: transparent;
+}
+.color-dot:hover {
+  transform: scale(1.12);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.color-pop {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: -4px;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: 6px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-float);
+}
+.color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-pill);
+  border: none;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  padding: 0;
+}
+.color-swatch.is-none {
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  color: var(--muted);
+}
+.color-swatch:hover {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+/* 折叠子树 = 最右侧幽灵图标按钮（展开=▾ / 折叠=▸ + 计数徽标） */
 .tree-toggle {
-  min-width: 24px;
+  position: relative;
+  flex: none;
+  width: 22px;
   height: 22px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--muted);
+  background: transparent;
+  color: var(--faint);
   cursor: pointer;
-  padding: 0 5px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 1;
 }
 .tree-toggle svg {
   flex: none;
   transform: rotate(90deg);
-  transition: transform 0.14s;
+  transition: transform 0.16s var(--ease, cubic-bezier(0.2, 0, 0, 1));
 }
 .tree-toggle.is-collapsed {
   color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
-  background: var(--accent-soft);
 }
 .tree-toggle.is-collapsed svg {
   transform: rotate(0deg);
@@ -310,15 +368,34 @@
 .tree-toggle:hover,
 .tree-toggle:focus-visible {
   color: var(--text);
-  border-color: var(--border-strong);
+  background: var(--surface-2);
   outline: none;
-  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.tree-toggle.is-collapsed:hover {
+  color: var(--accent);
+}
+.tree-count {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 13px;
+  text-align: center;
 }
 .card .title {
   font-weight: 550;
   font-size: 12.5px;
 }
 .title-btn {
+  display: block;
+  width: 100%;
   min-width: 0;
   border: none;
   background: transparent;
@@ -332,25 +409,28 @@
 }
 .title-edit {
   min-width: 0;
-  width: 104px;
+  width: 100%;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--surface-2);
   color: var(--text);
   font-size: 12px;
-  padding: 3px 5px;
+  padding: 2px 5px;
   outline: none;
 }
 .card .model {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--muted);
   letter-spacing: 0.2px;
 }
-.card .spacer {
-  flex: 1;
-}
 .card .tokens {
+  flex: none;
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--faint);
@@ -607,11 +687,11 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   padding: 8px 8px 8px 12px;
-  box-shadow: var(--shadow-float);
+  box-shadow: var(--shadow-soft);
 }
 .composer-box:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-float);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-soft);
 }
 .composer-bar {
   display: flex;
@@ -864,13 +944,18 @@
   background: var(--accent);
 }
 
-/* NodeResizer 手柄/边线（选中时出现，走 accent） */
 /* NodeResizer：手柄与边线全透明但仍可拖——靠光标变化（贴边/贴角 resize 光标）
-   触发缩放，像 macOS 窗口，零可见圆点/边框。特异性压过 React Flow 默认。 */
-.react-flow__resize-control.rz-line {
-  border: none;
+   触发缩放，像 macOS 窗口，零可见圆点/边框。
+   注意：RF 的 .react-flow__resize-control.line 与我们的 .rz-line 同特异性，
+   且 RF 样式表后加载会赢 → 会画出蓝色边线（选中时的“蓝框”真凶）。
+   这里加 .react-flow__node 祖先把特异性抬到 (0,3,0) 稳压 RF 的 (0,2,0)。 */
+.react-flow__node .react-flow__resize-control.rz-line {
+  /* RF 在 .line.left/.right/.top/.bottom 各边单独设 border-width（同特异性、后加载会赢），
+     故这里必须 !important 才能彻底压掉那条“蓝框”边线。 */
+  border-width: 0 !important;
+  border-color: transparent !important;
 }
-.react-flow__resize-control.rz-handle {
+.react-flow__node .react-flow__resize-control.rz-handle {
   width: 14px;
   height: 14px;
   background: transparent;

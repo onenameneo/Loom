@@ -43,6 +43,7 @@
 | `--canvas-dot` / `--edge` | 低透明墨 | 低透明白 | 画布点阵/连线 |
 | `--shadow-float` | 见 tokens.css | 见 tokens.css | **只**用于悬浮/拖拽 |
 | `--code-bg/border/text` | `#f6f7f9`/发丝/`#24292f` | `#1b1b1b`/发丝/`#e6edf3` | 代码块容器 |
+| `--label-gray/red/orange/yellow/green/blue/purple` | 去饱和 Finder 系 | 略提亮 | **节点颜色标签**（macOS Finder 式，仅用于状态点/标签，不外溢 chrome） |
 | `--inline-code-bg/text` | 蓝低透明 / `#0550ae` | 蓝低透明 / `#a5d6ff` | 行内 code |
 | `--syntax-*` | GitHub-light 系 | GitHub-dark 系 | 语法高亮（keyword/string/number/comment/function/punctuation/variable） |
 
@@ -70,8 +71,10 @@
 - 尊重 `prefers-reduced-motion`（过冲/淡入降级为瞬时）。
 
 ## 画布 / 节点视觉语言
-- **节点 = 索引卡片**：发丝线边、`--r-lg` 圆角、顶部 Geist Mono 呼号 + token 计数、静止无阴影、悬浮才浮起。
-- **选中**：`--accent` 细环 + `--accent-soft` 轻底，不发光。
+- **节点 = 索引卡片**：发丝线边、`--r-lg` 圆角、静止无阴影、悬浮才浮起。
+- **节点标题栏 = 两行**：左颜色点；主体两行（行1 标题、行2 小字 mono「模型 · token」）；最右幽灵折叠按钮（▾展开/▸折叠 + 计数徽标）。persona（system prompt）不占头部按钮，走 `/persona` 命令。
+- **选中**：四周**完全均匀的 accent 光晕**（0 偏移的 1px accent 环 + 柔和外发光，用户拍板；节点 focus 描边关闭，避免蓝色线框）。
+- **颜色标签**：节点标题栏左侧圆点，点开取色浮层（无色 + 7 色 Finder 系 `--label-*`），持久化于 `nodes.meta.color`；用于在画布上给节点分组归类。
 - **引文种子 = 标本签**：左 2px `--accent` 竖条 + `--accent-soft` 底 + mono「来自 X」标签。
 - **连线 = 制图尺寸线**：细贝塞尔，`--edge` 静止、`--accent` 悬浮/选中；标签 mono。
 - **背景**：安静点阵（`--canvas-dot`），非星空/地图。
@@ -90,6 +93,9 @@
 | 2026-07-14 | **产品定名 Loom**（织机/线/分支，呼应分支画布） | 用户拍板 |
 | 2026-07-14 | 图标统一 lucide-react；组件只用两层 token（改一处原始色即全局换 accent，本次已验证） | 最佳实践、可维护 |
 | 2026-07-14 | 白为主 + 半透明侧栏 + 不花里胡哨 | 用户定；北极星=冷静克制 |
+| 2026-07-16 | 节点选中改为**均匀 accent 光晕**（覆盖原「绝不发光」），并关闭 React Flow 节点 focus 描边 | 用户明确要「之前的蓝色阴影」、不要蓝色线框 |
+| 2026-07-16 | 标题栏加 **macOS Finder 式颜色标签**（新增 `--label-*` token，存 `nodes.meta.color`）；去掉原装饰色块；模型名 ellipsis 收窄让位标题 | 用户：装饰块无用→改成有用的颜色分组；标题栏拥挤需理顺层级 |
+| 2026-07-16 | 标题栏改**两行**（标题 / 小字模型·token）；折叠按钮重设计为幽灵图标移至最右；**移除 persona 齿轮**（与 `/persona` 命令重复）；选中「蓝框」真凶=NodeResizer `.line` 被 RF 同名样式后加载盖过，抬特异性修掉，只留柔和光晕 | 用户逐条指出；持续精简标题栏、恢复蓝色阴影而非线框 |
 | 2026-07-14 | 双层 token（primitive→semantic），组件只认语义层 | 便于调色、易实现明暗、样式集中可维护 |
 | 2026-07-14 | 画布引擎 React Flow（无头，自定义皮肤） | 富 DOM 聊天节点 + 划词选中最搭；tldraw 会与此刚需打架 |
 | 2026-07-15 | 统一「消息层」：画布节点与 ChatView 共用 `Message` 组件（user 右/assistant 全宽左，compact/comfortable 双密度） | 消除两界面各写一套、对齐不一致；一处改全局 |

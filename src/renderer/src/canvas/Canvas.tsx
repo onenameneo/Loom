@@ -80,6 +80,7 @@ function toNode(
       mountAncestors: dto.mountAncestors,
       systemPrompt: dto.systemPrompt,
       model: dto.model || fallbackModel,
+      color: dto.color,
       fresh,
       isRoot: !dto.parentId,
       ...actions,
@@ -203,12 +204,9 @@ export default function Canvas({
     });
   }, []);
 
-  const selectedNodeId = useMemo(
-    () => nodes.find((n) => n.selected)?.id ?? null,
-    [nodes],
-  );
-
-  const highlightTargetId = selectedNodeId ?? hoverId;
+  // 路径高亮只跟随 hover（探索性）；选中只显示光晕，不淡化其他节点——
+  // 否则选一个节点会把整条祖先链点亮，看起来像“多选”。
+  const highlightTargetId = hoverId;
   const highlightPath = useMemo(
     () => (highlightTargetId ? pathIds(highlightTargetId) : null),
     [highlightTargetId, pathIds],
@@ -320,6 +318,12 @@ export default function Canvas({
           nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, title } } : n)),
         );
         onTreeChange?.();
+      },
+      onSetColor: async (id: string, color: string) => {
+        if (window.api) await window.api.canvas.update(id, { color });
+        setNodes((nds) =>
+          nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, color: color || undefined } } : n)),
+        );
       },
       onDelete: async (id: string) => {
         if (!confirm("删除这个分支及其后代？")) return;

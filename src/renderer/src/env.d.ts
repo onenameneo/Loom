@@ -22,6 +22,7 @@ export interface CanvasNodeDto {
   mountAncestors: boolean;
   systemPrompt?: string;
   model?: string;
+  color?: string;
   messages: NodeMsg[];
 }
 export interface NodeBudget {
@@ -67,7 +68,7 @@ declare global {
         editResend: (arg: { nodeId: string; seq: number; text: string }) => Promise<{ ok: boolean }>;
         delete: (nodeId: string) => Promise<{ ok: boolean; deletedIds: string[] }>;
         setSystemPrompt: (nodeId: string, text: string) => Promise<{ ok: boolean }>;
-        update: (nodeId: string, patch: { title?: string }) => Promise<{ ok: boolean; node?: CanvasNodeDto }>;
+        update: (nodeId: string, patch: { title?: string; color?: string }) => Promise<{ ok: boolean; node?: CanvasNodeDto }>;
         setMount: (nodeId: string, on: boolean) => Promise<{ ok: boolean; budget: NodeBudget }>;
         setModel: (nodeId: string, model: string) => Promise<{ ok: boolean }>;
         models: () => Promise<{ id: string; name: string }[]>;

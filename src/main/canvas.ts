@@ -29,6 +29,7 @@ interface CanvasNode {
   seed?: Seed;
   systemPrompt?: string;
   model?: string;
+  color?: string;
   mountAncestors: boolean;
   messages: AgentMessage[];
   messageMeta: unknown[];
@@ -84,6 +85,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
       seed: record.seed as Seed | undefined,
       systemPrompt: record.systemPrompt,
       model: record.model,
+      color: record.color,
       mountAncestors: record.mountAncestors,
       messages: record.messages.map((m) => m.content),
       messageMeta: record.messages.map((m) => m.meta),
@@ -262,6 +264,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     mountAncestors: n.mountAncestors,
     systemPrompt: n.systemPrompt,
     model: n.model,
+    color: n.color,
     messages: n.messages.flatMap((m, seq) => {
       const role = roleOf(m);
       if (role !== "user" && role !== "assistant") return [];
@@ -452,13 +455,18 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     return { ok: true };
   });
 
-  ipcMain.handle("node:update", (_e, arg: { nodeId: string; title?: string }) => {
+  ipcMain.handle("node:update", (_e, arg: { nodeId: string; title?: string; color?: string }) => {
     const node = loadNode(arg.nodeId);
     if (!node) return { ok: false };
     const title = arg.title?.trim();
     if (title) {
       node.title = title;
       store.updateNode(arg.nodeId, { title });
+    }
+    if (Object.prototype.hasOwnProperty.call(arg, "color")) {
+      const color = arg.color?.trim() ?? "";
+      node.color = color || undefined;
+      store.updateNode(arg.nodeId, { color });
     }
     return { ok: true, node: dto(node) };
   });

@@ -18,7 +18,7 @@ const api = {
       ipcRenderer.invoke("node:delete", nodeId),
     setSystemPrompt: (nodeId: string, text: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("node:setSystemPrompt", { nodeId, text }),
-    update: (nodeId: string, patch: { title?: string }): Promise<{ ok: boolean; node?: any }> =>
+    update: (nodeId: string, patch: { title?: string; color?: string }): Promise<{ ok: boolean; node?: any }> =>
       ipcRenderer.invoke("node:update", { nodeId, ...patch }),
     setMount: (nodeId: string, on: boolean): Promise<{ ok: boolean; budget: any }> =>
       ipcRenderer.invoke("node:setMount", { nodeId, on }),
