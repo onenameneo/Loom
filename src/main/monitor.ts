@@ -44,26 +44,42 @@ const EXCLUDE_PATTERNS = [
   /--analytics/i,
   /extension-host/i,
   /ELECTRON_RUN_AS_NODE/i,
+  /\.app\//i, // GUI 应用包内的进程（如 ChatGPT.app 的 Codex Framework 辅助进程）
+  /--type=/, // Electron/Chromium 辅助子进程（renderer/gpu/utility）
+  /crashpad/i,
 ];
 
 function log(message: string, command: string) {
   console.debug(`[monitor] ${message}: ${command}`);
 }
 
+// ps 的 etime = 已运行时长 `[[dd-]hh:]mm:ss`（纯数字，无 locale 依赖）→ 毫秒。
+function etimeToMs(etime: string): number {
+  const daySplit = etime.split("-");
+  const days = daySplit.length > 1 ? Number(daySplit[0]) : 0;
+  const parts = daySplit[daySplit.length - 1].split(":").map((n) => Number(n) || 0);
+  let h = 0;
+  let m = 0;
+  let s = 0;
+  if (parts.length === 3) [h, m, s] = parts;
+  else if (parts.length === 2) [m, s] = parts;
+  else [s] = parts;
+  return (((days * 24 + h) * 60 + m) * 60 + s) * 1000;
+}
+
+// 列：pid pcpu etime command。用 etime（单 token 时长）而非 lstart（多词本地化日期，
+// 在非英文 locale 下会让正则失配 → 全部解析失败）。
 function parsePsLine(line: string, scannedAt: number): PsRow | null {
-  const match = line.match(
-    /^\s*(\d+)\s+(\S+\s+\S+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(\S+)\s+(.+)$/,
-  );
+  const match = line.match(/^\s*(\d+)\s+([\d.,]+)\s+(\S+)\s+(.+)$/);
   if (!match) return null;
   const pid = Number(match[1]);
-  const parsedStartedAt = Date.parse(match[2]);
-  const cpu = Number.parseFloat(match[3]);
+  const cpu = Number.parseFloat(match[2].replace(",", "."));
   const command = match[4]?.trim();
   if (!Number.isFinite(pid) || !command) return null;
   return {
     pid,
     command,
-    startedAt: Number.isFinite(parsedStartedAt) ? parsedStartedAt : scannedAt,
+    startedAt: scannedAt - etimeToMs(match[3]),
     cpu: Number.isFinite(cpu) ? cpu : 0,
   };
 }
@@ -125,8 +141,11 @@ export async function scan(): Promise<AgentProc[]> {
   const scannedAt = Date.now();
   let stdout = "";
   try {
-    ({ stdout } = await execFileAsync("ps", ["-axo", "pid=,lstart=,pcpu=,command="]));
-  } catch {
+    ({ stdout } = await execFileAsync("ps", ["-axo", "pid=,pcpu=,etime=,command="], {
+      maxBuffer: 16 * 1024 * 1024, // 防御：进程多/命令行长时不超默认 1MB 而 reject
+    }));
+  } catch (err) {
+    console.log("[monitor] ps failed:", (err as Error)?.message ?? err);
     return [];
   }
 
@@ -199,6 +218,10 @@ export function registerMonitor(opts: { getWin: () => BrowserWindow | null; stor
   async function tick() {
     const nextAgents = withStatuses(await scan(), cpuHistory);
     if (stopped) return;
+    console.log(
+      `[monitor] scan → ${nextAgents.length} agent(s):`,
+      nextAgents.map((a) => `${a.tool}#${a.pid}${a.project ? `(${a.project})` : ""}`).join(", ") || "(none)",
+    );
     const next = new Map(nextAgents.map((agent) => [agent.pid, agent]));
     const startedAgents = nextAgents.filter((agent) => !previous.has(agent.pid));
     const stoppedAgents = [...previous.values()].filter((agent) => !next.has(agent.pid));
