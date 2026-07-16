@@ -3,16 +3,17 @@ import { createReadStream, promises as fs } from "fs";
 import { basename, isAbsolute, relative, resolve } from "path";
 import { Readable, Writable } from "stream";
 import { BrowserWindow, dialog, ipcMain } from "electron";
-import {
+// @agentclientprotocol/sdk 是 ESM-only；electron 主进程打成 CJS，静态 import 会触发
+// ERR_REQUIRE_ESM。故值（ClientSideConnection/ndJsonStream/PROTOCOL_VERSION）走
+// acp:start 里的动态 import()（CJS 可动态加载 ESM），类型走 import type（编译期擦除）。
+import type {
   ClientSideConnection,
-  PROTOCOL_VERSION,
-  ndJsonStream,
-  type Client,
-  type RequestPermissionRequest,
-  type RequestPermissionResponse,
-  type SessionNotification,
-  type SessionUpdate,
-  type ToolCallStatus,
+  Client,
+  RequestPermissionRequest,
+  RequestPermissionResponse,
+  SessionNotification,
+  SessionUpdate,
+  ToolCallStatus,
 } from "@agentclientprotocol/sdk";
 import type { Store } from "./store/store";
 
@@ -251,6 +252,9 @@ export function registerAcp(opts: { getWin: () => BrowserWindow | null; store: S
     try {
       const stat = await fs.stat(cwd);
       if (!stat.isDirectory()) throw new Error("请选择一个项目目录。");
+
+      // ESM-only SDK：CJS 主进程用动态 import() 加载。
+      const { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } = await import("@agentclientprotocol/sdk");
 
       child = spawn(npxCommand(), ["-y", "@zed-industries/claude-code-acp"], {
         cwd,
