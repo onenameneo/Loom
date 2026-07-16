@@ -11,6 +11,18 @@ type AgentProc = {
   status: "running" | "idle";
 };
 type MonitorEvent = { type: "snapshot" | "started" | "stopped"; agents: AgentProc[]; agent?: AgentProc };
+type AcpSessionDto = {
+  id: string;
+  cwd: string;
+  project: string;
+  status: "starting" | "ready" | "thinking" | "error" | "stopped";
+  error?: string;
+};
+type AcpEvent = {
+  type: "started" | "update" | "permission" | "error" | "stopped";
+  sessionId?: string;
+  [key: string]: unknown;
+};
 
 const api = {
   canvas: {
@@ -58,6 +70,24 @@ const api = {
       return () => ipcRenderer.removeListener("monitor:event", l);
     },
     setNotify: (on: boolean): Promise<{ ok: boolean }> => ipcRenderer.invoke("monitor:setNotify", on),
+  },
+  acp: {
+    start: (arg: { cwd: string }): Promise<{ ok: boolean; sessionId?: string; message?: string; hint?: string }> =>
+      ipcRenderer.invoke("acp:start", arg),
+    prompt: (arg: { sessionId: string; text: string }): Promise<{ ok: boolean; message?: string }> =>
+      ipcRenderer.invoke("acp:prompt", arg),
+    cancel: (sessionId: string): Promise<{ ok: boolean; message?: string }> =>
+      ipcRenderer.invoke("acp:cancel", { sessionId }),
+    stop: (sessionId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("acp:stop", { sessionId }),
+    respondPermission: (arg: { sessionId: string; requestId: string; optionId?: string }): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke("acp:respondPermission", arg),
+    pickDir: (): Promise<{ canceled: boolean; path?: string }> => ipcRenderer.invoke("acp:pickDir"),
+    list: (): Promise<AcpSessionDto[]> => ipcRenderer.invoke("acp:list"),
+    onEvent: (cb: (e: AcpEvent) => void) => {
+      const l = (_: unknown, d: AcpEvent) => cb(d);
+      ipcRenderer.on("acp:event", l);
+      return () => ipcRenderer.removeListener("acp:event", l);
+    },
   },
   workspaces: {
     list: (): Promise<any[]> => ipcRenderer.invoke("ws:list"),

@@ -52,6 +52,40 @@ export interface MonitorEvent {
   agent?: AgentProc;
 }
 
+export interface AcpSessionDto {
+  id: string;
+  cwd: string;
+  project: string;
+  status: "starting" | "ready" | "thinking" | "error" | "stopped";
+  error?: string;
+}
+
+export interface AcpToolCall {
+  id: string;
+  title: string;
+  status: "pending" | "in_progress" | "done" | "error";
+  kind?: string;
+}
+
+export interface AcpPermissionReq {
+  sessionId: string;
+  requestId: string;
+  title: string;
+  options: { id: string; label: string; kind?: string }[];
+}
+
+export interface AcpEvent {
+  type: "started" | "update" | "permission" | "error" | "stopped";
+  sessionId?: string;
+  session?: AcpSessionDto;
+  update?: any;
+  requestId?: string;
+  title?: string;
+  options?: { id: string; label: string; kind?: string }[];
+  message?: string;
+  hint?: string;
+}
+
 export interface WorkspaceMeta {
   id: string;
   name: string;
@@ -102,6 +136,16 @@ declare global {
         list: () => Promise<AgentProc[]>;
         onEvent: (cb: (e: MonitorEvent) => void) => () => void;
         setNotify: (on: boolean) => Promise<{ ok: boolean }>;
+      };
+      acp: {
+        start: (arg: { cwd: string }) => Promise<{ ok: boolean; sessionId?: string; message?: string; hint?: string }>;
+        prompt: (arg: { sessionId: string; text: string }) => Promise<{ ok: boolean; message?: string }>;
+        cancel: (sessionId: string) => Promise<{ ok: boolean; message?: string }>;
+        stop: (sessionId: string) => Promise<{ ok: boolean }>;
+        respondPermission: (arg: { sessionId: string; requestId: string; optionId?: string }) => Promise<{ ok: boolean }>;
+        pickDir: () => Promise<{ canceled: boolean; path?: string }>;
+        list: () => Promise<AcpSessionDto[]>;
+        onEvent: (cb: (e: AcpEvent) => void) => () => void;
       };
       workspaces: {
         list: () => Promise<WorkspaceMeta[]>;

@@ -5,6 +5,7 @@ import { dbPath, SqliteStore } from "./store/sqliteStore";
 import type { Store } from "./store/store";
 import { registerCanvas } from "./canvas";
 import { registerMonitor } from "./monitor";
+import { registerAcp } from "./acp";
 import {
   accessSources,
   encryptionAvailable,
@@ -22,6 +23,7 @@ let win: BrowserWindow | null = null;
 let store: Store;
 let canvas: ReturnType<typeof registerCanvas> | null = null;
 let monitor: ReturnType<typeof registerMonitor> | null = null;
+let acp: ReturnType<typeof registerAcp> | null = null;
 
 function resolvedTheme(): "light" | "dark" {
   const t = store.getSettings().appearance.theme;
@@ -122,8 +124,11 @@ function createWindow() {
     webPreferences: { preload: join(__dirname, "../preload/index.js"), sandbox: false },
   });
   if (store && !monitor) monitor = registerMonitor({ getWin: () => win, store });
+  if (store && !acp) acp = registerAcp({ getWin: () => win, store });
   win.on("ready-to-show", () => win?.show());
   win.on("closed", () => {
+    acp?.stop();
+    acp = null;
     monitor?.stop();
     monitor = null;
     win = null;
@@ -140,6 +145,7 @@ app.whenReady().then(() => {
   store = new SqliteStore(dbPath(app.getPath("userData")));
   canvas = registerCanvas({ getWin: () => win, store });
   monitor = registerMonitor({ getWin: () => win, store });
+  acp = registerAcp({ getWin: () => win, store });
   registerIpc();
   buildMenu();
   createWindow();
@@ -149,6 +155,8 @@ app.whenReady().then(() => {
 });
 
 app.on("before-quit", () => {
+  acp?.stop();
+  acp = null;
   monitor?.stop();
   monitor = null;
 });
