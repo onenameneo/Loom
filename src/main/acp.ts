@@ -74,6 +74,9 @@ function cancelledPermission(): RequestPermissionResponse {
 
 function hintFor(error: unknown, stderr = ""): string {
   const text = `${String((error as Error)?.message ?? error)}\n${stderr}`.toLowerCase();
+  if (text.includes("unsupported model") || text.includes("model not") || (text.includes("400") && text.includes("model"))) {
+    return "该模型不被当前 Claude 端点支持。请在 Loom 设置里把「模型」改为你端点支持的名称（与聊天用的一致），再重新启动会话。";
+  }
   if (text.includes("auth") || text.includes("login") || text.includes("unauthorized")) {
     return "请先在终端完成 Claude Code 登录，然后回到 Loom 重新启动会话。";
   }
@@ -243,8 +246,12 @@ export function registerAcp(opts: { getWin: () => BrowserWindow | null; store: S
     send({ type: "stopped", sessionId: session.id, session: dto(session) });
   }
 
-  ipcMain.handle("acp:start", async (_e, arg: { cwd?: string }) => {
+  ipcMain.handle("acp:start", async (_e, arg: { cwd?: string; model?: string }) => {
     const cwd = resolve(String(arg?.cwd ?? ""));
+    // adapter 底层 claude-agent-sdk 默认模型可能不被用户端点（代理）支持 → 注入
+    // ANTHROPIC_MODEL 覆盖：优先显式传参 > 环境已设 > Loom 设置里的模型。
+    const settingsModel = opts.store.getSettings().access.model?.trim();
+    const acpModel = String(arg?.model ?? "").trim() || process.env.ANTHROPIC_MODEL || settingsModel || "";
     const localId = `acp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
     const sessionIdRef: { id?: string; localId: string } = { localId };
     let child: ChildProcessWithoutNullStreams | undefined;
@@ -259,7 +266,7 @@ export function registerAcp(opts: { getWin: () => BrowserWindow | null; store: S
       child = spawn(npxCommand(), ["-y", "@zed-industries/claude-code-acp"], {
         cwd,
         stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env },
+        env: { ...process.env, ...(acpModel ? { ANTHROPIC_MODEL: acpModel } : {}) },
       });
 
       child.stderr.setEncoding("utf8");
