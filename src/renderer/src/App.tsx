@@ -7,6 +7,8 @@ export default function App() {
   const [activeSurface, setActiveSurface] = useState("workspace");
   const [workspaces, setWorkspaces] = useState<WorkspaceMeta[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const [treeVersion, setTreeVersion] = useState(0);
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
 
@@ -86,6 +88,10 @@ export default function App() {
     settings,
     reloadSettings,
     theme,
+    focusNodeId,
+    clearFocusNode: () => setFocusNodeId(null),
+    treeVersion,
+    bumpTreeVersion: () => setTreeVersion((v) => v + 1),
   };
 
   const Active = SURFACES.find((s) => s.id === activeSurface) ?? SURFACES[0];
@@ -97,7 +103,15 @@ export default function App() {
         activeSurface={activeSurface}
         setSurface={setActiveSurface}
         ctx={ctx}
-        onSelectWorkspace={setActiveWorkspaceId}
+        onSelectWorkspace={(id) => {
+          setActiveWorkspaceId(id);
+          setFocusNodeId(null);
+        }}
+        onFocusNode={(workspaceId, nodeId) => {
+          setActiveWorkspaceId(workspaceId);
+          setActiveSurface("workspace");
+          setFocusNodeId(nodeId);
+        }}
         onCreateWorkspace={createWorkspace}
         onRenameWorkspace={async (id, name) => {
           await window.api.workspaces.rename(id, name);

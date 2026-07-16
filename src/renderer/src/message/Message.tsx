@@ -1,5 +1,7 @@
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Check, Copy, Pencil, RefreshCcw } from "lucide-react";
 import { CodeBlock } from "./CodeBlock";
 
 export type MsgRole = "user" | "assistant" | "error" | "tool";
@@ -28,17 +30,92 @@ const mdComponents = {
 export function Message({
   role,
   text,
+  images,
   density = "comfortable",
   streaming = false,
+  meta,
+  canRegenerate = false,
+  canEdit = false,
+  onRegenerate,
+  onEditResend,
+  onRetry,
 }: {
   role: MsgRole;
   text: string;
+  images?: { data: string; mimeType: string }[];
   density?: Density;
   streaming?: boolean;
+  meta?: string;
+  canRegenerate?: boolean;
+  canEdit?: boolean;
+  onRegenerate?: () => void;
+  onEditResend?: (text: string) => void;
+  onRetry?: () => void;
 }) {
+  const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(text);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1100);
+    } catch {
+      /* clipboard 不可用时静默 */
+    }
+  }
+
+  function submitEdit() {
+    const next = draft.trim();
+    if (!next) return;
+    onEditResend?.(next);
+    setEditing(false);
+  }
+
   return (
     <div className={`m m--${role} m--${density}`}>
-      {role === "assistant" ? (
+      <div className="m__bar nodrag">
+        <button onClick={copy} title="复制">
+          {copied ? <Check size={13} /> : <Copy size={13} />}
+        </button>
+        {canRegenerate && (
+          <button onClick={onRegenerate} title="重答">
+            <RefreshCcw size={13} />
+          </button>
+        )}
+        {canEdit && (
+          <button onClick={() => setEditing((v) => !v)} title="编辑重发">
+            <Pencil size={13} />
+          </button>
+        )}
+        {meta && <span className="m__meta">{meta}</span>}
+      </div>
+
+      {images && images.length > 0 && (
+        <div className="m__images">
+          {images.map((image, index) => (
+            <img key={`${image.mimeType}-${index}`} src={`data:${image.mimeType};base64,${image.data}`} alt="" />
+          ))}
+        </div>
+      )}
+
+      {editing ? (
+        <div className="m__edit nodrag">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitEdit();
+            }}
+            autoFocus
+          />
+          <div>
+            <button onClick={() => setEditing(false)}>取消</button>
+            <button className="primary" onClick={submitEdit}>重发</button>
+          </div>
+        </div>
+      ) : role === "assistant" ? (
         <div className="m__md">
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
             {text}
@@ -47,6 +124,9 @@ export function Message({
         </div>
       ) : (
         <span className="m__plain">{text}</span>
+      )}
+      {role === "error" && onRetry && (
+        <button className="m__retry nodrag" onClick={onRetry}>重试</button>
       )}
     </div>
   );

@@ -1,11 +1,13 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
-import { Handle, Position } from "@xyflow/react";
-import type { NodeBudget } from "../env";
+import { Handle, NodeResizer, Position } from "@xyflow/react";
+import { Check, Settings, Trash2 } from "lucide-react";
+import type { NodeBudget, NodeMsg } from "../env";
+import { Composer, type ComposerImage } from "../composer/Composer";
 import { Message } from "../message/Message";
 import { BranchContext } from "./branch";
 
 type Role = "user" | "assistant" | "error";
-type Msg = { role: Role; text: string };
+type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown };
 
 // 画布节点 = 一个活的 pi 对话线程（「索引卡片」）。发消息走 window.api.canvas，
 // 订阅本 nodeId 的流式事件；头部显示 token 预算（含/不含祖先）与挂载开关。
@@ -13,20 +15,63 @@ export function ChatThreadNode(props: any) {
   const { id, data } = props;
   const onBranch = useContext(BranchContext);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const idRef = useRef(1);
 
-  const [msgs, setMsgs] = useState<Msg[]>(() => data.messages ?? []);
+  const toMsgs = useCallback((items: NodeMsg[] = []) => (
+    items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta }))
+  ), []);
+
+  const [msgs, setMsgs] = useState<Msg[]>(() => toMsgs(data.messages ?? []));
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState(false);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(() => localStorage.getItem(`loom:draft:${id}`) ?? "");
   const [collapsed, setCollapsed] = useState(false);
   const [mount, setMount] = useState<boolean>(!!data.mountAncestors);
   const [budget, setBudget] = useState<NodeBudget | null>(null);
   const [tb, setTb] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [title, setTitle] = useState(String(data.title ?? ""));
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [personaOpen, setPersonaOpen] = useState(false);
+  const [persona, setPersona] = useState(String(data.systemPrompt ?? ""));
+  const [nodeModel, setNodeModel] = useState<string | undefined>(data.model);
+
+  useEffect(() => {
+    setMsgs(toMsgs(data.messages ?? []));
+    setTitle(String(data.title ?? ""));
+    setPersona(String(data.systemPrompt ?? ""));
+    setNodeModel(data.model);
+  }, [data.messages, data.title, data.systemPrompt, data.model, toMsgs]);
 
   const refreshBudget = useCallback(async () => {
     if (!window.api) return;
     setBudget(await window.api.canvas.budget(id));
   }, [id]);
+
+  const reloadNode = useCallback(async () => {
+    if (!window.api || !data.workspaceId) return;
+    const list = await window.api.canvas.list(data.workspaceId);
+    const next = list.find((n) => n.id === id);
+    if (next) {
+      setMsgs(toMsgs(next.messages));
+      setTitle(next.title);
+      setPersona(next.systemPrompt ?? "");
+      setNodeModel(next.model);
+    }
+  }, [data.workspaceId, id, toMsgs]);
+
+  useEffect(() => {
+    setInput(localStorage.getItem(`loom:draft:${id}`) ?? "");
+  }, [id]);
+
+  useEffect(() => {
+    localStorage.setItem(`loom:draft:${id}`, input);
+  }, [id, input]);
+
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (el && autoScroll) el.scrollTop = el.scrollHeight;
+  }, [msgs, thinking, autoScroll]);
 
   // 订阅本节点的流式事件
   useEffect(() => {
@@ -41,7 +86,7 @@ export function ChatThreadNode(props: any) {
           break;
         case "assistant_start":
           setThinking(false);
-          setMsgs((m) => [...m, { role: "assistant", text: "" }]);
+          setMsgs((m) => [...m, { id: idRef.current++, role: "assistant", text: "" }]);
           break;
         case "delta":
           setMsgs((m) => {
@@ -56,15 +101,16 @@ export function ChatThreadNode(props: any) {
           setThinking(false);
           setBusy(false);
           refreshBudget();
+          reloadNode();
           break;
         case "error":
           setThinking(false);
           setBusy(false);
-          setMsgs((m) => [...m, { role: "error", text: String(e.payload ?? "出错了") }]);
+          setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: String(e.payload ?? "出错了") }]);
           break;
       }
     });
-  }, [id, refreshBudget]);
+  }, [id, refreshBudget, reloadNode]);
 
   const onMouseUp = useCallback(() => {
     const sel = window.getSelection();
@@ -96,18 +142,91 @@ export function ChatThreadNode(props: any) {
     if (r?.budget) setBudget(r.budget);
   }
 
-  function submit() {
-    const text = input.trim();
-    if (!text || busy) return;
-    setMsgs((m) => [...m, { role: "user", text }]);
+  function submit(text: string, images: ComposerImage[] = []) {
+    if (busy || (!text && images.length === 0)) return;
+    setMsgs((m) => [...m, { id: idRef.current++, role: "user", text, images }]);
     setInput("");
+    localStorage.removeItem(`loom:draft:${id}`);
     if (!window.api) {
-      setMsgs((m) => [...m, { role: "error", text: "浏览器预览：在 Electron 中运行（pnpm dev）以对话。" }]);
+      setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: "浏览器预览：在 Electron 中运行（pnpm dev）以对话。" }]);
       return;
     }
     setBusy(true);
     setThinking(true);
-    window.api.canvas.send(id, text);
+    window.api.canvas.send(id, text, images);
+  }
+
+  async function stop() {
+    if (window.api) await window.api.canvas.abort(id);
+  }
+
+  async function regenerate() {
+    if (!window.api || busy) return;
+    setBusy(true);
+    setThinking(true);
+    setMsgs((m) => {
+      const lastUser = [...m].map((x) => x.role).lastIndexOf("user");
+      return lastUser >= 0 ? m.slice(0, lastUser + 1) : m;
+    });
+    await window.api.canvas.regenerate(id);
+    await reloadNode();
+  }
+
+  async function editResend(seq: number | undefined, text: string) {
+    if (!window.api || seq == null || busy) return;
+    setBusy(true);
+    setThinking(true);
+    setMsgs((m) => {
+      const idx = m.findIndex((x) => x.seq === seq);
+      return idx >= 0 ? [...m.slice(0, idx), { id: idRef.current++, role: "user", text, seq }] : m;
+    });
+    await window.api.canvas.editResend({ nodeId: id, seq, text });
+    await reloadNode();
+  }
+
+  async function saveTitle() {
+    const next = title.trim();
+    if (!next) return;
+    setEditingTitle(false);
+    await data.onRename?.(id, next);
+  }
+
+  async function savePersona() {
+    await window.api?.canvas.setSystemPrompt(id, persona);
+    setPersonaOpen(false);
+    data.onTreeChange?.();
+  }
+
+  async function clearNode() {
+    setMsgs([]);
+    if (window.api) await window.api.canvas.reset(id);
+    refreshBudget();
+  }
+
+  async function setModel(model: string) {
+    const next = model.trim();
+    if (!next || !window.api) return;
+    const r = await window.api.canvas.setModel(id, next);
+    if (r.ok) {
+      setNodeModel(next);
+      data.onTreeChange?.();
+    }
+  }
+
+  function metaFor(m: Msg): string | undefined {
+    const parts: string[] = [];
+    const total = m.usage?.totalTokens;
+    if (typeof total === "number") parts.push(`${total} tokens`);
+    const meta = m.meta && typeof m.meta === "object" ? (m.meta as Record<string, unknown>) : {};
+    const ms = meta.durationMs ?? meta.elapsedMs ?? meta.latencyMs;
+    if (typeof ms === "number") parts.push(`${(ms / 1000).toFixed(1)}s`);
+    return parts.length ? parts.join(" · ") : undefined;
+  }
+
+  function onBodyScroll() {
+    const el = bodyRef.current;
+    if (!el) return;
+    setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
   }
 
   const tokens = budget ? (mount ? budget.withAncestors : budget.withoutAncestors) : null;
@@ -117,24 +236,71 @@ export function ChatThreadNode(props: any) {
   const lastText = msgs.length ? msgs[msgs.length - 1].text : data.seed?.text ?? "";
 
   return (
-    <div className={`card ${data.fresh ? "card--fresh" : ""}`}>
+    <div className={`card ${data.fresh ? "card--fresh" : ""} ${collapsed ? "card--collapsed" : ""}`}>
+      <NodeResizer
+        minWidth={288}
+        minHeight={220}
+        isVisible={Boolean(props.selected) && !collapsed}
+        lineClassName="rz-line"
+        handleClassName="rz-handle"
+      />
       <div className="card__head">
         <button className="chev nodrag" onClick={() => setCollapsed((c) => !c)} title={collapsed ? "展开" : "折叠"}>
           {collapsed ? "▸" : "▾"}
         </button>
-        <span className="title">{data.title}</span>
-        {data.model && <span className="model">{data.model}</span>}
+        {editingTitle ? (
+          <input
+            className="title-edit nodrag"
+            value={title}
+            autoFocus
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={saveTitle}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveTitle();
+              if (e.key === "Escape") {
+                setTitle(String(data.title ?? ""));
+                setEditingTitle(false);
+              }
+            }}
+          />
+        ) : (
+          <button className="title title-btn nodrag" onDoubleClick={() => setEditingTitle(true)} onClick={() => data.onSelect?.(id)}>
+            {title}
+          </button>
+        )}
+        {nodeModel && <span className="model">{nodeModel}</span>}
         <span className="spacer" />
-        <span className="tokens" title={budget?.estimated ? "估算值（字符估算）" : undefined}>
+        <span className="tokens" title={budget?.estimated ? "将发送的估算 token（字符估算，随挂载祖先变化）" : undefined}>
           {budget?.estimated ? "~" : ""}
-          {tokenLabel} · 祖先:{mount ? "开" : "关"}
+          {tokenLabel} tok
         </span>
+        <button className="head-icon nodrag" title="节点 persona" onClick={() => setPersonaOpen((v) => !v)}>
+          <Settings size={13} />
+        </button>
+        {!data.isRoot && (
+          <button className="head-icon danger nodrag" title="删除分支" onClick={() => data.onDelete?.(id)}>
+            <Trash2 size={13} />
+          </button>
+        )}
       </div>
+
+      {personaOpen && (
+        <div className="persona nodrag">
+          <textarea
+            value={persona}
+            placeholder="留空使用默认 system prompt"
+            onChange={(e) => setPersona(e.target.value)}
+          />
+          <button onClick={savePersona}>
+            <Check size={13} /> 保存
+          </button>
+        </div>
+      )}
 
       {collapsed && <div className="preview">{lastText || "（空）"}</div>}
 
       {!collapsed && (
-        <div className="card__body nodrag nowheel" ref={bodyRef} onMouseUp={onMouseUp}>
+        <div className="card__body nodrag nowheel" ref={bodyRef} onMouseUp={onMouseUp} onScroll={onBodyScroll}>
           {data.seed && (
             <div className="seed">
               <span className="seed__q">“{data.seed.text}”</span>
@@ -143,7 +309,7 @@ export function ChatThreadNode(props: any) {
           )}
 
           {msgs.length === 0 && !thinking && (
-            <div className="empty">{data.seed ? "顺着这个片段往下问…" : "开始一段思考…"}</div>
+            <div className="empty">{data.seed ? "顺着这个片段往下问…" : "从主线开始一段思考…"}</div>
           )}
 
           {msgs.map((m, i) => (
@@ -151,8 +317,15 @@ export function ChatThreadNode(props: any) {
               key={i}
               role={m.role}
               text={m.text}
+              images={m.images}
               density="compact"
               streaming={m.role === "assistant" && streaming && i === msgs.length - 1}
+              meta={m.role === "assistant" ? metaFor(m) : undefined}
+              canRegenerate={m.role === "assistant" && i === msgs.length - 1 && !busy}
+              canEdit={m.role === "user" && !busy}
+              onRegenerate={regenerate}
+              onEditResend={(text) => editResend(m.seq, text)}
+              onRetry={m.role === "error" ? regenerate : undefined}
             />
           ))}
 
@@ -160,32 +333,45 @@ export function ChatThreadNode(props: any) {
 
           {tb && (
             <div className="seltb" style={{ left: tb.x, top: tb.y }} onMouseDown={(e) => e.preventDefault()}>
-              <button onClick={doBranch}>⑂ 岔出新节点</button>
+              <button onClick={doBranch}>⑂ 岔出分支</button>
               <button className="ghost" onClick={() => setTb(null)}>就地追问</button>
             </div>
+          )}
+          {!autoScroll && (
+            <button
+              className="to-latest to-latest--card nodrag"
+              onClick={() => {
+                setAutoScroll(true);
+                requestAnimationFrame(() => {
+                  const el = bodyRef.current;
+                  if (el) el.scrollTop = el.scrollHeight;
+                });
+              }}
+            >
+              ↓ 回到最新
+            </button>
           )}
         </div>
       )}
 
       {!collapsed && (
         <div className="card__foot nodrag">
-          <input
-            className="ask"
-            placeholder={busy ? "回复中…" : msgs.length ? "继续追问…" : data.seed ? "顺着这个往下问…" : "开始一段思考…"}
+          <Composer
+            nodeId={id}
             value={input}
-            disabled={busy}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
+            onChange={setInput}
+            busy={busy}
+            placeholder={busy ? "回复中…" : msgs.length ? "继续追问…" : data.seed ? "顺着这个往下问…" : "开始一段思考…"}
+            mount={mount}
+            canRegenerate={msgs.some((m) => m.role === "user") && !busy}
+            onSubmit={submit}
+            onStop={stop}
+            onToggleMount={toggleMount}
+            onOpenPersona={() => setPersonaOpen(true)}
+            onClearNode={clearNode}
+            onRegenerate={regenerate}
+            onSetModel={setModel}
           />
-          <label className="mount" title="是否把根→父的完整路径也发给模型">
-            <input type="checkbox" checked={mount} onChange={(e) => toggleMount(e.target.checked)} />
-            挂载祖先
-          </label>
         </div>
       )}
 

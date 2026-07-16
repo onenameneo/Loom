@@ -15,7 +15,7 @@
 **面 ② 无限画布 · 分支对话**（主打，差异化核心）
 - React Flow 节点图；每个节点 = 一个多轮对话线程（「索引卡片」）。
 - 关键动作：在回复里**划选片段 → 岔出新子节点 → 自动连线回出处**。
-- 一张画布 = 一个可命名保存的「研究工作区」。
+- 一张画布 = 一个可命名保存的「研究会话」。
 
 **面 ③ 本地 Agent 观察哨**（指挥塔）
 - **被动观察**本地 Codex / Claude Code 的状态（工作/等待/完成）并通知你，不抢占你的终端用法。
@@ -96,15 +96,15 @@ Electron · React · React Flow(@xyflow/react) · TypeScript · pi-mono(`@marioz
 
 ## 导航（外层）
 主界面收敛为**两面 + 设置**（依据「聊天 = 只有一个节点的画布」）：
-- **工作区**（对话/画布合一）：一张画布 = 一个研究会话；画布退化成线性即聊天。
+- **会话**（对话/画布合一）：一张画布 = 一个研究会话；画布退化成线性即聊天。
 - **观察哨**：本地 agent 状态。
 - **设置**：接入（provider/endpoint/key/model，key 安全存储）+ 外观。
-持久侧栏在两面/设置间切换；工作区列表在此管理。
+持久侧栏在两面/设置间切换；会话列表在此管理。
 
 ## 路线图
 - **P0 · 骨架**（已完成）：Electron + React + pi 打通，单节点聊天，套上 DESIGN.md。
-- **P1 · App Shell + 持久化基座**（openspec: `app-shell`）：两面侧栏导航 + 工作区管理 + 设置(接入/外观) + 窗口 chrome + SQLite 基座。先立骨架。
-- **P2 · 画布引擎**（openspec: `canvas-branching-context`）：React Flow 画布 + 片段分支（含手动挂载）+ **自定义 convertToLlm 上下文引擎**，插进 shell 工作区、用 shell 存储。
+- **P1 · App Shell + 持久化基座**（openspec: `app-shell`）：两面侧栏导航 + 会话管理 + 设置(接入/外观) + 窗口 chrome + SQLite 基座。先立骨架。
+- **P2 · 画布引擎**（openspec: `canvas-branching-context`）：React Flow 画布 + 片段分支（含手动挂载）+ **自定义 convertToLlm 上下文引擎**，插进 shell 会话面、用 shell 存储。
 - **P3 · 观察哨**：Claude Code hooks + Codex 日志 tail + 事件总线 + 系统通知（被动）。
 - **P4 · 能力层**：工具/MCP + 记忆（gbrain CLI）+ 打磨。
 

@@ -3,6 +3,10 @@ export {};
 export interface NodeMsg {
   role: "user" | "assistant";
   text: string;
+  images?: { data: string; mimeType: string }[];
+  seq: number;
+  usage?: { totalTokens?: number };
+  meta?: unknown;
 }
 export interface NodeSeed {
   text: string;
@@ -11,10 +15,13 @@ export interface NodeSeed {
 }
 export interface CanvasNodeDto {
   id: string;
+  workspaceId: string;
   parentId?: string;
   title: string;
   seed?: NodeSeed;
   mountAncestors: boolean;
+  systemPrompt?: string;
+  model?: string;
   messages: NodeMsg[];
 }
 export interface NodeBudget {
@@ -54,8 +61,16 @@ declare global {
         list: (workspaceId: string) => Promise<CanvasNodeDto[]>;
         open: (workspaceId: string) => Promise<CanvasNodeDto[]>;
         create: (arg: { workspaceId: string; parentId?: string; seed?: NodeSeed; title?: string }) => Promise<CanvasNodeDto>;
-        send: (nodeId: string, text: string) => Promise<{ ok: boolean }>;
+        send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[]) => Promise<{ ok: boolean }>;
+        abort: (nodeId: string) => Promise<{ ok: boolean }>;
+        regenerate: (nodeId: string) => Promise<{ ok: boolean }>;
+        editResend: (arg: { nodeId: string; seq: number; text: string }) => Promise<{ ok: boolean }>;
+        delete: (nodeId: string) => Promise<{ ok: boolean; deletedIds: string[] }>;
+        setSystemPrompt: (nodeId: string, text: string) => Promise<{ ok: boolean }>;
+        update: (nodeId: string, patch: { title?: string }) => Promise<{ ok: boolean; node?: CanvasNodeDto }>;
         setMount: (nodeId: string, on: boolean) => Promise<{ ok: boolean; budget: NodeBudget }>;
+        setModel: (nodeId: string, model: string) => Promise<{ ok: boolean }>;
+        models: () => Promise<{ id: string; name: string }[]>;
         budget: (nodeId: string) => Promise<NodeBudget>;
         reset: (nodeId: string) => Promise<{ ok: boolean }>;
         onEvent: (cb: (e: CanvasEvent) => void) => () => void;

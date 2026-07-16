@@ -52,6 +52,7 @@
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  position: relative;
 }
 .chatview .thread {
   position: relative;
@@ -89,6 +90,17 @@
   padding: 12px 24px 20px;
   background: linear-gradient(to top, var(--bg) 60%, transparent);
 }
+.chatview .composer-wrap {
+  max-width: 720px;
+  margin: 0 auto;
+}
+.budget-line {
+  max-width: 720px;
+  margin: 0 auto 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--faint);
+}
 .chatview .composer .box {
   max-width: 720px;
   margin: 0 auto;
@@ -101,6 +113,11 @@
   padding: 8px 8px 8px 14px;
   box-shadow: var(--shadow-float);
 }
+.chatview .composer .composer-box {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 8px 8px 8px 14px;
+}
 .chatview .composer textarea {
   flex: 1;
   border: none;
@@ -111,6 +128,7 @@
   font-family: var(--font-ui);
   font-size: 14px;
   line-height: 1.5;
+  field-sizing: content;
   max-height: 160px;
   padding: 4px 0;
 }
@@ -122,12 +140,13 @@
   height: 32px;
   flex: none;
   border: none;
-  border-radius: var(--r-pill);
+  border-radius: var(--r-md);
   background: var(--accent);
   color: #fff;
   cursor: pointer;
   display: grid;
   place-items: center;
+  font-size: 12px;
 }
 .chatview .composer .send:disabled {
   background: var(--surface-2);
@@ -141,10 +160,32 @@
   stroke: currentColor;
   fill: none;
 }
+.chatview-nodebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+.chatview-nodebar .model {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  padding: 3px 8px;
+  background: var(--surface);
+}
+.persona--chatview {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
 
-/* ---- 节点卡片 ---- */
+/* ---- 节点卡片（填满 React Flow 节点，宽高由节点 style / NodeResizer 控制）---- */
 .card {
-  width: 344px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
@@ -152,6 +193,9 @@
   font-size: 13px;
   color: var(--text);
   transition: box-shadow 0.16s, border-color 0.16s;
+}
+.card--collapsed {
+  height: auto;
 }
 .card:hover {
   box-shadow: var(--shadow-float);
@@ -169,9 +213,11 @@
     transform: none;
   }
 }
+/* 选中 = 四周完全均匀的 accent 光晕（0 偏移，不偏底），不用描边环/圆点 */
 .react-flow__node.selected .card {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), var(--shadow-float);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent),
+    0 0 20px 2px color-mix(in srgb, var(--accent) 42%, transparent);
 }
 
 /* 只有标题栏是拖拽手柄；其余区域正常交互（配合节点 dragHandle=".card__head"）。
@@ -180,12 +226,17 @@
   cursor: default;
 }
 .card__head {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   cursor: grab;
+}
+/* 折叠时让 React Flow 节点外框也收起（覆盖固定高度的 inline style） */
+.canvas-wrap .react-flow__node:has(.card--collapsed) {
+  height: auto !important;
 }
 .card__head:active {
   cursor: grabbing;
@@ -220,6 +271,29 @@
   font-weight: 550;
   font-size: 12.5px;
 }
+.title-btn {
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.title-edit {
+  min-width: 0;
+  width: 104px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+  padding: 3px 5px;
+  outline: none;
+}
 .card .model {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -235,6 +309,58 @@
   color: var(--faint);
   white-space: nowrap;
 }
+.head-icon {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+.head-icon:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.head-icon.danger:hover {
+  color: var(--err);
+}
+.persona {
+  border-bottom: 1px solid var(--border);
+  padding: 8px 10px;
+  display: flex;
+  gap: 8px;
+  background: var(--surface);
+}
+.persona textarea {
+  flex: 1;
+  min-height: 58px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.45;
+  padding: 6px 8px;
+  outline: none;
+}
+.persona button {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
 
 .preview {
   padding: 9px 14px 13px;
@@ -249,12 +375,39 @@
 
 .card__body {
   position: relative;
+  flex: 1;
+  min-height: 0;
   padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 300px;
   overflow-y: auto;
+}
+.to-latest {
+  position: sticky;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  align-self: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-float);
+  font-size: 11.5px;
+  padding: 5px 10px;
+  cursor: pointer;
+  z-index: 10;
+}
+.chatview .to-latest {
+  position: fixed;
+  right: 28px;
+  left: auto;
+  bottom: 84px;
+  transform: none;
+}
+.to-latest--card {
+  bottom: 0;
 }
 
 /* seed 引文 = 「标本签」 */
@@ -347,28 +500,186 @@
   border-bottom: 1px solid var(--border-strong);
 }
 
+/* 底部 = 悬浮大输入框，功能按钮内嵌（无分割线） */
 .card__foot {
+  flex: none;
+  padding: 10px 12px 12px;
+}
+.composer-box {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  padding: 8px 8px 8px 12px;
+  box-shadow: var(--shadow-float);
+}
+.composer-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-float);
+}
+.composer-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
-  border-top: 1px solid var(--border);
 }
-.ask {
-  flex: 1;
-  min-width: 0;
-  background: var(--surface-2);
+.composer-file {
+  display: none;
+}
+.composer-hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--faint);
+  margin-top: -2px;
+  user-select: none;
+}
+.cmd-menu-root {
+  position: relative;
+  flex: none;
+}
+.cmd-plus {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  padding: 7px 10px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.cmd-plus:hover,
+.cmd-plus:focus-visible {
   color: var(--text);
+  border-color: var(--border-strong);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.composer-popover {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% + 8px);
+  max-height: 236px;
+  overflow: auto;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-float);
+  z-index: 40;
+}
+.cmd-menu {
+  left: 0;
+  right: auto;
+  width: min(260px, calc(100vw - 32px));
+}
+.cmd-row {
+  width: 100%;
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  grid-template-areas:
+    "icon label"
+    "icon hint";
+  column-gap: 8px;
+  align-items: center;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  padding: 6px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+.cmd-row svg {
+  grid-area: icon;
+  color: var(--muted);
+  stroke: currentColor;
+}
+.cmd-row span {
+  grid-area: label;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
+}
+.cmd-row small {
+  grid-area: hint;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--faint);
+}
+.cmd-row.is-active,
+.cmd-row:hover,
+.cmd-row:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+.cmd-row.is-active svg {
+  color: var(--accent);
+}
+.cmd-empty {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--faint);
+}
+.composer-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.composer-image {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.composer-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.composer-image button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+}
+.ask {
+  min-width: 0;
+  background: transparent;
+  border: none;
+  padding: 2px 2px 0;
+  color: var(--text);
+  font-size: 12.5px;
   outline: none;
   font-family: var(--font-ui);
-}
-.ask:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  line-height: 1.45;
+  field-sizing: content; /* 随内容自增高（Electron/Chromium 支持；不支持则退回 min-height） */
+  min-height: 22px;
+  max-height: 150px;
+  resize: none;
 }
 .ask:disabled {
   opacity: 0.6;
@@ -376,18 +687,102 @@
 .ask::placeholder {
   color: var(--faint);
 }
-.mount {
-  display: flex;
+
+/* 圆形 accent 发送键（同 ChatView，内嵌输入框右下）；忙时变停止 */
+.round-send {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border: none;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.round-send svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+}
+
+/* ==== 图标按钮根治：清 UA 默认 padding(Chrome 给 button 塞了 1px 6px，会把图标顶偏) +
+   块级 svg + line-height:0，杜绝图标不居中 / 次像素偏移。
+   新增图标按钮请沿用：容器 grid/inline-flex + place/items center，并进这三条规则。 ==== */
+.cmd-plus,
+.round-send,
+.head-icon,
+.chatview .composer .send {
+  padding: 0;
+  line-height: 0;
+}
+.cmd-plus svg,
+.round-send svg,
+.head-icon svg,
+.chatview .composer .send svg {
+  display: block;
+}
+.round-send.is-stop {
+  background: var(--muted);
+}
+.round-send:disabled {
+  background: var(--surface-2);
+  color: var(--faint);
+  border: 1px solid var(--border);
+  cursor: default;
+}
+
+/* 挂载祖先 = 样式化开关 pill（替原生 checkbox），内嵌输入框左下 */
+.mount-toggle {
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+  height: 26px;
   font-size: 10.5px;
   color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 0 11px;
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
 }
-.mount input {
-  accent-color: var(--accent);
+.mount-toggle::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.mount-toggle:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.mount-toggle.on {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-soft);
+}
+.mount-toggle.on::before {
+  background: var(--accent);
+}
+
+/* NodeResizer 手柄/边线（选中时出现，走 accent） */
+/* NodeResizer：手柄与边线全透明但仍可拖——靠光标变化（贴边/贴角 resize 光标）
+   触发缩放，像 macOS 窗口，零可见圆点/边框。特异性压过 React Flow 默认。 */
+.react-flow__resize-control.rz-line {
+  border: none;
+}
+.react-flow__resize-control.rz-handle {
+  width: 14px;
+  height: 14px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
 /* handles / edges / minimap */

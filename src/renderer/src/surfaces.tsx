@@ -11,6 +11,10 @@ export interface SurfaceCtx {
   settings: SettingsPayload | null;
   reloadSettings: () => void;
   theme: "light" | "dark";
+  focusNodeId?: string | null;
+  clearFocusNode?: () => void;
+  treeVersion: number;
+  bumpTreeVersion: () => void;
 }
 
 export interface Surface {
@@ -21,17 +25,17 @@ export interface Surface {
   badge?: (ctx: SurfaceCtx) => string | number | null;
 }
 
-// ---- 工作区主面（对话/画布合一；本阶段单节点聊天）----
+// ---- 会话主面（对话/画布合一；本阶段单节点聊天）----
 function WorkspacePanel({ ctx }: { ctx: SurfaceCtx }) {
   const ws = ctx.workspaces.find((w) => w.id === ctx.activeWorkspaceId);
   const noKey = ctx.settings && !ctx.settings.hasKey;
   if (!ws) {
     return (
       <div className="surface-empty">
-        <div className="big">还没有工作区</div>
-        <div className="sub">一张画布 = 一个研究会话。</div>
+        <div className="big">还没有会话</div>
+        <div className="sub">一个会话 = 一张可分支的研究画布。</div>
         <button className="btn" onClick={ctx.createWorkspace}>
-          <IconPlus /> 新建工作区
+          <IconPlus /> 新建会话
         </button>
       </div>
     );
@@ -45,6 +49,9 @@ function WorkspacePanel({ ctx }: { ctx: SurfaceCtx }) {
       isDark={ctx.theme === "dark"}
       noKey={Boolean(noKey)}
       goSettings={ctx.goSettings}
+      focusNodeId={ctx.focusNodeId}
+      onFocusedNode={ctx.clearFocusNode}
+      onTreeChange={ctx.bumpTreeVersion}
     />
   );
 }
@@ -156,7 +163,7 @@ function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
 }
 
 export const SURFACES: Surface[] = [
-  { id: "workspace", label: "工作区", icon: IconWorkspace, Panel: WorkspacePanel },
+  { id: "workspace", label: "会话", icon: IconWorkspace, Panel: WorkspacePanel },
   {
     id: "observatory",
     label: "观察哨",

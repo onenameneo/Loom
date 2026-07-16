@@ -12,7 +12,7 @@ import {
 } from "./settings";
 
 // ---------------------------------------------------------------------------
-// 主进程：持久化(store) + 设置(safeStorage) + 工作区 + 画布引擎(pi 多节点)。
+// 主进程：持久化(store) + 设置(safeStorage) + 会话 + 画布引擎(pi 多节点)。
 // 模型配置走「设置优先、env 回退」(resolveModelConfig)。对话/分支画布逻辑在
 // canvas.ts（每节点一个 pi Agent + 自定义 convertToLlm 分支上下文装配）。
 // ---------------------------------------------------------------------------
@@ -81,7 +81,7 @@ function buildMenu() {
     {
       label: "文件",
       submenu: [
-        { label: "新建工作区", accelerator: "CmdOrCtrl+N", click: menuAction("new-workspace") },
+        { label: "新建会话", accelerator: "CmdOrCtrl+N", click: menuAction("new-workspace") },
         { type: "separator" as const },
         { label: "设置…", accelerator: "CmdOrCtrl+,", click: menuAction("settings") },
         isMac ? { role: "close" as const } : { role: "quit" as const },
@@ -91,7 +91,7 @@ function buildMenu() {
     {
       label: "视图",
       submenu: [
-        { label: "工作区", accelerator: "CmdOrCtrl+1", click: menuAction("surface:workspace") },
+        { label: "会话", accelerator: "CmdOrCtrl+1", click: menuAction("surface:workspace") },
         { label: "观察哨", accelerator: "CmdOrCtrl+2", click: menuAction("surface:observatory") },
         { type: "separator" as const },
         { role: "toggleDevTools" as const },
@@ -113,7 +113,9 @@ function createWindow() {
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 14, y: 16 },
     vibrancy: "sidebar",
-    backgroundColor: "#ffffff",
+    visualEffectState: "active",
+    // 透明窗底，让 macOS 原生 vibrancy 材质透过半透明侧栏显出来（不透明底会盖掉毛玻璃）。
+    backgroundColor: "#00000000",
     webPreferences: { preload: join(__dirname, "../preload/index.js"), sandbox: false },
   });
   win.on("ready-to-show", () => win?.show());

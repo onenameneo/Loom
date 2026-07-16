@@ -52,6 +52,8 @@ export interface NodeRecord {
   parentId?: string;
   title: string;
   seed?: unknown;
+  systemPrompt?: string;
+  model?: string;
   mountAncestors: boolean;
   messages: PersistedMessage[];
 }
@@ -77,9 +79,13 @@ export interface Store {
     seed?: unknown;
     mountAncestors?: boolean;
   }): NodeRecord;
-  updateNode(id: string, patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown }>): void;
+  updateNode(
+    id: string,
+    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: string }>,
+  ): void;
   deleteNode(id: string): void;
   appendMessages(nodeId: string, msgs: PersistedMessage[]): void;
+  deleteMessagesFrom(nodeId: string, seq: number): void;
   listMessages(nodeId: string): PersistedMessage[];
 }
 

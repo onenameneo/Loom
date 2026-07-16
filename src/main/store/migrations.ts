@@ -111,7 +111,7 @@ export function importLegacyJsonIfEmpty(db: Database.Database, userDataDir: stri
     for (const ws of data.workspaces) {
       const workspace: Workspace = {
         id: String(ws.id),
-        name: String(ws.name || "未命名工作区"),
+        name: String(ws.name || "未命名会话"),
         createdAt: Number(ws.createdAt || Date.now()),
         updatedAt: Number(ws.updatedAt || Date.now()),
         pinned: Boolean(ws.pinned),

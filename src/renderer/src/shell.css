@@ -15,6 +15,22 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* 全局焦点策略：鼠标点击不出浏览器默认（橙色）描边；只有键盘 focus-visible
+   才给 on-style 的 accent 细环（保住可访问性）。:where 零特异性，不覆盖组件自带焦点样式。 */
+:where(button, [role="button"], a, summary, [tabindex]):focus:not(:focus-visible) {
+  outline: none;
+}
+:where(button, [role="button"], a, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* lucide 图标默认 inline 带基线间隙，会让居中按钮里的图标竖直偏移；
+   统一 block 根治所有图标的居中问题（lucide-react 给每个 svg 都加了 .lucide 类）。 */
+.lucide {
+  display: block;
+}
+
 .app {
   display: flex;
   height: 100vh;
@@ -113,6 +129,7 @@ body {
   margin-left: auto;
   width: 18px;
   height: 18px;
+  padding: 0;
   display: grid;
   place-items: center;
   border: none;
@@ -126,6 +143,7 @@ body {
   color: var(--text);
 }
 .sb-add svg {
+  display: block;
   width: 13px;
   height: 13px;
   stroke: currentColor;
@@ -140,12 +158,34 @@ body {
 .sb-ws {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   padding: 6px 9px;
   border-radius: var(--r-sm);
   color: var(--muted);
   font-size: 12.5px;
   cursor: pointer;
+}
+.sb-ws-chev {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-left: -3px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  line-height: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+.sb-ws-chev:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+.sb-ws-chev svg {
+  display: block;
 }
 .sb-ws:hover {
   background: color-mix(in srgb, var(--text) 6%, transparent);
@@ -190,47 +230,27 @@ body {
   color: var(--text);
 }
 
-.sb-foot {
-  margin-top: auto;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 10px 8px 4px;
-  border-top: 1px solid var(--border);
-}
-.sb-ava {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-  flex: none;
-}
-.sb-name {
-  font-size: 12px;
-  color: var(--text);
-}
-.sb-name small {
-  display: block;
-  color: var(--faint);
-  font-size: 10.5px;
-}
+/* 明暗切换：并入顶部标题栏右侧的极简 ghost 按钮（底部用户区已移除）。 */
 .theme-toggle {
   margin-left: auto;
-  width: 28px;
-  height: 28px;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
   display: grid;
   place-items: center;
   border-radius: var(--r-sm);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--muted);
+  border: none;
+  background: transparent;
+  color: var(--faint);
   cursor: pointer;
 }
 .theme-toggle:hover {
   color: var(--text);
-  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 .theme-toggle svg {
+  display: block;
   width: 15px;
   height: 15px;
   stroke: currentColor;
@@ -492,4 +512,40 @@ body {
 }
 .ws-actions button svg {
   display: block;
+}
+/* 分支大纲 = 纯缩进嵌套（无竖线，靠缩进 + 圆点表达层级，贴 DESIGN.md 克制） */
+.sb-outline {
+  margin: 1px 0 6px;
+  display: flex;
+  flex-direction: column;
+}
+.sb-branch {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--faint);
+  font-size: 11.5px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  text-align: left;
+}
+.sb-branch:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+.sb-branch span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branch-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--border-strong);
+  flex: none;
 }

@@ -3,8 +3,8 @@ import type { CanvasNodeDto } from "../env";
 import Canvas from "./Canvas";
 import ChatView from "./ChatView";
 
-// 工作区主视图：对话优先、按需成画布。
-//   · 只有根节点（无分支）→ 居中聊天视图（ChatView）。
+// 会话主视图：对话优先、按需成画布。
+//   · 只有主线（无分支）→ 居中聊天视图（ChatView）。
 //   · 划词岔出第一个分支，或手动「展开画布」→ 切成 React Flow 画布（Canvas）。
 // 两个视图共用 window.api.canvas；root 节点消息主进程有镜像，切换不丢历史。
 export default function Workspace({
@@ -14,6 +14,9 @@ export default function Workspace({
   isDark,
   noKey,
   goSettings,
+  focusNodeId,
+  onFocusedNode,
+  onTreeChange,
 }: {
   workspaceId: string;
   workspaceName: string;
@@ -21,6 +24,9 @@ export default function Workspace({
   isDark: boolean;
   noKey: boolean;
   goSettings: () => void;
+  focusNodeId?: string | null;
+  onFocusedNode?: () => void;
+  onTreeChange?: () => void;
 }) {
   const [root, setRoot] = useState<CanvasNodeDto | null>(null);
   const [nodeCount, setNodeCount] = useState(1);
@@ -29,7 +35,7 @@ export default function Workspace({
   const reload = useCallback(async () => {
     let dtos: CanvasNodeDto[];
     if (window.api) dtos = await window.api.canvas.open(workspaceId);
-    else dtos = [{ id: "root", title: "根节点", mountAncestors: false, messages: [] }];
+    else dtos = [{ id: "root", workspaceId, title: "主线", mountAncestors: false, messages: [] }];
     setRoot(dtos.find((d) => !d.parentId) ?? dtos[0] ?? null);
     setNodeCount(dtos.length);
   }, [workspaceId]);
@@ -48,12 +54,13 @@ export default function Workspace({
         await window.api.canvas.create({
           workspaceId,
           parentId: root.id,
-          seed: { text: seedText, from: workspaceName, parent: root.id },
+          seed: { text: seedText, from: root.title || "主线", parent: root.id },
         });
       }
       setForceCanvas(true); // 切到画布；Canvas 会自行 open 载入 root+新分支
+      onTreeChange?.();
     },
-    [root, workspaceId, workspaceName],
+    [root, workspaceId, workspaceName, onTreeChange],
   );
 
   return (
@@ -74,10 +81,24 @@ export default function Workspace({
       </div>
       {isCanvas || !root ? (
         <div className="canvas-wrap">
-          <Canvas workspaceId={workspaceId} model={model} isDark={isDark} />
+          <Canvas
+            workspaceId={workspaceId}
+            model={model}
+            isDark={isDark}
+            focusNodeId={focusNodeId}
+            onFocused={onFocusedNode}
+            onTreeChange={onTreeChange}
+          />
         </div>
       ) : (
-        <ChatView nodeId={root.id} initialMessages={root.messages} onBranch={branchFromChat} />
+        <ChatView
+          nodeId={root.id}
+          initialMessages={root.messages}
+          initialMount={root.mountAncestors}
+          systemPrompt={root.systemPrompt}
+          model={root.model || model}
+          onBranch={branchFromChat}
+        />
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain } from "electron";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { Message } from "@mariozechner/pi-ai";
+import type { ImageContent, Message, TextContent } from "@mariozechner/pi-ai";
 import type { NodeRecord, PersistedMessage, Store } from "./store/store";
 import { resolveModelConfig } from "./settings";
 
@@ -13,7 +13,7 @@ import { resolveModelConfig } from "./settings";
 //                现取 [ (可选)祖先链 → (可选)seed 片段 → 本节点消息 ] 组装。
 //   · 事件     ：canvas:event { nodeId, type, payload }，type 复用 P0。
 //
-// 图存储写透 Store，内存 Map 只作为当前工作区的读快照。
+// 图存储写透 Store，内存 Map 只作为当前会话的读快照。
 // ---------------------------------------------------------------------------
 
 const SYSTEM_PROMPT = "你是一个冷静、精确、克制的思考助手。回答直接，不啰嗦。";
@@ -27,8 +27,11 @@ interface CanvasNode {
   parentId?: string;
   title: string;
   seed?: Seed;
+  systemPrompt?: string;
+  model?: string;
   mountAncestors: boolean;
   messages: AgentMessage[];
+  messageMeta: unknown[];
 }
 
 /** 主进程侧一个 pi Message 的最小构造（发给 provider 只认 role + content）。 */
@@ -79,8 +82,11 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
       parentId: record.parentId,
       title: record.title,
       seed: record.seed as Seed | undefined,
+      systemPrompt: record.systemPrompt,
+      model: record.model,
       mountAncestors: record.mountAncestors,
       messages: record.messages.map((m) => m.content),
+      messageMeta: record.messages.map((m) => m.meta),
     };
   }
 
@@ -181,19 +187,20 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   }
 
   // ---- 模型构建（沿用 P0：设置优先、env 回退；known 模型当接线模板）----------
-  async function buildModel() {
+  async function buildModel(modelId?: string) {
     const { getModel, getModels } = await import("@mariozechner/pi-ai");
     const cfg = resolveModelConfig(store);
-    const known = getModels("anthropic").some((m: any) => m.id === cfg.model);
+    const selected = modelId || cfg.model;
+    const known = getModels("anthropic").some((m: any) => m.id === selected);
     // getModel 返回的是 pi-ai 注册表里的共享引用——必须浅拷贝后再改，
     // 否则会污染注册表（把 claude 模板的 id 改成 mimo），下个节点 build 时
     // known 误判为 true、getModel 又查不到 → “Cannot set ... 'baseUrl'”。
-    const base = getModel("anthropic", (known ? cfg.model : "claude-sonnet-4-5") as any);
-    if (!base) throw new Error(`未找到可用的模型模板（model=${cfg.model}）。`);
+    const base = getModel("anthropic", (known ? selected : "claude-sonnet-4-5") as any);
+    if (!base) throw new Error(`未找到可用的模型模板（model=${selected}）。`);
     const model = { ...base };
     if (!known) {
-      model.id = cfg.model;
-      model.name = cfg.model;
+      model.id = selected;
+      model.name = selected;
     }
     if (cfg.baseUrl) model.baseUrl = cfg.baseUrl;
     return model;
@@ -204,11 +211,11 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     const existing = agents.get(nodeId);
     if (existing) return existing;
 
+    const node = loadNode(nodeId);
     const { Agent } = await import("@mariozechner/pi-agent-core");
-    const model = await buildModel();
-
+    const model = await buildModel(node?.model);
     const agent = new Agent({
-      initialState: { systemPrompt: SYSTEM_PROMPT, model, messages: [...(loadNode(nodeId)?.messages ?? [])] },
+      initialState: { systemPrompt: node?.systemPrompt || SYSTEM_PROMPT, model, messages: [...(node?.messages ?? [])] },
       getApiKey: async () => resolveModelConfig(store).apiKey,
       // ★ 分支上下文引擎：本节点发消息前，从图里现取上下文装配。
       convertToLlm: (own: any[]) => {
@@ -248,29 +255,89 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
 
   const dto = (n: CanvasNode) => ({
     id: n.id,
+    workspaceId: n.workspaceId,
     parentId: n.parentId,
     title: n.title,
     seed: n.seed,
     mountAncestors: n.mountAncestors,
-    messages: n.messages.flatMap((m) => {
+    systemPrompt: n.systemPrompt,
+    model: n.model,
+    messages: n.messages.flatMap((m, seq) => {
       const role = roleOf(m);
       if (role !== "user" && role !== "assistant") return [];
-      return [{ role, text: textOf(m) }];
+      const usage = (m as any)?.usage;
+      return [{ role, text: textOf(m), images: imagesOf(m), seq, usage, meta: n.messageMeta[seq] }];
     }),
   });
+
+  function imagesOf(msg: AgentMessage): { data: string; mimeType: string }[] | undefined {
+    const content = (msg as any)?.content;
+    if (!Array.isArray(content)) return undefined;
+    const images = content
+      .filter((c: any): c is ImageContent => c?.type === "image" && typeof c.data === "string" && typeof c.mimeType === "string")
+      .map((c) => ({ data: c.data, mimeType: c.mimeType }));
+    return images.length ? images : undefined;
+  }
+
+  function descendantsOf(nodeId: string): string[] {
+    const out: string[] = [];
+    const walk = (id: string) => {
+      for (const node of nodes.values()) {
+        if (node.parentId === id) {
+          out.push(node.id);
+          walk(node.id);
+        }
+      }
+    };
+    walk(nodeId);
+    return out;
+  }
+
+  function syncTranscript(agent: any, node: CanvasNode) {
+    agent.state.messages = [...node.messages];
+  }
+
+  function truncateTranscript(node: CanvasNode, seqFrom: number, agent?: any) {
+    store.deleteMessagesFrom(node.id, seqFrom);
+    node.messages = node.messages.slice(0, seqFrom);
+    node.messageMeta = node.messageMeta.slice(0, seqFrom);
+    if (agent) syncTranscript(agent, node);
+  }
+
+  function appendDelta(node: CanvasNode, agent: any, from: number) {
+    const nextMessages: AgentMessage[] = agent?.state?.messages ?? [];
+    const delta = nextMessages.slice(from);
+    if (delta.length > 0) {
+      store.appendMessages(node.id, delta.map(persisted));
+      node.messages.push(...delta);
+      node.messageMeta.push(...delta.map(() => undefined));
+    }
+  }
+
+  async function continueFrom(node: CanvasNode, agent: any) {
+    const from = node.messages.length;
+    await agent.continue();
+    appendDelta(node, agent, from);
+  }
+
+  async function promptFrom(node: CanvasNode, agent: any, msg: AgentMessage) {
+    const from = node.messages.length;
+    await agent.prompt(msg);
+    appendDelta(node, agent, from);
+  }
 
   ipcMain.handle("node:list", (_e, workspaceId: string) => {
     return hydrateWorkspace(workspaceId).map(dto);
   });
 
-  // 打开工作区：原子地「返回已有节点，或没有则建一个根」。
+  // 打开会话：原子地「返回已有节点，或没有则建一条主线」。
   // IPC 处理器同步无 await → 并发调用（如 StrictMode 双挂载）在主进程串行执行，
   // 第二次调用能看到第一次建的根，避免重复建根的竞态。
   ipcMain.handle("node:open", (_e, workspaceId: string) => {
     let list = hydrateWorkspace(workspaceId);
     if (list.length === 0) {
       const root = toCanvasNode(
-        store.createNode({ workspaceId, title: "根节点", mountAncestors: false }),
+        store.createNode({ workspaceId, title: "主线", mountAncestors: false }),
       );
       nodes.set(root.id, root);
       list = [root];
@@ -282,7 +349,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     const node = toCanvasNode(store.createNode({
       workspaceId: arg.workspaceId,
       parentId: arg.parentId,
-      title: arg.title ?? (arg.seed ? "新分支" : "根节点"),
+      title: arg.title ?? (arg.seed ? "新分支" : "主线"),
       seed: arg.seed,
       mountAncestors: false,
     }));
@@ -290,7 +357,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     return dto(node);
   });
 
-  ipcMain.handle("node:send", async (_e, arg: { nodeId: string; text: string }) => {
+  ipcMain.handle("node:send", async (_e, arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[] }) => {
     const node = loadNode(arg.nodeId);
     if (!node) {
       send(arg.nodeId, "error", "节点不存在。");
@@ -302,22 +369,111 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     }
     try {
       const agent = await getAgent(arg.nodeId);
-      const userMessage: AgentMessage = { role: "user", content: arg.text, timestamp: Date.now() };
+      const text = arg.text.trim();
+      const images = (arg.images ?? []).filter((img) => img.data && img.mimeType);
+      const content =
+        images.length > 0
+          ? [
+              ...(text ? [{ type: "text", text } satisfies TextContent] : []),
+              ...images.map((img) => ({ type: "image", data: img.data, mimeType: img.mimeType }) satisfies ImageContent),
+            ]
+          : text;
+      const userMessage: AgentMessage = { role: "user", content, timestamp: Date.now() };
       store.appendMessages(arg.nodeId, [persisted(userMessage)]);
       node.messages.push(userMessage);
+      node.messageMeta.push(undefined);
 
-      await agent.prompt(userMessage);
-      const nextMessages: AgentMessage[] = agent?.state?.messages ?? [];
-      const delta = nextMessages.slice(node.messages.length);
-      if (delta.length > 0) {
-        store.appendMessages(arg.nodeId, delta.map(persisted));
-        node.messages.push(...delta);
-      }
+      await promptFrom(node, agent, userMessage);
       return { ok: true };
     } catch (err: any) {
       send(arg.nodeId, "error", String(err?.message ?? err));
       return { ok: false };
     }
+  });
+
+  ipcMain.handle("node:abort", (_e, nodeId: string) => {
+    agents.get(nodeId)?.abort?.();
+    return { ok: true };
+  });
+
+  ipcMain.handle("node:regenerate", async (_e, nodeId: string) => {
+    const node = loadNode(nodeId);
+    if (!node) {
+      send(nodeId, "error", "节点不存在。");
+      return { ok: false };
+    }
+    if (!resolveModelConfig(store).apiKey) {
+      send(nodeId, "error", "未配置 API key（去设置填写，或设置 ANTHROPIC_API_KEY）。");
+      return { ok: false };
+    }
+    const lastUser = [...node.messages].map(roleOf).lastIndexOf("user");
+    if (lastUser < 0) return { ok: false };
+    try {
+      const agent = await getAgent(nodeId);
+      truncateTranscript(node, lastUser + 1, agent);
+      await continueFrom(node, agent);
+      return { ok: true };
+    } catch (err: any) {
+      send(nodeId, "error", String(err?.message ?? err));
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle("node:editResend", async (_e, arg: { nodeId: string; seq: number; text: string }) => {
+    const node = loadNode(arg.nodeId);
+    const text = arg.text.trim();
+    if (!node || !text) {
+      if (!node) send(arg.nodeId, "error", "节点不存在。");
+      return { ok: false };
+    }
+    if (roleOf(node.messages[arg.seq]) !== "user") return { ok: false };
+    if (!resolveModelConfig(store).apiKey) {
+      send(arg.nodeId, "error", "未配置 API key（去设置填写，或设置 ANTHROPIC_API_KEY）。");
+      return { ok: false };
+    }
+    try {
+      const agent = await getAgent(arg.nodeId);
+      truncateTranscript(node, arg.seq, agent);
+      const userMessage: AgentMessage = { role: "user", content: text, timestamp: Date.now() };
+      await promptFrom(node, agent, userMessage);
+      return { ok: true };
+    } catch (err: any) {
+      send(arg.nodeId, "error", String(err?.message ?? err));
+      return { ok: false };
+    }
+  });
+
+  ipcMain.handle("node:setSystemPrompt", (_e, arg: { nodeId: string; text: string }) => {
+    const node = loadNode(arg.nodeId);
+    const text = arg.text.trim();
+    store.updateNode(arg.nodeId, { systemPrompt: text });
+    if (node) node.systemPrompt = text || undefined;
+    agents.delete(arg.nodeId);
+    return { ok: true };
+  });
+
+  ipcMain.handle("node:update", (_e, arg: { nodeId: string; title?: string }) => {
+    const node = loadNode(arg.nodeId);
+    if (!node) return { ok: false };
+    const title = arg.title?.trim();
+    if (title) {
+      node.title = title;
+      store.updateNode(arg.nodeId, { title });
+    }
+    return { ok: true, node: dto(node) };
+  });
+
+  ipcMain.handle("node:delete", (_e, nodeId: string) => {
+    const target = loadNode(nodeId);
+    if (!target || !target.parentId) return { ok: false, deletedIds: [] };
+    hydrateWorkspace(target.workspaceId);
+    const deletedIds = [nodeId, ...descendantsOf(nodeId)];
+    store.deleteNode(nodeId);
+    for (const id of deletedIds) {
+      nodes.delete(id);
+      agents.delete(id);
+    }
+    return { ok: true, deletedIds };
   });
 
   ipcMain.handle("node:setMount", (_e, arg: { nodeId: string; on: boolean }) => {
@@ -331,9 +487,27 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
 
   ipcMain.handle("node:budget", (_e, nodeId: string) => budget(nodeId));
 
+  ipcMain.handle("node:models", async () => {
+    const { getModels } = await import("@mariozechner/pi-ai");
+    return getModels("anthropic").map((m: any) => ({ id: String(m.id), name: String(m.name || m.id) }));
+  });
+
+  ipcMain.handle("node:setModel", (_e, arg: { nodeId: string; model: string }) => {
+    const node = loadNode(arg.nodeId);
+    const model = arg.model.trim();
+    store.updateNode(arg.nodeId, { model });
+    if (node) node.model = model || undefined;
+    agents.delete(arg.nodeId);
+    return { ok: true };
+  });
+
   ipcMain.handle("node:reset", (_e, nodeId: string) => {
     const node = loadNode(nodeId);
-    if (node) node.messages = [];
+    store.deleteMessagesFrom(nodeId, 0);
+    if (node) {
+      node.messages = [];
+      node.messageMeta = [];
+    }
     agents.get(nodeId)?.reset?.();
     return { ok: true };
   });

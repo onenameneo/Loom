@@ -42,7 +42,7 @@ export function ConfirmDialog({
 export function RenameDialog({
   open,
   onOpenChange,
-  title = "重命名工作区",
+  title = "重命名会话",
   initial,
   onSubmit,
 }: {

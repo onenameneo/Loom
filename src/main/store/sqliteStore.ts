@@ -27,6 +27,7 @@ type NodeRow = {
   title: string;
   seed: string | null;
   mount_ancestors: number;
+  meta: string | null;
 };
 
 type MessageRow = {
@@ -135,7 +136,7 @@ export class SqliteStore implements Store {
       );
   }
 
-  createWorkspace(name = "未命名工作区"): Workspace {
+  createWorkspace(name = "未命名会话"): Workspace {
     const now = Date.now();
     const ws: Workspace = {
       id: id("ws"),
@@ -173,7 +174,7 @@ export class SqliteStore implements Store {
   listNodes(workspaceId: string): NodeRecord[] {
     const rows = this.db
       .prepare(
-        "SELECT id, workspace_id, parent_id, title, seed, mount_ancestors FROM nodes WHERE workspace_id = ? ORDER BY created_at, id",
+        "SELECT id, workspace_id, parent_id, title, seed, mount_ancestors, meta FROM nodes WHERE workspace_id = ? ORDER BY created_at, id",
       )
       .all(workspaceId) as NodeRow[];
     return rows.map((row) => this.toNode(row));
@@ -181,7 +182,7 @@ export class SqliteStore implements Store {
 
   getNode(id: string): NodeRecord | undefined {
     const row = this.db
-      .prepare("SELECT id, workspace_id, parent_id, title, seed, mount_ancestors FROM nodes WHERE id = ?")
+      .prepare("SELECT id, workspace_id, parent_id, title, seed, mount_ancestors, meta FROM nodes WHERE id = ?")
       .get(id) as NodeRow | undefined;
     return row ? this.toNode(row) : undefined;
   }
@@ -223,15 +224,33 @@ export class SqliteStore implements Store {
     return node;
   }
 
-  updateNode(id: string, patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown }>): void {
+  updateNode(
+    id: string,
+    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: string }>,
+  ): void {
     const current = this.getNode(id);
     if (!current) return;
+    const row = this.db.prepare("SELECT meta FROM nodes WHERE id = ?").get(id) as
+      | { meta: string | null }
+      | undefined;
+    const meta = decode<Record<string, unknown>>(row?.meta, {});
+    if (Object.prototype.hasOwnProperty.call(patch, "systemPrompt")) {
+      const text = patch.systemPrompt?.trim() ?? "";
+      if (text) meta.systemPrompt = text;
+      else delete meta.systemPrompt;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "model")) {
+      const model = patch.model?.trim() ?? "";
+      if (model) meta.model = model;
+      else delete meta.model;
+    }
     this.db
-      .prepare("UPDATE nodes SET title = ?, seed = ?, mount_ancestors = ?, updated_at = ? WHERE id = ?")
+      .prepare("UPDATE nodes SET title = ?, seed = ?, mount_ancestors = ?, meta = ?, updated_at = ? WHERE id = ?")
       .run(
         patch.title ?? current.title,
         Object.prototype.hasOwnProperty.call(patch, "seed") ? encode(patch.seed) : encode(current.seed),
         patch.mountAncestors ?? current.mountAncestors ? 1 : 0,
+        encode(meta),
         Date.now(),
         id,
       );
@@ -268,6 +287,14 @@ export class SqliteStore implements Store {
     tx(msgs);
   }
 
+  deleteMessagesFrom(nodeId: string, seq: number): void {
+    const tx = this.db.transaction(() => {
+      this.db.prepare("DELETE FROM messages WHERE node_id = ? AND seq >= ?").run(nodeId, seq);
+      this.db.prepare("UPDATE nodes SET updated_at = ? WHERE id = ?").run(Date.now(), nodeId);
+    });
+    tx();
+  }
+
   listMessages(nodeId: string): PersistedMessage[] {
     const rows = this.db
       .prepare("SELECT id, seq, role, content, meta FROM messages WHERE node_id = ? ORDER BY seq")
@@ -282,12 +309,17 @@ export class SqliteStore implements Store {
   }
 
   private toNode(row: NodeRow): NodeRecord {
+    const meta = decode<Record<string, unknown>>(row.meta, {});
+    const systemPrompt = typeof meta.systemPrompt === "string" ? meta.systemPrompt : undefined;
+    const model = typeof meta.model === "string" ? meta.model : undefined;
     return {
       id: row.id,
       workspaceId: row.workspace_id,
       parentId: row.parent_id ?? undefined,
       title: row.title,
       seed: decode(row.seed, undefined),
+      systemPrompt,
+      model,
       mountAncestors: Boolean(row.mount_ancestors),
       messages: this.listMessages(row.id),
     };

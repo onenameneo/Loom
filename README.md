@@ -1,7 +1,7 @@
-# Loom — 个人 agent 思考工作台
+# Loom — 个人 agent 思考会话台
 
 Electron + React + [pi-mono](https://github.com/earendil-works/pi) 的个人向 AI-agent 桌面应用。
-对话是入口，research/学习时铺开成无限分支画布，并盯着本地干活的 agent。
+对话是入口，一个会话可铺开成无限分支画布，并盯着本地干活的 agent。
 
 - 产品蓝图：[BLUEPRINT.md](BLUEPRINT.md)
 - 设计系统：[DESIGN.md](DESIGN.md)

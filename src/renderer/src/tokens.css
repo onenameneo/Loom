@@ -52,7 +52,7 @@
   --bg: var(--c-white);
   --surface: var(--c-white);
   --surface-2: var(--c-n-50);
-  --sidebar-glass: rgba(255, 255, 255, 0.6);
+  --sidebar-glass: rgba(255, 255, 255, 0.45);
   --text: var(--c-ink);
   --muted: var(--c-ink-2);
   --faint: var(--c-ink-3);
@@ -88,7 +88,7 @@
   --bg: var(--c-dbg);
   --surface: var(--c-d-1);
   --surface-2: var(--c-d-2);
-  --sidebar-glass: rgba(24, 24, 24, 0.55);
+  --sidebar-glass: rgba(24, 24, 24, 0.4);
   --text: var(--c-mist);
   --muted: var(--c-mist-2);
   --faint: var(--c-mist-3);

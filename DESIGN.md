@@ -31,7 +31,7 @@
 ### 语义 token（值取自参考实现）
 | 语义 | 亮色 | 暗色 | 用途 |
 |---|---|---|---|
-| `--bg` | `#ffffff` | `#181818` | 工作区/画布底（Codex 深底，永不纯黑） |
+| `--bg` | `#ffffff` | `#181818` | 会话/画布底（Codex 深底，永不纯黑） |
 | `--surface` | `#ffffff` | `#202020` | 卡片/面板 |
 | `--surface-2` | `#f5f5f5` | `#272727` | 输入框/次级面 |
 | `--sidebar-glass` | `rgba(255,255,255,.6)` | `rgba(19,21,24,.55)` | 半透明侧栏材质 |
@@ -39,7 +39,7 @@
 | `--border` / `--border-strong` | `rgba(0,0,0,.09/.15)` | `rgba(255,255,255,.10/.16)` | 发丝线 |
 | `--accent` | `#0169cc` Codex 蓝 | `#339cff` | **唯一** accent，只在选中/焦点/主操作/活跃分支 |
 | `--accent-soft` / `--accent-line` | teal 低透明 | teal 低透明 | 引文底/边线 |
-| `--ok` / `--warn` / `--err` | `#1f9d63`/`#c98a1a`/`#d64b45` | `#56c48a`/`#d3a24a`/`#e0685f` | **语义色=状态**（观察哨、工作区点） |
+| `--ok` / `--warn` / `--err` | `#1f9d63`/`#c98a1a`/`#d64b45` | `#56c48a`/`#d3a24a`/`#e0685f` | **语义色=状态**（观察哨、会话点） |
 | `--canvas-dot` / `--edge` | 低透明墨 | 低透明白 | 画布点阵/连线 |
 | `--shadow-float` | 见 tokens.css | 见 tokens.css | **只**用于悬浮/拖拽 |
 | `--code-bg/border/text` | `#f6f7f9`/发丝/`#24292f` | `#1b1b1b`/发丝/`#e6edf3` | 代码块容器 |
@@ -78,7 +78,7 @@
 
 ## 材质与明暗策略（易实现）
 - **主题切换**：根节点单个 `data-theme="light|dark"`，全部表面读语义 token 自动换。
-- **vibrancy 半透明**：macOS 用 Electron `BrowserWindow { vibrancy: 'sidebar', titleBarStyle: 'hiddenInset' }`；Windows 用 `backgroundMaterial: 'mica'`；其他平台降级为实心 `--sidebar-glass`（不透明兜底值）。侧栏/浮层可半透，工作区/画布主面保持实心以保证文字对比度。
+- **vibrancy 半透明**：macOS 用 Electron `BrowserWindow { vibrancy: 'sidebar', titleBarStyle: 'hiddenInset' }`；Windows 用 `backgroundMaterial: 'mica'`；其他平台降级为实心 `--sidebar-glass`（不透明兜底值）。侧栏/浮层可半透，会话/画布主面保持实心以保证文字对比度。
 - **可调性**：换 accent = 改 `--accent`/`--accent-hover`/`--accent-soft`/`--accent-line` 指向的 primitive；整体调冷暖 = 改中性 primitive。组件零改动。
 
 ## 决策记录

@@ -68,7 +68,7 @@ export class JsonStore implements Store {
         Number(b.pinned) - Number(a.pinned) || a.order - b.order || b.updatedAt - a.updatedAt,
     );
   }
-  createWorkspace(name = "未命名工作区"): Workspace {
+  createWorkspace(name = "未命名会话"): Workspace {
     const now = Date.now();
     const ws: Workspace = {
       id: `ws_${now.toString(36)}_${Math.floor(now % 100000).toString(36)}`,
@@ -118,9 +118,13 @@ export class JsonStore implements Store {
   }): NodeRecord {
     throw new Error("JsonStore does not implement canvas node persistence.");
   }
-  updateNode(_id: string, _patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown }>): void {}
+  updateNode(
+    _id: string,
+    _patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: string }>,
+  ): void {}
   deleteNode(_id: string): void {}
   appendMessages(_nodeId: string, _msgs: PersistedMessage[]): void {}
+  deleteMessagesFrom(_nodeId: string, _seq: number): void {}
   listMessages(_nodeId: string): PersistedMessage[] {
     return [];
   }

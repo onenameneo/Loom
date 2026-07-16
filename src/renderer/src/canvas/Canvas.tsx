@@ -4,6 +4,7 @@ import {
   BackgroundVariant,
   MiniMap,
   ReactFlow,
+  type ReactFlowInstance,
   useEdgesState,
   useNodesState,
   type Edge,
@@ -19,9 +20,10 @@ const defaultEdgeOptions = { type: "default" as const };
 
 const ROOT_X = 240;
 const ROOT_Y = 48;
-const CARD_W = 344;
+const CARD_W = 360;
+const NODE_H = 440; // 卡片默认高度（更高；可经 NodeResizer 拖拽改）
 const GAP_X = 150; // 父子之间的水平间距（子节点在父的右侧，拉开距离）
-const ROW_H = 240; // 兄弟/叶子之间的纵向间距
+const ROW_H = 300; // 兄弟/叶子之间的纵向间距（配合更高的卡片）
 
 // 从左到右生长的树布局：子节点在父的右侧、拉开水平距离；兄弟节点纵向错开，
 // 父节点纵向对齐到其子节点的中点。位置是纯 renderer 关注点（图存储不落盘位置）。
@@ -54,13 +56,32 @@ function layout(dtos: CanvasNodeDto[]): Record<string, { x: number; y: number }>
   return pos;
 }
 
-function toNode(dto: CanvasNodeDto, pos: { x: number; y: number }, model?: string, fresh = false): Node {
+function toNode(
+  dto: CanvasNodeDto,
+  pos: { x: number; y: number },
+  fallbackModel?: string,
+  fresh = false,
+  actions?: Record<string, unknown>,
+): Node {
   return {
     id: dto.id,
     type: "chatThread",
     position: pos,
     dragHandle: ".card__head", // 只有标题栏可拖，正文/输入框正常交互
-    data: { title: dto.title, seed: dto.seed, messages: dto.messages, mountAncestors: dto.mountAncestors, model, fresh },
+    style: { width: CARD_W, height: NODE_H },
+    data: {
+      workspaceId: dto.workspaceId,
+      parentId: dto.parentId,
+      title: dto.title,
+      seed: dto.seed,
+      messages: dto.messages,
+      mountAncestors: dto.mountAncestors,
+      systemPrompt: dto.systemPrompt,
+      model: dto.model || fallbackModel,
+      fresh,
+      isRoot: !dto.parentId,
+      ...actions,
+    },
   };
 }
 
@@ -79,16 +100,61 @@ export default function Canvas({
   workspaceId,
   model,
   isDark,
+  focusNodeId,
+  onFocused,
+  onTreeChange,
 }: {
   workspaceId: string;
   model?: string;
   isDark: boolean;
+  focusNodeId?: string | null;
+  onFocused?: () => void;
+  onTreeChange?: () => void;
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const titleRef = useRef(new Map<string, string>());
+  const flowRef = useRef<ReactFlowInstance | null>(null);
 
-  // 载入（或初始化）本工作区的节点树
+  const removeIds = useCallback(
+    (ids: string[]) => {
+      const dead = new Set(ids);
+      setNodes((nds) => nds.filter((n) => !dead.has(n.id)));
+      setEdges((eds) => eds.filter((e) => !dead.has(e.source) && !dead.has(e.target)));
+      for (const id of ids) titleRef.current.delete(id);
+    },
+    [setNodes, setEdges],
+  );
+
+  const actions = useCallback(
+    () => ({
+      onTreeChange,
+      onSelect: (id: string) => {
+        setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })));
+      },
+      onRename: async (id: string, title: string) => {
+        if (window.api) await window.api.canvas.update(id, { title });
+        titleRef.current.set(id, title);
+        setNodes((nds) =>
+          nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, title } } : n)),
+        );
+        onTreeChange?.();
+      },
+      onDelete: async (id: string) => {
+        if (!confirm("删除这个分支及其后代？")) return;
+        if (window.api) {
+          const r = await window.api.canvas.delete(id);
+          if (r.ok) removeIds(r.deletedIds);
+        } else {
+          removeIds([id]);
+        }
+        onTreeChange?.();
+      },
+    }),
+    [onTreeChange, removeIds, setNodes],
+  );
+
+  // 载入（或初始化）本会话的节点树
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -97,19 +163,35 @@ export default function Canvas({
         // 原子「打开」：主进程串行处理，避免 StrictMode 双挂载建出两个根。
         dtos = await window.api.canvas.open(workspaceId);
       } else {
-        // 浏览器预览：本地起一个根节点，画布仍可渲染
-        dtos = [{ id: "root", title: "根节点", mountAncestors: false, messages: [] }];
+        // 浏览器预览：本地起一条主线，画布仍可渲染
+        dtos = [{ id: "root", workspaceId, title: "主线", mountAncestors: false, messages: [] }];
       }
       if (!alive) return;
       const pos = layout(dtos);
       titleRef.current = new Map(dtos.map((d) => [d.id, d.title]));
-      setNodes(dtos.map((d) => toNode(d, pos[d.id] ?? { x: ROOT_X, y: ROOT_Y }, model)));
+      const nodeActions = actions();
+      setNodes(dtos.map((d) => toNode(d, pos[d.id] ?? { x: ROOT_X, y: ROOT_Y }, model, false, nodeActions)));
       setEdges(edgesFrom(dtos));
     })();
     return () => {
       alive = false;
     };
-  }, [workspaceId, model, setNodes, setEdges]);
+  }, [workspaceId, model, setNodes, setEdges, actions]);
+
+  useEffect(() => {
+    if (!focusNodeId) return;
+    setNodes((nds) => {
+      const target = nds.find((n) => n.id === focusNodeId);
+      if (target && flowRef.current) {
+        flowRef.current.setCenter(target.position.x + CARD_W / 2, target.position.y + 120, {
+          zoom: 1,
+          duration: 260,
+        });
+      }
+      return nds.map((n) => ({ ...n, selected: n.id === focusNodeId }));
+    });
+    onFocused?.();
+  }, [focusNodeId, onFocused, setNodes]);
 
   const onBranch = useCallback(
     async (sourceId: string, seedText: string) => {
@@ -123,6 +205,7 @@ export default function Canvas({
         id = `local_${Math.round(performance.now())}`;
       }
       titleRef.current.set(id, "新分支");
+      const nodeActions = actions();
       setNodes((nds) => {
         const src = nds.find((n) => n.id === sourceId);
         const baseX = src ? src.position.x : ROOT_X;
@@ -132,16 +215,29 @@ export default function Canvas({
           id,
           type: "chatThread",
           dragHandle: ".card__head",
+          style: { width: CARD_W, height: NODE_H },
           // 出现在来源节点的右侧、拉开距离；多个兄弟纵向错开
           position: { x: baseX + CARD_W + GAP_X, y: baseY + siblings * ROW_H },
-          data: { title: "新分支", seed, messages: [], mountAncestors: false, model, fresh: true },
+          data: {
+            workspaceId,
+            parentId: sourceId,
+            title: "新分支",
+            seed,
+            messages: [],
+            mountAncestors: false,
+            model,
+            fresh: true,
+            isRoot: false,
+            ...nodeActions,
+          },
         };
         return nds.concat(newNode);
       });
       const label = seedText.length > 14 ? `${seedText.slice(0, 14)}…` : seedText;
       setEdges((eds) => eds.concat({ id: `e-${sourceId}-${id}`, source: sourceId, target: id, label }));
+      onTreeChange?.();
     },
-    [workspaceId, model, setNodes, setEdges],
+    [workspaceId, model, setNodes, setEdges, actions, onTreeChange],
   );
 
   return (
@@ -152,6 +248,9 @@ export default function Canvas({
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onInit={(instance) => {
+          flowRef.current = instance;
+        }}
         defaultEdgeOptions={defaultEdgeOptions}
         fitView
         fitViewOptions={{ padding: 0.28, maxZoom: 1 }}
