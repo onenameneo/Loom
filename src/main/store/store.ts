@@ -17,9 +17,14 @@ export interface AppearanceSettings {
   density: Density;
 }
 
+export interface MonitorSettings {
+  notify: boolean;
+}
+
 export interface Settings {
   access: AccessSettings;
   appearance: AppearanceSettings;
+  monitor: MonitorSettings;
   apiKeyEnc?: string; // safeStorage 加密后的 base64；明文永不落盘
 }
 
@@ -93,6 +98,7 @@ export interface Store {
 export const DEFAULT_SETTINGS: Settings = {
   access: { provider: "anthropic", baseUrl: "", model: "" },
   appearance: { theme: "system", density: "comfortable" },
+  monitor: { notify: true },
 };
 
 export const SCHEMA_VERSION = 1;

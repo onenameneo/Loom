@@ -36,6 +36,22 @@ export interface CanvasEvent {
   payload?: unknown;
 }
 
+export interface AgentProc {
+  pid: number;
+  tool: "codex" | "claude";
+  cwd?: string;
+  project?: string;
+  startedAt: number;
+  cpu: number;
+  status: "running" | "idle";
+}
+
+export interface MonitorEvent {
+  type: "snapshot" | "started" | "stopped";
+  agents: AgentProc[];
+  agent?: AgentProc;
+}
+
 export interface WorkspaceMeta {
   id: string;
   name: string;
@@ -48,6 +64,7 @@ export interface WorkspaceMeta {
 export interface SettingsPayload {
   access: { provider: string; baseUrl: string; model: string };
   appearance: { theme: "light" | "dark" | "system"; density: "comfortable" | "compact" };
+  monitor: { notify: boolean };
   sources: { baseUrl: string; model: string; key: string };
   hasKey: boolean;
   encryptionAvailable: boolean;
@@ -80,6 +97,11 @@ declare global {
         get: () => Promise<SettingsPayload>;
         set: (patch: any) => Promise<{ ok: boolean; appearance: any }>;
         setKey: (plain: string) => Promise<{ ok: boolean; encrypted: boolean }>;
+      };
+      monitor: {
+        list: () => Promise<AgentProc[]>;
+        onEvent: (cb: (e: MonitorEvent) => void) => () => void;
+        setNotify: (on: boolean) => Promise<{ ok: boolean }>;
       };
       workspaces: {
         list: () => Promise<WorkspaceMeta[]>;

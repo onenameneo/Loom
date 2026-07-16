@@ -1,6 +1,16 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 type CanvasEvent = { nodeId: string; type: string; payload?: unknown };
+type AgentProc = {
+  pid: number;
+  tool: "codex" | "claude";
+  cwd?: string;
+  project?: string;
+  startedAt: number;
+  cpu: number;
+  status: "running" | "idle";
+};
+type MonitorEvent = { type: "snapshot" | "started" | "stopped"; agents: AgentProc[]; agent?: AgentProc };
 
 const api = {
   canvas: {
@@ -39,6 +49,15 @@ const api = {
     set: (patch: any): Promise<any> => ipcRenderer.invoke("settings:set", patch),
     setKey: (plain: string): Promise<{ ok: boolean; encrypted: boolean }> =>
       ipcRenderer.invoke("settings:setKey", plain),
+  },
+  monitor: {
+    list: (): Promise<AgentProc[]> => ipcRenderer.invoke("monitor:list"),
+    onEvent: (cb: (e: MonitorEvent) => void) => {
+      const l = (_: unknown, d: MonitorEvent) => cb(d);
+      ipcRenderer.on("monitor:event", l);
+      return () => ipcRenderer.removeListener("monitor:event", l);
+    },
+    setNotify: (on: boolean): Promise<{ ok: boolean }> => ipcRenderer.invoke("monitor:setNotify", on),
   },
   workspaces: {
     list: (): Promise<any[]> => ipcRenderer.invoke("ws:list"),

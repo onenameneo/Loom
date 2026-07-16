@@ -11,6 +11,7 @@ export default function App() {
   const [treeVersion, setTreeVersion] = useState(0);
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [agentCount, setAgentCount] = useState(0);
 
   const reloadSettings = useCallback(async () => {
     if (!window.api) {
@@ -18,6 +19,7 @@ export default function App() {
       setSettings({
         access: { provider: "anthropic", baseUrl: "", model: "" },
         appearance: { theme: "light", density: "comfortable" },
+        monitor: { notify: true },
         sources: { baseUrl: "default", model: "default", key: "none" },
         hasKey: false,
         encryptionAvailable: true,
@@ -52,6 +54,19 @@ export default function App() {
     reloadSettings();
     reloadWorkspaces();
   }, [reloadSettings, reloadWorkspaces]);
+
+  useEffect(() => {
+    if (!window.api?.monitor) return;
+    let cancelled = false;
+    window.api.monitor.list().then((agents) => {
+      if (!cancelled) setAgentCount(agents.length);
+    });
+    const off = window.api.monitor.onEvent((event) => setAgentCount(event.agents.length));
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
 
   const createWorkspace = useCallback(async () => {
     if (!window.api) return;
@@ -92,6 +107,7 @@ export default function App() {
     clearFocusNode: () => setFocusNodeId(null),
     treeVersion,
     bumpTreeVersion: () => setTreeVersion((v) => v + 1),
+    agentCount,
   };
 
   const Active = SURFACES.find((s) => s.id === activeSurface) ?? SURFACES[0];

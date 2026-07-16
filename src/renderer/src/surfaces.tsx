@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { SettingsPayload, WorkspaceMeta } from "./env";
+import type { AgentProc, SettingsPayload, WorkspaceMeta } from "./env";
 import { IconEye, IconPlus, IconSettings, IconWorkspace } from "./icons";
 import Workspace from "./canvas/Workspace";
 
@@ -15,6 +15,7 @@ export interface SurfaceCtx {
   clearFocusNode?: () => void;
   treeVersion: number;
   bumpTreeVersion: () => void;
+  agentCount: number;
 }
 
 export interface Surface {
@@ -56,13 +57,84 @@ function WorkspacePanel({ ctx }: { ctx: SurfaceCtx }) {
   );
 }
 
-// ---- 观察哨主面（占位）----
-function ObservatoryPanel(_: { ctx: SurfaceCtx }) {
+function isDarwinRenderer(): boolean {
+  return /Mac/i.test(navigator.platform);
+}
+
+function formatDuration(startedAt: number, now: number): string {
+  const minutes = Math.max(0, Math.floor((now - startedAt) / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+function agentTitle(agent: AgentProc): string {
+  return agent.project || agent.cwd || `pid ${agent.pid}`;
+}
+
+// ---- 工作站主面（内部 surface id 仍沿用 observatory）----
+function MonitorPanel(_: { ctx: SurfaceCtx }) {
+  const [agents, setAgents] = useState<AgentProc[]>([]);
+  const [now, setNow] = useState(Date.now());
+  const supported = isDarwinRenderer();
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!window.api?.monitor) return;
+    let cancelled = false;
+    window.api.monitor.list().then((list) => {
+      if (!cancelled) setAgents(list);
+    });
+    const off = window.api.monitor.onEvent((event) => setAgents(event.agents));
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
+
+  if (!supported) {
+    return (
+      <div className="surface-empty">
+        <div className="big">工作站暂不支持当前平台</div>
+        <div className="sub">当前版本先支持 macOS 本地进程探测。</div>
+      </div>
+    );
+  }
+
+  if (agents.length === 0) {
+    return (
+      <div className="surface-empty">
+        <div className="big">暂无在跑的 agent</div>
+        <div className="sub">Codex / Claude Code 会话开始后会自动出现在这里。</div>
+      </div>
+    );
+  }
+
   return (
-    <div className="surface-empty">
-      <div className="big">观察哨</div>
-      <div className="sub mono">P3 · 被动监控本地 Codex / Claude Code（hooks + 日志）</div>
-      <div className="sub">此处为占位。真实监控由后续变更实现。</div>
+    <div className="monitor">
+      <div className="monitor-head">
+        <h2>工作站</h2>
+        <span>{agents.length} 个 agent 在跑</span>
+      </div>
+      <div className="agent-list">
+        {agents.map((agent) => (
+          <article className="agent-card" key={agent.pid}>
+            <div className="agent-tool">{agent.tool}</div>
+            <div className="agent-main">
+              <div className="agent-project">{agentTitle(agent)}</div>
+              {agent.cwd && <div className="agent-path">{agent.cwd}</div>}
+            </div>
+            <div className="agent-meta">
+              <span className={`agent-status ${agent.status}`} aria-label={agent.status} />
+              <span>已运行 {formatDuration(agent.startedAt, now)}</span>
+            </div>
+          </article>
+        ))}
+      </div>
     </div>
   );
 }
@@ -81,6 +153,7 @@ function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [model, setModel] = useState("");
   const [keyInput, setKeyInput] = useState("");
   const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
+  const [monitorNotify, setMonitorNotify] = useState(true);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -88,12 +161,18 @@ function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
     setBaseUrl(s.access.baseUrl);
     setModel(s.access.model);
     setTheme(s.appearance.theme);
+    setMonitorNotify(s.monitor.notify);
   }, [s]);
 
   if (!s) return <div className="surface-empty">加载中…</div>;
 
   async function save() {
-    await window.api.settings.set({ access: { provider: "anthropic", baseUrl, model }, appearance: { theme } });
+    await window.api.settings.set({
+      access: { provider: "anthropic", baseUrl, model },
+      appearance: { theme },
+      monitor: { notify: monitorNotify },
+    });
+    await window.api.monitor.setNotify(monitorNotify);
     if (keyInput.trim()) {
       await window.api.settings.setKey(keyInput.trim());
       setKeyInput("");
@@ -154,6 +233,18 @@ function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
         </label>
       </section>
 
+      <section>
+        <h3>工作站</h3>
+        <label className="check-field">
+          <input
+            type="checkbox"
+            checked={monitorNotify}
+            onChange={(e) => setMonitorNotify(e.target.checked)}
+          />
+          <span>工作站桌面通知</span>
+        </label>
+      </section>
+
       <div className="settings-foot">
         <button className="btn primary" onClick={save}>保存</button>
         {saved && <span className="saved">已保存 ✓</span>}
@@ -166,10 +257,10 @@ export const SURFACES: Surface[] = [
   { id: "workspace", label: "会话", icon: IconWorkspace, Panel: WorkspacePanel },
   {
     id: "observatory",
-    label: "观察哨",
+    label: "工作站",
     icon: IconEye,
-    Panel: ObservatoryPanel,
-    badge: () => null, // 占位：将来返回运行中 agent 数
+    Panel: MonitorPanel,
+    badge: (ctx) => ctx.agentCount || null,
   },
   { id: "settings", label: "设置", icon: IconSettings, Panel: SettingsPanel },
 ];

@@ -322,6 +322,110 @@ body {
   font-size: 11.5px;
   color: var(--faint);
 }
+
+/* ---------- monitor ---------- */
+.monitor {
+  flex: 1;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 40px 24px 60px;
+  overflow-y: auto;
+}
+.monitor-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s4);
+  margin-bottom: var(--s4);
+}
+.monitor-head h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.monitor-head span {
+  color: var(--faint);
+  font-size: 12px;
+}
+.agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.agent-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s3);
+  min-height: 74px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--s3);
+  box-shadow: var(--shadow-soft);
+}
+.agent-tool {
+  min-width: 58px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: center;
+  text-transform: uppercase;
+}
+.agent-main {
+  min-width: 0;
+}
+.agent-project {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+.agent-path {
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.agent-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.agent-status {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--faint);
+  flex: none;
+}
+.agent-status.running {
+  background: var(--ok);
+}
+.agent-status.idle {
+  background: var(--faint);
+}
+
+@media (max-width: 720px) {
+  .agent-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .agent-meta {
+    grid-column: 2;
+  }
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -405,6 +509,16 @@ body {
 .field select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.check-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  color: var(--text);
+  font-size: 13px;
+}
+.check-field input {
+  accent-color: var(--accent);
 }
 .warn-note {
   font-size: 12px;

@@ -4,6 +4,7 @@ import { app, BrowserWindow, ipcMain, Menu, nativeTheme, shell } from "electron"
 import { dbPath, SqliteStore } from "./store/sqliteStore";
 import type { Store } from "./store/store";
 import { registerCanvas } from "./canvas";
+import { registerMonitor } from "./monitor";
 import {
   accessSources,
   encryptionAvailable,
@@ -20,6 +21,7 @@ import {
 let win: BrowserWindow | null = null;
 let store: Store;
 let canvas: ReturnType<typeof registerCanvas> | null = null;
+let monitor: ReturnType<typeof registerMonitor> | null = null;
 
 function resolvedTheme(): "light" | "dark" {
   const t = store.getSettings().appearance.theme;
@@ -38,6 +40,7 @@ function registerIpc() {
     return {
       access: s.access,
       appearance: s.appearance,
+      monitor: s.monitor,
       sources: accessSources(store),
       hasKey: Boolean(store.getApiKeyEnc()) || Boolean(process.env.ANTHROPIC_API_KEY),
       encryptionAvailable: encryptionAvailable(),
@@ -92,7 +95,7 @@ function buildMenu() {
       label: "视图",
       submenu: [
         { label: "会话", accelerator: "CmdOrCtrl+1", click: menuAction("surface:workspace") },
-        { label: "观察哨", accelerator: "CmdOrCtrl+2", click: menuAction("surface:observatory") },
+        { label: "工作站", accelerator: "CmdOrCtrl+2", click: menuAction("surface:observatory") },
         { type: "separator" as const },
         { role: "toggleDevTools" as const },
         { role: "resetZoom" as const },
@@ -118,7 +121,13 @@ function createWindow() {
     backgroundColor: "#00000000",
     webPreferences: { preload: join(__dirname, "../preload/index.js"), sandbox: false },
   });
+  if (store && !monitor) monitor = registerMonitor({ getWin: () => win, store });
   win.on("ready-to-show", () => win?.show());
+  win.on("closed", () => {
+    monitor?.stop();
+    monitor = null;
+    win = null;
+  });
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
@@ -130,12 +139,18 @@ function createWindow() {
 app.whenReady().then(() => {
   store = new SqliteStore(dbPath(app.getPath("userData")));
   canvas = registerCanvas({ getWin: () => win, store });
+  monitor = registerMonitor({ getWin: () => win, store });
   registerIpc();
   buildMenu();
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on("before-quit", () => {
+  monitor?.stop();
+  monitor = null;
 });
 
 app.on("window-all-closed", () => {

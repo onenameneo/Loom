@@ -50,6 +50,7 @@ export class JsonStore implements Store {
       ...this.data.settings,
       access: { ...this.data.settings.access, ...(patch.access ?? {}) },
       appearance: { ...this.data.settings.appearance, ...(patch.appearance ?? {}) },
+      monitor: { ...this.data.settings.monitor, ...(patch.monitor ?? {}) },
     };
     this.flush();
     return this.data.settings;
