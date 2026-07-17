@@ -295,9 +295,6 @@ export function toolMatchesFilter(tool: ActivityTool, filter: ToolFilter): boole
   return filter === "all" || tool === filter;
 }
 
-function eventTitle(event: ActivityEvent): string {
-  return event.toolName || event.title;
-}
 
 export function getSessionViews(
   sessions: ActivitySession[],
@@ -423,7 +420,10 @@ function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
                           <span className={`activity-dot ${event.kind}`} />
                           <div className="activity-event-row" title={event.detail || event.title}>
                             <span className="activity-kind"><Icon size={14} /> {kindLabel(event.kind)}</span>
-                            <strong>{eventTitle(event)}</strong>
+                            <div className="activity-event-main">
+                              <strong>{event.title}</strong>
+                              {event.detail && <span className="activity-event-detail">{event.detail}</span>}
+                            </div>
                             <time><Clock3 size={13} /> {formatRelative(event.ts, ctx.activityNow)} 前</time>
                           </div>
                         </article>
