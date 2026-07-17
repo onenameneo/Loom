@@ -248,10 +248,17 @@ export function registerAcp(opts: { getWin: () => BrowserWindow | null; store: S
 
   ipcMain.handle("acp:start", async (_e, arg: { cwd?: string; model?: string }) => {
     const cwd = resolve(String(arg?.cwd ?? ""));
-    // adapter 底层 claude-agent-sdk 默认模型可能不被用户端点（代理）支持 → 注入
-    // ANTHROPIC_MODEL 覆盖：优先显式传参 > 环境已设 > Loom 设置里的模型。
-    const settingsModel = opts.store.getSettings().access.model?.trim();
-    const acpModel = String(arg?.model ?? "").trim() || process.env.ANTHROPIC_MODEL || settingsModel || "";
+    // ACP adapter 应表现得像用户自己的 claude CLI：用其 Claude Code 登录/配置（~/.claude），
+    // 走真实 Anthropic + 订阅模型。Loom 自己的 .env（经 dotenv 进了 process.env）里有给 pi
+    // 聊天配的 MiMo 代理端点 + key + MODEL_ID——若透传给 adapter 会把它劫持到只服务
+    // mimo-v2.5 的代理，导致 Claude 模型 400。故剔除这些 Loom 覆盖项，让 adapter 回落到
+    // 用户真正的 Claude Code 配置。仅当为本次会话显式指定模型时才覆盖。
+    const childEnv: NodeJS.ProcessEnv = { ...process.env };
+    for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "MODEL_ID"]) {
+      delete childEnv[key];
+    }
+    const overrideModel = String(arg?.model ?? "").trim();
+    if (overrideModel) childEnv.ANTHROPIC_MODEL = overrideModel;
     const localId = `acp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
     const sessionIdRef: { id?: string; localId: string } = { localId };
     let child: ChildProcessWithoutNullStreams | undefined;
@@ -266,7 +273,7 @@ export function registerAcp(opts: { getWin: () => BrowserWindow | null; store: S
       child = spawn(npxCommand(), ["-y", "@zed-industries/claude-code-acp"], {
         cwd,
         stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, ...(acpModel ? { ANTHROPIC_MODEL: acpModel } : {}) },
+        env: childEnv,
       });
 
       child.stderr.setEncoding("utf8");
