@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import {
   BellRing,
-  Bot,
   CheckCircle2,
   Circle,
   Clock3,
@@ -10,7 +9,6 @@ import {
   PowerOff,
   Radio,
   Settings,
-  Terminal,
   Wrench,
 } from "lucide-react";
 import type {
@@ -39,6 +37,16 @@ export interface SurfaceCtx {
   treeVersion: number;
   bumpTreeVersion: () => void;
   agentCount: number;
+  activitySessions: ActivitySession[];
+  agents: AgentProc[];
+  activityStatus: ActivityStatus | null;
+  activeSessionKey: string | null;
+  setActiveSessionKey: (key: string | null) => void;
+  toolFilter: ToolFilter;
+  setToolFilter: (filter: ToolFilter) => void;
+  activityNow: number;
+  refreshActivityStatus: () => Promise<void>;
+  runActivityConfig: (action: "enable" | "disable", tool: ActivityTool) => Promise<void>;
 }
 
 export interface Surface {
@@ -80,22 +88,22 @@ function WorkspacePanel({ ctx }: { ctx: SurfaceCtx }) {
   );
 }
 
-function isDarwinRenderer(): boolean {
+export function isDarwinRenderer(): boolean {
   return /Mac/i.test(navigator.platform);
 }
 
-function formatDuration(startedAt: number, now: number): string {
+export function formatDuration(startedAt: number, now: number): string {
   const minutes = Math.max(0, Math.floor((now - startedAt) / 60_000));
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
   return `${hours}h ${minutes % 60}m`;
 }
 
-function agentTitle(agent: AgentProc): string {
+export function agentTitle(agent: AgentProc): string {
   return agent.project || agent.cwd || `pid ${agent.pid}`;
 }
 
-function formatRelative(ts: number, now: number): string {
+export function formatRelative(ts: number, now: number): string {
   const seconds = Math.max(0, Math.floor((now - ts) / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -105,11 +113,11 @@ function formatRelative(ts: number, now: number): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
-function sessionTitle(session: ActivitySession): string {
+export function sessionTitle(session: ActivitySession): string {
   return session.project || session.cwd || session.sessionId;
 }
 
-function kindLabel(kind: ActivityEvent["kind"]): string {
+export function kindLabel(kind: ActivityEvent["kind"]): string {
   switch (kind) {
     case "tool":
       return "工具";
@@ -142,7 +150,7 @@ function eventIcon(kind: ActivityEvent["kind"]) {
   }
 }
 
-function applyActivityEvent(list: ActivitySession[], event: ActivityEvent): ActivitySession[] {
+export function applyActivityEvent(list: ActivitySession[], event: ActivityEvent): ActivitySession[] {
   const key = `${event.tool}:${event.sessionId}`;
   const existing = list.find((session) => session.key === key);
   const next: ActivitySession = {
@@ -158,34 +166,34 @@ function applyActivityEvent(list: ActivitySession[], event: ActivityEvent): Acti
   return [next, ...list.filter((session) => session.key !== key)].sort((a, b) => b.lastActiveAt - a.lastActiveAt);
 }
 
-const TOOL_LABEL: Record<ActivityTool, string> = { claude: "Claude Code", codex: "Codex" };
-const TOOL_SHORT_LABEL: Record<ActivityTool, string> = { claude: "Claude", codex: "Codex" };
-const LIVENESS_LABEL: Record<LivenessState, string> = {
+export const TOOL_LABEL: Record<ActivityTool, string> = { claude: "Claude Code", codex: "Codex" };
+export const TOOL_SHORT_LABEL: Record<ActivityTool, string> = { claude: "Claude", codex: "Codex" };
+export const LIVENESS_LABEL: Record<LivenessState, string> = {
   active: "活跃",
   waiting: "待输入",
   idle: "空闲",
   ended: "已结束",
 };
-const LIVENESS_ORDER: Record<LivenessState, number> = { active: 0, waiting: 1, idle: 2, ended: 3 };
+export const LIVENESS_ORDER: Record<LivenessState, number> = { active: 0, waiting: 1, idle: 2, ended: 3 };
 // 90s 是本次设计约定的“近期活动”窗口；渲染层每秒 tick 重新派生，便于后续调参。
 const ACTIVE_WINDOW_MS = 90_000;
 
-type LivenessState = "active" | "waiting" | "idle" | "ended";
-type ToolFilter = "all" | ActivityTool;
+export type LivenessState = "active" | "waiting" | "idle" | "ended";
+export type ToolFilter = "all" | ActivityTool;
 
-interface AgentSessionMatch {
+export interface AgentSessionMatch {
   precision: "weak";
   reason: "cwd" | "project";
   agent: AgentProc;
 }
 
-interface SessionView {
+export interface SessionView {
   session: ActivitySession;
   liveness: LivenessState;
   match: AgentSessionMatch | null;
 }
 
-function normalizeActivitySessions(list: ActivitySession[]): ActivitySession[] {
+export function normalizeActivitySessions(list: ActivitySession[]): ActivitySession[] {
   const bySessionId = new Map<string, ActivitySession>();
   for (const session of list) {
     const key = `${session.tool}:${session.sessionId}`;
@@ -233,12 +241,12 @@ function linkLabel(tool: ActivityTool, status: ActivityToolStatus | undefined, n
 
 // 连续的同名工具调用折叠成一条。工具事件在 PostToolUse 下会成为绝大多数，
 // 不折叠的话时间线就是一串噪音。
-interface EventGroup {
+export interface EventGroup {
   key: string;
   events: ActivityEvent[];
 }
 
-function groupEvents(events: ActivityEvent[]): EventGroup[] {
+export function groupEvents(events: ActivityEvent[]): EventGroup[] {
   const groups: EventGroup[] = [];
   for (const event of events) {
     const last = groups[groups.length - 1];
@@ -258,7 +266,7 @@ function groupEvents(events: ActivityEvent[]): EventGroup[] {
   return groups;
 }
 
-function matchesAgentSession(agent: AgentProc, session: ActivitySession): AgentSessionMatch | null {
+export function matchesAgentSession(agent: AgentProc, session: ActivitySession): AgentSessionMatch | null {
   if (agent.tool !== session.tool) return null;
   if (agent.cwd && session.cwd && agent.cwd === session.cwd) {
     return { precision: "weak", reason: "cwd", agent };
@@ -269,7 +277,7 @@ function matchesAgentSession(agent: AgentProc, session: ActivitySession): AgentS
   return null;
 }
 
-function findAgentSessionMatch(session: ActivitySession, agents: AgentProc[]): AgentSessionMatch | null {
+export function findAgentSessionMatch(session: ActivitySession, agents: AgentProc[]): AgentSessionMatch | null {
   for (const agent of agents) {
     const match = matchesAgentSession(agent, session);
     if (match) return match;
@@ -277,7 +285,7 @@ function findAgentSessionMatch(session: ActivitySession, agents: AgentProc[]): A
   return null;
 }
 
-function deriveLiveness(session: ActivitySession, agents: AgentProc[], now: number): LivenessState {
+export function deriveLiveness(session: ActivitySession, agents: AgentProc[], now: number): LivenessState {
   const match = findAgentSessionMatch(session, agents);
   if (!match) return "ended";
   const last = session.events[session.events.length - 1];
@@ -285,7 +293,7 @@ function deriveLiveness(session: ActivitySession, agents: AgentProc[], now: numb
   return now - session.lastActiveAt <= ACTIVE_WINDOW_MS ? "active" : "idle";
 }
 
-function toolMatchesFilter(tool: ActivityTool, filter: ToolFilter): boolean {
+export function toolMatchesFilter(tool: ActivityTool, filter: ToolFilter): boolean {
   return filter === "all" || tool === filter;
 }
 
@@ -293,84 +301,14 @@ function eventTitle(event: ActivityEvent): string {
   return event.toolName || event.title;
 }
 
-// ---- 工作站主面（内部 surface id 仍沿用 observatory）----
-function MonitorPanel(_: { ctx: SurfaceCtx }) {
-  const [agents, setAgents] = useState<AgentProc[]>([]);
-  const [sessions, setSessions] = useState<ActivitySession[]>([]);
-  const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [toolFilter, setToolFilter] = useState<ToolFilter>("all");
-  const [status, setStatus] = useState<ActivityStatus | null>(null);
-  const [configOpen, setConfigOpen] = useState(false);
-  const [busyTool, setBusyTool] = useState<ActivityTool | null>(null);
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [now, setNow] = useState(Date.now());
-  const supported = isDarwinRenderer();
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    if (!window.api?.monitor) return;
-    let cancelled = false;
-    window.api.monitor.list().then((list) => {
-      if (!cancelled) setAgents(list);
-    });
-    const off = window.api.monitor.onEvent((event) => setAgents(event.agents));
-    return () => {
-      cancelled = true;
-      off();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!window.api?.activity) return;
-    let cancelled = false;
-    Promise.all([window.api.activity.list(), window.api.activity.status()]).then(([list, nextStatus]) => {
-      if (cancelled) return;
-      const normalized = normalizeActivitySessions(list);
-      setSessions(normalized);
-      setStatus(nextStatus);
-      if (!activeKey && normalized[0]) setActiveKey(normalized[0].key);
-    });
-    const off = window.api.activity.onEvent((event) => {
-      setSessions((list) => applyActivityEvent(normalizeActivitySessions(list), event));
-      setActiveKey((key) => key ?? `${event.tool}:${event.sessionId}`);
-    });
-    return () => {
-      cancelled = true;
-      off();
-    };
-  }, [activeKey]);
-
-  async function refreshStatus() {
-    if (window.api?.activity) setStatus(await window.api.activity.status());
-  }
-
-  function openConfig() {
-    setConfigOpen(true);
-    void refreshStatus();
-  }
-
-  async function runConfig(action: "enable" | "disable", tool: ActivityTool) {
-    setBusyTool(tool);
-    try {
-      const result = await window.api.activity[action]({ tools: [tool] });
-      setStatus(result.status);
-    } finally {
-      setBusyTool(null);
-    }
-  }
-
-  async function copyPath(path?: string) {
-    if (!path) return;
-    await navigator.clipboard.writeText(path);
-  }
-
-  const filteredAgents = agents.filter((agent) => toolMatchesFilter(agent.tool, toolFilter));
-  const sessionViews = sessions
-    .filter((session) => toolMatchesFilter(session.tool, toolFilter))
+export function getSessionViews(
+  sessions: ActivitySession[],
+  agents: AgentProc[],
+  filter: ToolFilter,
+  now: number,
+): SessionView[] {
+  return sessions
+    .filter((session) => toolMatchesFilter(session.tool, filter))
     .map<SessionView>((session) => {
       const match = findAgentSessionMatch(session, agents);
       return {
@@ -383,7 +321,36 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
       const byState = LIVENESS_ORDER[a.liveness] - LIVENESS_ORDER[b.liveness];
       return byState || b.session.lastActiveAt - a.session.lastActiveAt;
     });
-  const activeView = sessionViews.find((view) => view.session.key === activeKey) ?? sessionViews[0] ?? null;
+}
+
+// ---- 工作站主面（内部 surface id 仍沿用 observatory）----
+function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
+  const [configOpen, setConfigOpen] = useState(false);
+  const [busyTool, setBusyTool] = useState<ActivityTool | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const supported = isDarwinRenderer();
+
+  function openConfig() {
+    setConfigOpen(true);
+    void ctx.refreshActivityStatus();
+  }
+
+  async function runConfig(action: "enable" | "disable", tool: ActivityTool) {
+    setBusyTool(tool);
+    try {
+      await ctx.runActivityConfig(action, tool);
+    } finally {
+      setBusyTool(null);
+    }
+  }
+
+  async function copyPath(path?: string) {
+    if (!path) return;
+    await navigator.clipboard.writeText(path);
+  }
+
+  const sessionViews = getSessionViews(ctx.activitySessions, ctx.agents, ctx.toolFilter, ctx.activityNow);
+  const activeView = sessionViews.find((view) => view.session.key === ctx.activeSessionKey) ?? sessionViews[0] ?? null;
   const activeSession = activeView?.session ?? null;
   const telemetry = sessionViews.reduce(
     (acc, view) => {
@@ -392,166 +359,90 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
     },
     { active: 0, waiting: 0, idle: 0, ended: 0 } satisfies Record<LivenessState, number>,
   );
-  // 只保留「一个会话都匹配不上」的在跑进程 —— 有弱匹配的已在上面的会话列表里
-  // 以「同目录疑似」呈现，不能再塞进未接入组，否则退化成之前那份冗余列表。
-  const unconnectedAgents = supported
-    ? filteredAgents
-        .filter((agent) => !sessions.some((session) => matchesAgentSession(agent, session)))
-        .sort((a, b) => b.startedAt - a.startedAt)
-    : [];
 
   return (
-    <div className="monitor">
-      <header className="monitor-topbar">
-        <div className="monitor-title">
-          <h2>工作站</h2>
-          <div className="monitor-telemetry" aria-label="活动遥测">
-            {(["active", "waiting", "idle", "ended"] as LivenessState[]).map((state) => (
-              <span className={`telemetry-chip ${state}`} key={state}>
-                <span className={`state-dot ${state}`} />
-                <strong>{telemetry[state]}</strong>
-                {LIVENESS_LABEL[state]}
-              </span>
-            ))}
-          </div>
+    <div className="surface-fill monitor-surface">
+      <div className="surface-head monitor-surface-head">
+        <div className="monitor-head-title">
+          <span className="ws-title">{activeSession ? sessionTitle(activeSession) : "工作站"}</span>
+          <span className="monitor-cwd">{activeSession?.cwd || "等待本地 agent 事件"}</span>
         </div>
-        <div className="monitor-tools">
-          <div className="tool-segment" role="tablist" aria-label="工具过滤">
-            {([
-              ["all", Radio, "全部"],
-              ["claude", Bot, "Claude"],
-              ["codex", Terminal, "Codex"],
-            ] as const).map(([value, Icon, label]) => (
-              <button
-                key={value}
-                className={toolFilter === value ? "active" : ""}
-                onClick={() => setToolFilter(value)}
-                role="tab"
-                aria-selected={toolFilter === value}
-              >
-                <Icon size={14} />
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
+        <div className="monitor-head-actions">
+          {activeView && (
+            <span className={`liveness-pill ${activeView.liveness}`}>
+              <span className={`state-dot ${activeView.liveness}`} />
+              {LIVENESS_LABEL[activeView.liveness]}
+            </span>
+          )}
+          <button className="icon-btn" onClick={() => copyPath(activeSession?.cwd)} aria-label="复制 cwd" disabled={!activeSession?.cwd}>
+            <Copy size={15} />
+          </button>
           <button className="icon-btn monitor-config-btn" onClick={openConfig} aria-label="活动流配置">
             <Settings size={16} />
           </button>
         </div>
-      </header>
+      </div>
 
-      <section className="activity-layout">
-        <div className="activity-sessions">
-          <div className="monitor-section-head">
-            <h3>会话</h3>
-            <span>{sessionViews.length}</span>
-          </div>
-          {sessionViews.length ? (
-            sessionViews.map(({ session, liveness, match }) => (
-              <button
-                key={session.key}
-                className={`activity-session-card ${activeSession?.key === session.key ? "selected" : ""} ${liveness === "active" ? "live" : ""}`}
-                onClick={() => setActiveKey(session.key)}
-              >
-                <span className={`state-dot ${liveness}`} />
-                <span className="activity-session-main">
-                  <span className="activity-session-line">
-                    <strong>{sessionTitle(session)}</strong>
-                    <em>{TOOL_SHORT_LABEL[session.tool]}</em>
-                  </span>
-                  <span>
-                    {kindLabel(session.events[session.events.length - 1]?.kind ?? "notification")} · {formatRelative(session.lastActiveAt, now)} 前
-                    {match && <b>同目录疑似</b>}
-                  </span>
-                </span>
-              </button>
-            ))
-          ) : (
-            <div className="activity-empty">暂无活动。启用活动流后，本地 Claude Code / Codex 的动作会实时出现在这里。</div>
-          )}
-          {unconnectedAgents.length > 0 && (
-            <div className="unconnected-group">
-              <div className="unconnected-head">
-                <span>未接入</span>
-                <small>重开会话后生效</small>
-              </div>
-              {unconnectedAgents.map((agent) => (
-                <article className="activity-session-card muted" key={agent.pid}>
-                  <span className="state-dot ended" />
-                  <span className="activity-session-main">
-                    <span className="activity-session-line">
-                      <strong>{agentTitle(agent)}</strong>
-                      <em>{TOOL_SHORT_LABEL[agent.tool]}</em>
-                    </span>
-                    <span>已运行 {formatDuration(agent.startedAt, now)}</span>
-                  </span>
-                </article>
-              ))}
-            </div>
-          )}
+      <div className="monitor">
+        <div className="monitor-telemetry" aria-label="活动遥测">
+          {(["active", "waiting", "idle", "ended"] as LivenessState[]).map((state) => (
+            <span className={`telemetry-chip ${state}`} key={state}>
+              <span className={`state-dot ${state}`} />
+              <strong>{telemetry[state]}</strong>
+              {LIVENESS_LABEL[state]}
+            </span>
+          ))}
         </div>
 
-        <div className="activity-timeline">
-          <div className="activity-timeline-head">
-            <div className="activity-timeline-title">
-              <h3>{activeSession ? sessionTitle(activeSession) : "活动流"}</h3>
-              <span>{activeSession?.cwd || "等待本地 agent 事件"}</span>
-            </div>
-            {activeView && (
-              <div className="timeline-actions">
-                <span className={`liveness-pill ${activeView.liveness}`}>
-                  <span className={`state-dot ${activeView.liveness}`} />
-                  {LIVENESS_LABEL[activeView.liveness]}
-                </span>
-                <button className="icon-btn" onClick={() => copyPath(activeSession?.cwd)} aria-label="复制 cwd" disabled={!activeSession?.cwd}>
-                  <Copy size={15} />
-                </button>
+        <section className="activity-layout">
+          <div className="activity-timeline">
+            {activeSession && activeSession.events.length > 0 ? (
+              <div className="activity-events">
+                {groupEvents(activeSession.events).map((group) => {
+                  const head = group.events[0];
+                  const folded = group.events.length > 1;
+                  const open = expanded[group.key];
+                  const shown = folded && !open ? [] : group.events;
+                  const Icon = eventIcon(head.kind);
+                  return (
+                    <div key={group.key}>
+                      {folded && (
+                        <article className="activity-event">
+                          <span className={`activity-dot ${head.kind}`} />
+                          <button
+                            className="activity-event-row activity-fold"
+                            onClick={() => setExpanded((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
+                            title={`${head.toolName} × ${group.events.length}`}
+                          >
+                            <span className="activity-kind"><Icon size={14} /> {kindLabel(head.kind)}</span>
+                            <strong>{head.toolName} × {group.events.length}</strong>
+                            <time><Clock3 size={13} /> {formatRelative(group.events[group.events.length - 1].ts, ctx.activityNow)} 前</time>
+                          </button>
+                        </article>
+                      )}
+                      {shown.map((event) => (
+                        <article className={`activity-event ${folded ? "nested" : ""}`} key={event.id}>
+                          <span className={`activity-dot ${event.kind}`} />
+                          <div className="activity-event-row" title={event.detail || event.title}>
+                            <span className="activity-kind"><Icon size={14} /> {kindLabel(event.kind)}</span>
+                            <strong>{eventTitle(event)}</strong>
+                            <time><Clock3 size={13} /> {formatRelative(event.ts, ctx.activityNow)} 前</time>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
+            ) : (
+              <div className="activity-empty large">暂无活动。启用活动流后，本地 Claude Code / Codex 的动作会实时出现在这里。</div>
             )}
           </div>
-          {activeSession ? (
-            <div className="activity-events">
-              {groupEvents(activeSession.events).map((group) => {
-                const head = group.events[0];
-                const folded = group.events.length > 1;
-                const open = expanded[group.key];
-                const shown = folded && !open ? [] : group.events;
-                const Icon = eventIcon(head.kind);
-                return (
-                  <div key={group.key}>
-                    {folded && (
-                      <article className="activity-event">
-                        <span className={`activity-dot ${head.kind}`} />
-                        <button
-                          className="activity-event-row activity-fold"
-                          onClick={() => setExpanded((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
-                          title={`${head.toolName} × ${group.events.length}`}
-                        >
-                          <span className="activity-kind"><Icon size={14} /> {kindLabel(head.kind)}</span>
-                          <strong>{head.toolName} × {group.events.length}</strong>
-                          <time><Clock3 size={13} /> {formatRelative(group.events[group.events.length - 1].ts, now)} 前</time>
-                        </button>
-                      </article>
-                    )}
-                    {shown.map((event) => (
-                      <article className={`activity-event ${folded ? "nested" : ""}`} key={event.id}>
-                        <span className={`activity-dot ${event.kind}`} />
-                        <div className="activity-event-row" title={event.detail || event.title}>
-                          <span className="activity-kind"><Icon size={14} /> {kindLabel(event.kind)}</span>
-                          <strong>{eventTitle(event)}</strong>
-                          <time><Clock3 size={13} /> {formatRelative(event.ts, now)} 前</time>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="activity-empty large">暂无活动。启用活动流后，本地 Claude Code / Codex 的动作会实时出现在这里。</div>
+        </section>
+        {!supported && (
+          <div className="activity-empty monitor-support-note">本地进程发现仅在 macOS 桌面环境可用，活动流事件仍会显示。</div>
           )}
-        </div>
-      </section>
+      </div>
 
       {configOpen && (
         <div className="activity-modal" role="dialog" aria-modal="true" aria-label="活动流配置">
@@ -562,14 +453,14 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
               <button onClick={() => setConfigOpen(false)}>关闭</button>
             </div>
             {(["claude", "codex"] as ActivityTool[]).map((tool) => {
-              const st = status?.tools[tool];
+              const st = ctx.activityStatus?.tools[tool];
               const state = linkState(st);
               return (
                 <section className="activity-tool-card" key={tool}>
                   <div className="activity-tool-head">
                     <span className={`activity-status ${state}`} />
                     <strong>{TOOL_LABEL[tool]}</strong>
-                    <small>{linkLabel(tool, st, now)}</small>
+                    <small>{linkLabel(tool, st, ctx.activityNow)}</small>
                   </div>
                   <code>{st?.path}</code>
                   {st?.actionRequired && <p className="activity-note">{st.actionRequired}</p>}

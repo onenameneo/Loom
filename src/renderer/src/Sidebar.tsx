@@ -1,8 +1,22 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Pencil, Pin, Trash2 } from "lucide-react";
-import type { CanvasNodeDto, SettingsPayload, WorkspaceMeta } from "./env";
+import { Bot, ChevronDown, ChevronRight, Pencil, Pin, Radio, Terminal, Trash2 } from "lucide-react";
+import type { ActivityTool, AgentProc, CanvasNodeDto, SettingsPayload, WorkspaceMeta } from "./env";
 import { IconMoon, IconPlus, IconSun } from "./icons";
-import { SURFACES, type SurfaceCtx } from "./surfaces";
+import {
+  agentTitle,
+  formatDuration,
+  formatRelative,
+  getSessionViews,
+  isDarwinRenderer,
+  kindLabel,
+  LIVENESS_LABEL,
+  matchesAgentSession,
+  sessionTitle,
+  TOOL_SHORT_LABEL,
+  toolMatchesFilter,
+  SURFACES,
+  type SurfaceCtx,
+} from "./surfaces";
 import { ConfirmDialog, RenameDialog, Tip } from "./ui/dialogs";
 
 // 由某会话的节点列表推导「主线→分支」的缩进行（父子关系，深度优先）。
@@ -49,7 +63,7 @@ export default function Sidebar({
   const [renaming, setRenaming] = useState<WorkspaceMeta | null>(null);
   const [deleting, setDeleting] = useState<WorkspaceMeta | null>(null);
   // 每个会话独立展开：expanded 记哪些会话展开，outlines 存各自的节点列表。
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(["agent:claude", "agent:codex"]));
   const [outlines, setOutlines] = useState<Record<string, CanvasNodeDto[]>>({});
 
   // 活跃会话自动展开（切到它时把它的树打开）
@@ -63,7 +77,8 @@ export default function Sidebar({
   useEffect(() => {
     if (!window.api || activeSurface !== "workspace") return;
     let alive = true;
-    const ids = [...expanded];
+    const workspaceIds = new Set(ctx.workspaces.map((w) => w.id));
+    const ids = [...expanded].filter((id) => workspaceIds.has(id));
     Promise.all(
       ids.map((id) => window.api!.canvas.list(id).then((nodes) => [id, nodes] as const)),
     ).then((entries) => {
@@ -82,6 +97,74 @@ export default function Sidebar({
       return next;
     });
   }, []);
+
+  const agentTools: ActivityTool[] = ["claude", "codex"];
+  const sessionViews = getSessionViews(ctx.activitySessions, ctx.agents, "all", ctx.activityNow);
+  const supportedMonitor = isDarwinRenderer();
+  const unconnectedAgents = supportedMonitor
+    ? ctx.agents
+        .filter((agent) => !ctx.activitySessions.some((session) => matchesAgentSession(agent, session)))
+        .sort((a, b) => b.startedAt - a.startedAt)
+    : [];
+
+  const renderAgentGroup = (tool: ActivityTool) => {
+    if (!toolMatchesFilter(tool, ctx.toolFilter)) return null;
+    const groupId = `agent:${tool}`;
+    const isExp = expanded.has(groupId);
+    const sessions = sessionViews.filter((view) => view.session.tool === tool);
+    const agents = unconnectedAgents.filter((agent) => agent.tool === tool);
+    if (!sessions.length && !agents.length) return null;
+    const ToolIcon = tool === "claude" ? Bot : Terminal;
+    return (
+      <Fragment key={tool}>
+        <button className="sb-label sb-agent-label" onClick={() => toggleExpand(groupId)}>
+          {isExp ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <ToolIcon size={13} />
+          <span>{TOOL_SHORT_LABEL[tool]}</span>
+        </button>
+        {isExp && (
+          <div className="sb-agent-group">
+            {sessions.map(({ session, liveness, match }) => (
+              <button
+                key={session.key}
+                className={`sb-ws sb-agent-session ${ctx.activeSessionKey === session.key ? "active" : ""} ${liveness === "active" ? "live" : ""}`}
+                onClick={() => {
+                  ctx.setActiveSessionKey(session.key);
+                  setSurface("observatory");
+                }}
+                title={session.cwd || sessionTitle(session)}
+              >
+                <span className={`state-dot ${liveness}`} />
+                <span className="ws-name">
+                  <span>{sessionTitle(session)}</span>
+                  <small>
+                    {kindLabel(session.events[session.events.length - 1]?.kind ?? "notification")} · {formatRelative(session.lastActiveAt, ctx.activityNow)} 前
+                    {match ? " · 同目录疑似" : ""}
+                  </small>
+                </span>
+                <span className="sb-agent-state">{LIVENESS_LABEL[liveness]}</span>
+              </button>
+            ))}
+            {agents.length > 0 && (
+              <div className="sb-agent-unconnected">
+                <div className="sb-agent-note">未接入 · 重开会话后生效</div>
+                {agents.map((agent: AgentProc) => (
+                  <div className="sb-ws sb-agent-session muted" key={agent.pid} title={agent.cwd || agentTitle(agent)}>
+                    <span className="state-dot ended" />
+                    <span className="ws-name">
+                      <span>{agentTitle(agent)}</span>
+                      <small>已运行 {formatDuration(agent.startedAt, ctx.activityNow)}</small>
+                    </span>
+                    <span className="sb-agent-state">未接入</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </Fragment>
+    );
+  };
 
   return (
     <aside className="sidebar">
@@ -197,6 +280,34 @@ export default function Sidebar({
               </Fragment>
             );
           })}
+        </>
+      )}
+
+      {activeSurface === "observatory" && (
+        <>
+          <div className="sb-label">过滤</div>
+          <div className="sb-tool-segment" role="tablist" aria-label="工具过滤">
+            {([
+              ["all", Radio, "全部"],
+              ["claude", Bot, "Claude"],
+              ["codex", Terminal, "Codex"],
+            ] as const).map(([value, Icon, label]) => (
+              <button
+                key={value}
+                className={ctx.toolFilter === value ? "active" : ""}
+                onClick={() => ctx.setToolFilter(value)}
+                role="tab"
+                aria-selected={ctx.toolFilter === value}
+              >
+                <Icon size={13} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+          {agentTools.map(renderAgentGroup)}
+          {sessionViews.length === 0 && unconnectedAgents.length === 0 && (
+            <div className="sb-hint">暂无活动。启用后会显示本地 agent 会话。</div>
+          )}
         </>
       )}
 

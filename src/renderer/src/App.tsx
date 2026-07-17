@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import type { SettingsPayload, WorkspaceMeta } from "./env";
+import type { ActivitySession, ActivityStatus, ActivityTool, AgentProc, SettingsPayload, WorkspaceMeta } from "./env";
 import Sidebar from "./Sidebar";
-import { SURFACES, type SurfaceCtx } from "./surfaces";
+import {
+  applyActivityEvent,
+  getSessionViews,
+  normalizeActivitySessions,
+  SURFACES,
+  type SurfaceCtx,
+  type ToolFilter,
+} from "./surfaces";
 
 export default function App() {
   const [activeSurface, setActiveSurface] = useState("workspace");
@@ -11,7 +18,12 @@ export default function App() {
   const [treeVersion, setTreeVersion] = useState(0);
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [agentCount, setAgentCount] = useState(0);
+  const [agents, setAgents] = useState<AgentProc[]>([]);
+  const [activitySessions, setActivitySessions] = useState<ActivitySession[]>([]);
+  const [activityStatus, setActivityStatus] = useState<ActivityStatus | null>(null);
+  const [activeSessionKey, setActiveSessionKey] = useState<string | null>(null);
+  const [toolFilter, setToolFilter] = useState<ToolFilter>("all");
+  const [activityNow, setActivityNow] = useState(Date.now());
 
   const reloadSettings = useCallback(async () => {
     if (!window.api) {
@@ -59,13 +71,53 @@ export default function App() {
     if (!window.api?.monitor) return;
     let cancelled = false;
     window.api.monitor.list().then((agents) => {
-      if (!cancelled) setAgentCount(agents.length);
+      if (!cancelled) setAgents(agents);
     });
-    const off = window.api.monitor.onEvent((event) => setAgentCount(event.agents.length));
+    const off = window.api.monitor.onEvent((event) => setAgents(event.agents));
     return () => {
       cancelled = true;
       off();
     };
+  }, []);
+
+  useEffect(() => {
+    if (!window.api?.activity) return;
+    let cancelled = false;
+    Promise.all([window.api.activity.list(), window.api.activity.status()]).then(([list, nextStatus]) => {
+      if (cancelled) return;
+      setActivitySessions(normalizeActivitySessions(list));
+      setActivityStatus(nextStatus);
+    });
+    const off = window.api.activity.onEvent((event) => {
+      setActivitySessions((list) => applyActivityEvent(normalizeActivitySessions(list), event));
+      setActiveSessionKey((key) => key ?? `${event.tool}:${event.sessionId}`);
+    });
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => setActivityNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const views = getSessionViews(activitySessions, agents, toolFilter, activityNow);
+    if (activeSessionKey && views.some((view) => view.session.key === activeSessionKey)) return;
+    setActiveSessionKey(views[0]?.session.key ?? null);
+  }, [activeSessionKey, activityNow, activitySessions, agents, toolFilter]);
+
+  const refreshActivityStatus = useCallback(async () => {
+    if (!window.api?.activity) return;
+    setActivityStatus(await window.api.activity.status());
+  }, []);
+
+  const runActivityConfig = useCallback(async (action: "enable" | "disable", tool: ActivityTool) => {
+    if (!window.api?.activity) return;
+    const result = await window.api.activity[action]({ tools: [tool] });
+    setActivityStatus(result.status);
   }, []);
 
   const createWorkspace = useCallback(async () => {
@@ -107,7 +159,17 @@ export default function App() {
     clearFocusNode: () => setFocusNodeId(null),
     treeVersion,
     bumpTreeVersion: () => setTreeVersion((v) => v + 1),
-    agentCount,
+    agentCount: agents.length,
+    activitySessions,
+    agents,
+    activityStatus,
+    activeSessionKey,
+    setActiveSessionKey,
+    toolFilter,
+    setToolFilter,
+    activityNow,
+    refreshActivityStatus,
+    runActivityConfig,
   };
 
   const Active = SURFACES.find((s) => s.id === activeSurface) ?? SURFACES[0];
