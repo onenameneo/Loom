@@ -1,17 +1,19 @@
 import { useEffect, useState } from "react";
 import {
   BellRing,
+  Bot,
   CheckCircle2,
   Circle,
   Clock3,
+  Copy,
   Power,
   PowerOff,
   Radio,
-  SlidersHorizontal,
+  Settings,
+  Terminal,
   Wrench,
 } from "lucide-react";
 import type {
-  ActivityConfigResult,
   ActivityEvent,
   ActivitySession,
   ActivityStatus,
@@ -143,25 +145,71 @@ function eventIcon(kind: ActivityEvent["kind"]) {
 function applyActivityEvent(list: ActivitySession[], event: ActivityEvent): ActivitySession[] {
   const key = `${event.tool}:${event.sessionId}`;
   const existing = list.find((session) => session.key === key);
-  const next: ActivitySession = existing ?? {
+  const next: ActivitySession = {
     key,
     tool: event.tool,
     sessionId: event.sessionId,
-    cwd: event.cwd,
-    project: event.project,
+    cwd: event.cwd || existing?.cwd,
+    project: event.project || existing?.project,
     lastActiveAt: event.ts,
-    eventCount: 0,
-    events: [],
+    eventCount: (existing?.eventCount ?? 0) + 1,
+    events: [...(existing?.events ?? []), event].slice(-200),
   };
-  next.cwd = event.cwd || next.cwd;
-  next.project = event.project || next.project;
-  next.lastActiveAt = event.ts;
-  next.eventCount += 1;
-  next.events = [...next.events, event].slice(-200);
   return [next, ...list.filter((session) => session.key !== key)].sort((a, b) => b.lastActiveAt - a.lastActiveAt);
 }
 
 const TOOL_LABEL: Record<ActivityTool, string> = { claude: "Claude Code", codex: "Codex" };
+const TOOL_SHORT_LABEL: Record<ActivityTool, string> = { claude: "Claude", codex: "Codex" };
+const LIVENESS_LABEL: Record<LivenessState, string> = {
+  active: "活跃",
+  waiting: "待输入",
+  idle: "空闲",
+  ended: "已结束",
+};
+const LIVENESS_ORDER: Record<LivenessState, number> = { active: 0, waiting: 1, idle: 2, ended: 3 };
+// 90s 是本次设计约定的“近期活动”窗口；渲染层每秒 tick 重新派生，便于后续调参。
+const ACTIVE_WINDOW_MS = 90_000;
+
+type LivenessState = "active" | "waiting" | "idle" | "ended";
+type ToolFilter = "all" | ActivityTool;
+
+interface AgentSessionMatch {
+  precision: "weak";
+  reason: "cwd" | "project";
+  agent: AgentProc;
+}
+
+interface SessionView {
+  session: ActivitySession;
+  liveness: LivenessState;
+  match: AgentSessionMatch | null;
+}
+
+function normalizeActivitySessions(list: ActivitySession[]): ActivitySession[] {
+  const bySessionId = new Map<string, ActivitySession>();
+  for (const session of list) {
+    const key = `${session.tool}:${session.sessionId}`;
+    const existing = bySessionId.get(key);
+    if (!existing) {
+      bySessionId.set(key, { ...session, key });
+      continue;
+    }
+    const events = [...existing.events, ...session.events]
+      .sort((a, b) => a.ts - b.ts)
+      .slice(-200);
+    bySessionId.set(key, {
+      key,
+      tool: session.tool,
+      sessionId: session.sessionId,
+      cwd: session.cwd || existing.cwd,
+      project: session.project || existing.project,
+      lastActiveAt: Math.max(existing.lastActiveAt, session.lastActiveAt),
+      eventCount: existing.eventCount + session.eventCount,
+      events,
+    });
+  }
+  return [...bySessionId.values()].sort((a, b) => b.lastActiveAt - a.lastActiveAt);
+}
 
 type LinkState = "off" | "pending" | "live";
 
@@ -210,11 +258,39 @@ function groupEvents(events: ActivityEvent[]): EventGroup[] {
   return groups;
 }
 
-function matchesAgentSession(agent: AgentProc, session: ActivitySession): boolean {
-  if (agent.tool !== session.tool) return false;
-  if (agent.cwd && session.cwd) return agent.cwd === session.cwd;
-  if (agent.project && session.project) return agent.project === session.project;
-  return false;
+function matchesAgentSession(agent: AgentProc, session: ActivitySession): AgentSessionMatch | null {
+  if (agent.tool !== session.tool) return null;
+  if (agent.cwd && session.cwd && agent.cwd === session.cwd) {
+    return { precision: "weak", reason: "cwd", agent };
+  }
+  if (agent.project && session.project && agent.project === session.project) {
+    return { precision: "weak", reason: "project", agent };
+  }
+  return null;
+}
+
+function findAgentSessionMatch(session: ActivitySession, agents: AgentProc[]): AgentSessionMatch | null {
+  for (const agent of agents) {
+    const match = matchesAgentSession(agent, session);
+    if (match) return match;
+  }
+  return null;
+}
+
+function deriveLiveness(session: ActivitySession, agents: AgentProc[], now: number): LivenessState {
+  const match = findAgentSessionMatch(session, agents);
+  if (!match) return "ended";
+  const last = session.events[session.events.length - 1];
+  if (last?.kind === "permission" || last?.kind === "turn_end") return "waiting";
+  return now - session.lastActiveAt <= ACTIVE_WINDOW_MS ? "active" : "idle";
+}
+
+function toolMatchesFilter(tool: ActivityTool, filter: ToolFilter): boolean {
+  return filter === "all" || tool === filter;
+}
+
+function eventTitle(event: ActivityEvent): string {
+  return event.toolName || event.title;
 }
 
 // ---- 工作站主面（内部 surface id 仍沿用 observatory）----
@@ -222,6 +298,7 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
   const [agents, setAgents] = useState<AgentProc[]>([]);
   const [sessions, setSessions] = useState<ActivitySession[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [toolFilter, setToolFilter] = useState<ToolFilter>("all");
   const [status, setStatus] = useState<ActivityStatus | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
   const [busyTool, setBusyTool] = useState<ActivityTool | null>(null);
@@ -252,12 +329,13 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
     let cancelled = false;
     Promise.all([window.api.activity.list(), window.api.activity.status()]).then(([list, nextStatus]) => {
       if (cancelled) return;
-      setSessions(list);
+      const normalized = normalizeActivitySessions(list);
+      setSessions(normalized);
       setStatus(nextStatus);
-      if (!activeKey && list[0]) setActiveKey(list[0].key);
+      if (!activeKey && normalized[0]) setActiveKey(normalized[0].key);
     });
     const off = window.api.activity.onEvent((event) => {
-      setSessions((list) => applyActivityEvent(list, event));
+      setSessions((list) => applyActivityEvent(normalizeActivitySessions(list), event));
       setActiveKey((key) => key ?? `${event.tool}:${event.sessionId}`);
     });
     return () => {
@@ -285,64 +363,151 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
     }
   }
 
-  const activeSession = sessions.find((session) => session.key === activeKey) ?? sessions[0] ?? null;
-  const connectedAgents = agents.filter((agent) => sessions.some((session) => matchesAgentSession(agent, session)));
-  const allConnected = agents.length > 0 && connectedAgents.length === agents.length;
+  async function copyPath(path?: string) {
+    if (!path) return;
+    await navigator.clipboard.writeText(path);
+  }
+
+  const filteredAgents = agents.filter((agent) => toolMatchesFilter(agent.tool, toolFilter));
+  const sessionViews = sessions
+    .filter((session) => toolMatchesFilter(session.tool, toolFilter))
+    .map<SessionView>((session) => {
+      const match = findAgentSessionMatch(session, agents);
+      return {
+        session,
+        match,
+        liveness: deriveLiveness(session, agents, now),
+      };
+    })
+    .sort((a, b) => {
+      const byState = LIVENESS_ORDER[a.liveness] - LIVENESS_ORDER[b.liveness];
+      return byState || b.session.lastActiveAt - a.session.lastActiveAt;
+    });
+  const activeView = sessionViews.find((view) => view.session.key === activeKey) ?? sessionViews[0] ?? null;
+  const activeSession = activeView?.session ?? null;
+  const telemetry = sessionViews.reduce(
+    (acc, view) => {
+      acc[view.liveness] += 1;
+      return acc;
+    },
+    { active: 0, waiting: 0, idle: 0, ended: 0 } satisfies Record<LivenessState, number>,
+  );
+  // 只保留「一个会话都匹配不上」的在跑进程 —— 有弱匹配的已在上面的会话列表里
+  // 以「同目录疑似」呈现，不能再塞进未接入组，否则退化成之前那份冗余列表。
   const unconnectedAgents = supported
-    ? agents.filter((agent) => !sessions.some((session) => matchesAgentSession(agent, session)))
+    ? filteredAgents
+        .filter((agent) => !sessions.some((session) => matchesAgentSession(agent, session)))
+        .sort((a, b) => b.startedAt - a.startedAt)
     : [];
 
   return (
     <div className="monitor">
-      <div className="monitor-head">
-        <h2>工作站</h2>
-        <span>{agents.length} 个 agent 在跑 · {sessions.length} 个活动会话</span>
-      </div>
-
-      <section className="activity-discovery">
-        <div>
-          <strong>检测到 {agents.length} 个本地 agent 在跑，{connectedAgents.length} 个已接入活动流</strong>
-          <span>{supported ? "Claude Code 与 Codex 的 hooks 会被本地 collector 接收。" : "当前版本先支持 macOS 本地进程探测。"}</span>
+      <header className="monitor-topbar">
+        <div className="monitor-title">
+          <h2>工作站</h2>
+          <div className="monitor-telemetry" aria-label="活动遥测">
+            {(["active", "waiting", "idle", "ended"] as LivenessState[]).map((state) => (
+              <span className={`telemetry-chip ${state}`} key={state}>
+                <span className={`state-dot ${state}`} />
+                <strong>{telemetry[state]}</strong>
+                {LIVENESS_LABEL[state]}
+              </span>
+            ))}
+          </div>
         </div>
-        <button className={`btn ${allConnected ? "" : "primary"}`} onClick={openConfig}>
-          <Power size={15} /> {allConnected ? "活动流配置" : "启用活动流"}
-        </button>
-      </section>
+        <div className="monitor-tools">
+          <div className="tool-segment" role="tablist" aria-label="工具过滤">
+            {([
+              ["all", Radio, "全部"],
+              ["claude", Bot, "Claude"],
+              ["codex", Terminal, "Codex"],
+            ] as const).map(([value, Icon, label]) => (
+              <button
+                key={value}
+                className={toolFilter === value ? "active" : ""}
+                onClick={() => setToolFilter(value)}
+                role="tab"
+                aria-selected={toolFilter === value}
+              >
+                <Icon size={14} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+          <button className="icon-btn monitor-config-btn" onClick={openConfig} aria-label="活动流配置">
+            <Settings size={16} />
+          </button>
+        </div>
+      </header>
 
       <section className="activity-layout">
         <div className="activity-sessions">
           <div className="monitor-section-head">
             <h3>会话</h3>
-            <span>{sessions.length}</span>
+            <span>{sessionViews.length}</span>
           </div>
-          {sessions.length ? (
-            sessions.map((session) => (
+          {sessionViews.length ? (
+            sessionViews.map(({ session, liveness, match }) => (
               <button
                 key={session.key}
-                className={`activity-session-card ${activeSession?.key === session.key ? "active" : ""}`}
+                className={`activity-session-card ${activeSession?.key === session.key ? "selected" : ""} ${liveness === "active" ? "live" : ""}`}
                 onClick={() => setActiveKey(session.key)}
               >
-                <span className="activity-tool">{session.tool}</span>
+                <span className={`state-dot ${liveness}`} />
                 <span className="activity-session-main">
-                  <strong>{sessionTitle(session)}</strong>
-                  <span>{session.eventCount} 事件 · {formatRelative(session.lastActiveAt, now)} 前</span>
+                  <span className="activity-session-line">
+                    <strong>{sessionTitle(session)}</strong>
+                    <em>{TOOL_SHORT_LABEL[session.tool]}</em>
+                  </span>
+                  <span>
+                    {kindLabel(session.events[session.events.length - 1]?.kind ?? "notification")} · {formatRelative(session.lastActiveAt, now)} 前
+                    {match && <b>同目录疑似</b>}
+                  </span>
                 </span>
               </button>
             ))
           ) : (
             <div className="activity-empty">暂无活动。启用活动流后，本地 Claude Code / Codex 的动作会实时出现在这里。</div>
           )}
+          {unconnectedAgents.length > 0 && (
+            <div className="unconnected-group">
+              <div className="unconnected-head">
+                <span>未接入</span>
+                <small>重开会话后生效</small>
+              </div>
+              {unconnectedAgents.map((agent) => (
+                <article className="activity-session-card muted" key={agent.pid}>
+                  <span className="state-dot ended" />
+                  <span className="activity-session-main">
+                    <span className="activity-session-line">
+                      <strong>{agentTitle(agent)}</strong>
+                      <em>{TOOL_SHORT_LABEL[agent.tool]}</em>
+                    </span>
+                    <span>已运行 {formatDuration(agent.startedAt, now)}</span>
+                  </span>
+                </article>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="activity-timeline">
           <div className="activity-timeline-head">
-            <div>
+            <div className="activity-timeline-title">
               <h3>{activeSession ? sessionTitle(activeSession) : "活动流"}</h3>
               <span>{activeSession?.cwd || "等待本地 agent 事件"}</span>
             </div>
-            <button className="btn activity-timeline-config" onClick={openConfig}>
-              <SlidersHorizontal size={15} /> 配置
-            </button>
+            {activeView && (
+              <div className="timeline-actions">
+                <span className={`liveness-pill ${activeView.liveness}`}>
+                  <span className={`state-dot ${activeView.liveness}`} />
+                  {LIVENESS_LABEL[activeView.liveness]}
+                </span>
+                <button className="icon-btn" onClick={() => copyPath(activeSession?.cwd)} aria-label="复制 cwd" disabled={!activeSession?.cwd}>
+                  <Copy size={15} />
+                </button>
+              </div>
+            )}
           </div>
           {activeSession ? (
             <div className="activity-events">
@@ -358,30 +523,23 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
                       <article className="activity-event">
                         <span className={`activity-dot ${head.kind}`} />
                         <button
-                          className="activity-event-card activity-fold"
+                          className="activity-event-row activity-fold"
                           onClick={() => setExpanded((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
+                          title={`${head.toolName} × ${group.events.length}`}
                         >
-                          <div className="activity-event-head">
-                            <span className="activity-kind"><Icon size={14} /> {kindLabel(head.kind)}</span>
-                            <time><Clock3 size={13} /> {formatRelative(group.events[group.events.length - 1].ts, now)} 前</time>
-                          </div>
-                          <strong>
-                            {head.toolName} × {group.events.length}
-                          </strong>
-                          <p>{open ? "收起" : "展开逐条查看"}</p>
+                          <span className="activity-kind"><Icon size={14} /> {kindLabel(head.kind)}</span>
+                          <strong>{head.toolName} × {group.events.length}</strong>
+                          <time><Clock3 size={13} /> {formatRelative(group.events[group.events.length - 1].ts, now)} 前</time>
                         </button>
                       </article>
                     )}
                     {shown.map((event) => (
                       <article className={`activity-event ${folded ? "nested" : ""}`} key={event.id}>
                         <span className={`activity-dot ${event.kind}`} />
-                        <div className="activity-event-card">
-                          <div className="activity-event-head">
-                            <span className="activity-kind"><Icon size={14} /> {kindLabel(event.kind)}</span>
-                            <time><Clock3 size={13} /> {formatRelative(event.ts, now)} 前</time>
-                          </div>
-                          <strong>{event.title}</strong>
-                          {event.detail && <p>{event.detail}</p>}
+                        <div className="activity-event-row" title={event.detail || event.title}>
+                          <span className="activity-kind"><Icon size={14} /> {kindLabel(event.kind)}</span>
+                          <strong>{eventTitle(event)}</strong>
+                          <time><Clock3 size={13} /> {formatRelative(event.ts, now)} 前</time>
                         </div>
                       </article>
                     ))}
@@ -436,34 +594,6 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
         </div>
       )}
 
-      {/* 进程探测只补 hooks 的盲区：hooks 只对启用后新开的会话生效，
-          所以「在跑但没接入」只有 ps 看得见。全部接入时本段自然消失。 */}
-      {unconnectedAgents.length > 0 && (
-        <section className="monitor-section">
-          <div className="monitor-section-head">
-            <h3>未接入活动流</h3>
-            <span>{unconnectedAgents.length} 个进程</span>
-          </div>
-          <div className="activity-empty">
-            这些 agent 在启用活动流之前就已经在跑，不会加载新配置。重启它们的会话后动作才会出现在活动流里。
-          </div>
-          <div className="agent-list">
-            {unconnectedAgents.map((agent) => (
-              <article className="agent-card" key={agent.pid}>
-                <div className="agent-tool">{agent.tool}</div>
-                <div className="agent-main">
-                  <div className="agent-project">{agentTitle(agent)}</div>
-                  {agent.cwd && <div className="agent-path">{agent.cwd}</div>}
-                </div>
-                <div className="agent-meta">
-                  <span className={`agent-status ${agent.status}`} aria-label={agent.status} />
-                  <span>已运行 {formatDuration(agent.startedAt, now)}</span>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-      )}
     </div>
   );
 }
@@ -543,7 +673,7 @@ function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
           />
         </label>
         {!s.encryptionAvailable && (
-          <div className="warn-note">⚠ 系统加密不可用，key 将以明文存储（本机 keychain 缺失）。</div>
+          <div className="warn-note">系统加密不可用，key 将以明文存储（本机 keychain 缺失）。</div>
         )}
         {s.encryptionAvailable && (
           <div className="ok-note">key 经系统加密后存储，磁盘上无明文。</div>
@@ -576,7 +706,7 @@ function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
 
       <div className="settings-foot">
         <button className="btn primary" onClick={save}>保存</button>
-        {saved && <span className="saved">已保存 ✓</span>}
+        {saved && <span className="saved">已保存</span>}
       </div>
     </div>
   );
