@@ -368,6 +368,25 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
                 {conflict.message} <code>{conflict.path}</code>
               </div>
             ))}
+            {configResult && (
+              <div className="activity-result">
+                {selectedToolList().map((tool) => {
+                  const st = status?.scopes[scope][tool];
+                  return (
+                    <div className="activity-result-row" key={tool}>
+                      <span className={`activity-status ${st?.enabled ? "running" : "idle"}`} />
+                      <span>{tool === "claude" ? "Claude Code" : "Codex"}</span>
+                      <small>{st?.enabled ? "已接入活动流" : "未接入"}</small>
+                    </div>
+                  );
+                })}
+                {configResult.changed.length > 0 && (
+                  <div className="activity-result-note">
+                    已更新 {configResult.changed.length} 个配置文件。对正在运行的会话，需重启该会话后才会生效；新启动的动作会实时出现。
+                  </div>
+                )}
+              </div>
+            )}
             <div className="activity-modal-actions">
               <button className="btn" onClick={() => runConfig("disable")} disabled={configBusy}>
                 <PowerOff size={15} /> 关闭活动流
