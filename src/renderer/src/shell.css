@@ -273,7 +273,7 @@ body {
   width: calc(100% - 18px);
   margin: var(--s2) 9px 0;
   padding: var(--s2) 0 6px;
-  gap: 5px;
+  gap: 6px;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -285,33 +285,106 @@ body {
 .sb-agent-label:hover {
   color: var(--muted);
 }
+.sb-agent-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--faint);
+}
 .sb-agent-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sb-agent-session {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 9px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+.sb-agent-session:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.sb-agent-session.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.sb-agent-session.muted {
+  cursor: default;
+}
+.sb-agent-session.muted:hover {
+  background: transparent;
+}
+.sb-agent-session .state-dot {
+  align-self: center;
+}
+.sb-agent-body {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.sb-agent-session {
-  min-height: 38px;
-  width: 100%;
+.sb-agent-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
 }
-.sb-agent-session.active {
-  box-shadow: inset 2px 0 0 var(--accent);
+.sb-agent-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
 }
-.sb-agent-session.muted {
+.sb-agent-session.muted .sb-agent-name {
+  font-weight: 450;
+  color: var(--muted);
+}
+.sb-agent-time {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
   color: var(--faint);
-  cursor: default;
+}
+.sb-agent-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 .sb-agent-state {
   flex: none;
-  color: var(--faint);
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 10.5px;
+  color: var(--muted);
 }
-.sb-agent-note {
-  padding: var(--s2) 9px 4px 24px;
-  color: var(--faint);
+.sb-agent-state.waiting {
+  color: var(--warn);
+}
+.sb-agent-last {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 10px;
+  color: var(--faint);
+}
+.sb-agent-empty {
+  padding: 4px 9px 6px 24px;
+  color: var(--faint);
+  font-size: 11px;
 }
 .sb-agent-session.live .state-dot.active {
   animation: monitor-live-pulse 1800ms cubic-bezier(0.2, 0, 0, 1) infinite;

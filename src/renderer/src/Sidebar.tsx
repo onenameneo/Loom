@@ -111,21 +111,23 @@ export default function Sidebar({
     const isExp = expanded.has(groupId);
     const sessions = sessionViews.filter((view) => view.session.tool === tool);
     const agents = unconnectedAgents.filter((agent) => agent.tool === tool);
-    if (!sessions.length && !agents.length) return null;
     const ToolIcon = tool === "claude" ? Bot : Terminal;
+    const count = sessions.length + agents.length;
+    // 两组固定常显，让「有哪些工具」的结构一目了然；空组给一行提示。
     return (
       <Fragment key={tool}>
         <button className="sb-label sb-agent-label" onClick={() => toggleExpand(groupId)}>
           {isExp ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
           <ToolIcon size={13} />
           <span>{TOOL_SHORT_LABEL[tool]}</span>
+          {count > 0 && <span className="sb-agent-count">{count}</span>}
         </button>
         {isExp && (
           <div className="sb-agent-group">
-            {sessions.map(({ session, liveness, match }) => (
+            {sessions.map(({ session, liveness }) => (
               <button
                 key={session.key}
-                className={`sb-ws sb-agent-session ${ctx.activeSessionKey === session.key ? "active" : ""} ${liveness === "active" ? "live" : ""}`}
+                className={`sb-agent-session ${ctx.activeSessionKey === session.key ? "active" : ""} ${liveness === "active" ? "live" : ""}`}
                 onClick={() => {
                   ctx.setActiveSessionKey(session.key);
                   setSurface("observatory");
@@ -133,31 +135,37 @@ export default function Sidebar({
                 title={session.cwd || sessionTitle(session)}
               >
                 <span className={`state-dot ${liveness}`} />
-                <span className="ws-name">
-                  <span>{sessionTitle(session)}</span>
-                  <small>
-                    {kindLabel(session.events[session.events.length - 1]?.kind ?? "notification")} · {formatRelative(session.lastActiveAt, ctx.activityNow)} 前
-                    {match ? " · 同目录疑似" : ""}
-                  </small>
+                <span className="sb-agent-body">
+                  <span className="sb-agent-row">
+                    <span className="sb-agent-name">{sessionTitle(session)}</span>
+                    <span className="sb-agent-time">{formatRelative(session.lastActiveAt, ctx.activityNow)}</span>
+                  </span>
+                  <span className="sb-agent-sub">
+                    <span className={`sb-agent-state ${liveness}`}>{LIVENESS_LABEL[liveness]}</span>
+                    <span className="sb-agent-last">{kindLabel(session.events[session.events.length - 1]?.kind ?? "notification")}</span>
+                  </span>
                 </span>
-                <span className="sb-agent-state">{LIVENESS_LABEL[liveness]}</span>
               </button>
             ))}
-            {agents.length > 0 && (
-              <div className="sb-agent-unconnected">
-                <div className="sb-agent-note">未接入 · 重开会话后生效</div>
-                {agents.map((agent: AgentProc) => (
-                  <div className="sb-ws sb-agent-session muted" key={agent.pid} title={agent.cwd || agentTitle(agent)}>
-                    <span className="state-dot ended" />
-                    <span className="ws-name">
-                      <span>{agentTitle(agent)}</span>
-                      <small>已运行 {formatDuration(agent.startedAt, ctx.activityNow)}</small>
-                    </span>
+            {agents.map((agent: AgentProc) => (
+              <div
+                className="sb-agent-session muted"
+                key={agent.pid}
+                title={`${agent.cwd || agentTitle(agent)} · 未接入，重开会话后生效`}
+              >
+                <span className="state-dot ended" />
+                <span className="sb-agent-body">
+                  <span className="sb-agent-row">
+                    <span className="sb-agent-name">{agentTitle(agent)}</span>
+                    <span className="sb-agent-time">{formatDuration(agent.startedAt, ctx.activityNow)}</span>
+                  </span>
+                  <span className="sb-agent-sub">
                     <span className="sb-agent-state">未接入</span>
-                  </div>
-                ))}
+                  </span>
+                </span>
               </div>
-            )}
+            ))}
+            {count === 0 && <div className="sb-agent-empty">暂无会话</div>}
           </div>
         )}
       </Fragment>
