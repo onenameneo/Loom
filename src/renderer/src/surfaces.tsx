@@ -1,9 +1,18 @@
 import { useEffect, useState } from "react";
-import { FolderOpen, Send, Shield, Square, X } from "lucide-react";
-import type { AcpEvent, AcpPermissionReq, AcpSessionDto, AcpToolCall, AgentProc, SettingsPayload, WorkspaceMeta } from "./env";
+import { BellRing, CheckCircle2, Circle, Clock3, Power, PowerOff, Radio, Wrench } from "lucide-react";
+import type {
+  ActivityConfigResult,
+  ActivityEvent,
+  ActivityScope,
+  ActivitySession,
+  ActivityStatus,
+  ActivityTool,
+  AgentProc,
+  SettingsPayload,
+  WorkspaceMeta,
+} from "./env";
 import { IconEye, IconPlus, IconSettings, IconWorkspace } from "./icons";
 import Workspace from "./canvas/Workspace";
-import { Message } from "./message/Message";
 
 export interface SurfaceCtx {
   workspaces: WorkspaceMeta[];
@@ -74,96 +83,92 @@ function agentTitle(agent: AgentProc): string {
   return agent.project || agent.cwd || `pid ${agent.pid}`;
 }
 
-type AcpChatMessage = { id: string; role: "user" | "assistant"; text: string; streaming?: boolean };
-type AcpConversation = { messages: AcpChatMessage[]; tools: AcpToolCall[]; permissions: AcpPermissionReq[] };
-
-function emptyConversation(): AcpConversation {
-  return { messages: [], tools: [], permissions: [] };
+function formatRelative(ts: number, now: number): string {
+  const seconds = Math.max(0, Math.floor((now - ts) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
-function acpText(update: any): string {
-  const content = update?.content;
-  return content?.type === "text" && typeof content.text === "string" ? content.text : "";
+function sessionTitle(session: ActivitySession): string {
+  return session.project || session.cwd || session.sessionId;
 }
 
-function toolStatus(status?: string | null): AcpToolCall["status"] {
-  if (status === "completed") return "done";
-  if (status === "failed") return "error";
-  if (status === "in_progress") return "in_progress";
-  return "pending";
-}
-
-function mergeMessage(messages: AcpChatMessage[], role: "user" | "assistant", text: string, sourceId?: string | null) {
-  if (!text) return messages;
-  const id = sourceId || `${role}_${messages.length}`;
-  const existingIndex = sourceId ? messages.findIndex((m) => m.id === id && m.role === role) : -1;
-  if (existingIndex >= 0) {
-    return messages.map((message, index) =>
-      index === existingIndex ? { ...message, text: `${message.text}${text}` } : message,
-    );
-  }
-  const last = messages[messages.length - 1];
-  if (!sourceId && last?.role === role) {
-    return messages.map((message, index) =>
-      index === messages.length - 1 ? { ...message, text: `${message.text}${text}` } : message,
-    );
-  }
-  return [...messages, { id, role, text, streaming: role === "assistant" }];
-}
-
-function applyAcpUpdate(conversation: AcpConversation, update: any): AcpConversation {
-  if (!update?.sessionUpdate) return conversation;
-  if (update.sessionUpdate === "user_message_chunk" || update.sessionUpdate === "agent_message_chunk") {
-    const role = update.sessionUpdate === "user_message_chunk" ? "user" : "assistant";
-    return {
-      ...conversation,
-      messages: mergeMessage(conversation.messages, role, acpText(update), update.messageId),
-    };
-  }
-  if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
-    const id = String(update.toolCallId ?? "");
-    if (!id) return conversation;
-    const patch: AcpToolCall = {
-      id,
-      title: update.title || id,
-      status: toolStatus(update.status),
-      kind: update.kind,
-    };
-    const exists = conversation.tools.some((tool) => tool.id === id);
-    return {
-      ...conversation,
-      tools: exists
-        ? conversation.tools.map((tool) => (tool.id === id ? { ...tool, ...patch, title: patch.title || tool.title } : tool))
-        : [...conversation.tools, patch],
-    };
-  }
-  return conversation;
-}
-
-function statusLabel(status: AcpSessionDto["status"]): string {
-  switch (status) {
-    case "starting":
-      return "准备中";
-    case "thinking":
-      return "思考中";
-    case "error":
-      return "出错";
-    case "stopped":
-      return "已停止";
+function kindLabel(kind: ActivityEvent["kind"]): string {
+  switch (kind) {
+    case "tool":
+      return "工具";
+    case "permission":
+      return "批准";
+    case "turn_end":
+      return "回合";
+    case "session_start":
+      return "开始";
+    case "stop":
+      return "结束";
     default:
-      return "就绪";
+      return "通知";
   }
+}
+
+function eventIcon(kind: ActivityEvent["kind"]) {
+  switch (kind) {
+    case "tool":
+      return Wrench;
+    case "permission":
+      return BellRing;
+    case "turn_end":
+    case "stop":
+      return CheckCircle2;
+    case "session_start":
+      return Radio;
+    default:
+      return Circle;
+  }
+}
+
+function applyActivityEvent(list: ActivitySession[], event: ActivityEvent): ActivitySession[] {
+  const key = `${event.tool}:${event.sessionId}`;
+  const existing = list.find((session) => session.key === key);
+  const next: ActivitySession = existing ?? {
+    key,
+    tool: event.tool,
+    sessionId: event.sessionId,
+    cwd: event.cwd,
+    project: event.project,
+    lastActiveAt: event.ts,
+    eventCount: 0,
+    events: [],
+  };
+  next.cwd = event.cwd || next.cwd;
+  next.project = event.project || next.project;
+  next.lastActiveAt = event.ts;
+  next.eventCount += 1;
+  next.events = [...next.events, event].slice(-200);
+  return [next, ...list.filter((session) => session.key !== key)].sort((a, b) => b.lastActiveAt - a.lastActiveAt);
+}
+
+function matchesAgentSession(agent: AgentProc, session: ActivitySession): boolean {
+  if (agent.tool !== session.tool) return false;
+  if (agent.cwd && session.cwd) return agent.cwd === session.cwd;
+  if (agent.project && session.project) return agent.project === session.project;
+  return false;
 }
 
 // ---- 工作站主面（内部 surface id 仍沿用 observatory）----
 function MonitorPanel(_: { ctx: SurfaceCtx }) {
   const [agents, setAgents] = useState<AgentProc[]>([]);
-  const [sessions, setSessions] = useState<AcpSessionDto[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [conversations, setConversations] = useState<Record<string, AcpConversation>>({});
-  const [draft, setDraft] = useState("");
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState<{ message: string; hint?: string } | null>(null);
+  const [sessions, setSessions] = useState<ActivitySession[]>([]);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [status, setStatus] = useState<ActivityStatus | null>(null);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [scope, setScope] = useState<ActivityScope>("project");
+  const [selectedTools, setSelectedTools] = useState<Record<ActivityTool, boolean>>({ claude: true, codex: true });
+  const [configResult, setConfigResult] = useState<ActivityConfigResult | null>(null);
+  const [configBusy, setConfigBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
   const supported = isDarwinRenderer();
 
@@ -186,222 +191,198 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
   }, []);
 
   useEffect(() => {
-    if (!window.api?.acp) return;
+    if (!window.api?.activity) return;
     let cancelled = false;
-    window.api.acp.list().then((list) => {
+    Promise.all([window.api.activity.list(), window.api.activity.status()]).then(([list, nextStatus]) => {
       if (cancelled) return;
       setSessions(list);
-      if (!activeSessionId && list[0]) setActiveSessionId(list[0].id);
+      setStatus(nextStatus);
+      if (!activeKey && list[0]) setActiveKey(list[0].key);
     });
-    const off = window.api.acp.onEvent((event: AcpEvent) => {
-      if (event.type === "started" && event.session) {
-        setStarting(false);
-        setError(null);
-        setSessions((list) => [event.session!, ...list.filter((session) => session.id !== event.session!.id)]);
-        setActiveSessionId(event.session.id);
-      }
-      if (event.type === "stopped" && event.session) {
-        setSessions((list) => list.map((session) => (session.id === event.session!.id ? event.session! : session)));
-      }
-      if (event.type === "error") {
-        setStarting(false);
-        setError({ message: event.message || "ACP 会话启动失败。", hint: event.hint });
-        if (event.sessionId) {
-          setSessions((list) =>
-            list.map((session) =>
-              session.id === event.sessionId ? { ...session, status: "error", error: event.message } : session,
-            ),
-          );
-        }
-      }
-      if (event.type === "permission" && event.sessionId && event.requestId && event.title && event.options) {
-        const req: AcpPermissionReq = {
-          sessionId: event.sessionId,
-          requestId: event.requestId,
-          title: event.title,
-          options: event.options,
-        };
-        setConversations((prev) => {
-          const conv = prev[event.sessionId!] ?? emptyConversation();
-          return {
-            ...prev,
-            [event.sessionId!]: {
-              ...conv,
-              permissions: [...conv.permissions.filter((item) => item.requestId !== req.requestId), req],
-            },
-          };
-        });
-      }
-      if (event.type === "update" && event.sessionId && event.update) {
-        setSessions((list) =>
-          list.map((session) =>
-            session.id === event.sessionId && session.status !== "stopped"
-              ? { ...session, status: event.update?.sessionUpdate === "agent_message_chunk" ? "thinking" : session.status }
-              : session,
-          ),
-        );
-        setConversations((prev) => {
-          const conv = prev[event.sessionId!] ?? emptyConversation();
-          return { ...prev, [event.sessionId!]: applyAcpUpdate(conv, event.update) };
-        });
-      }
+    const off = window.api.activity.onEvent((event) => {
+      setSessions((list) => applyActivityEvent(list, event));
+      setActiveKey((key) => key ?? `${event.tool}:${event.sessionId}`);
     });
     return () => {
       cancelled = true;
       off();
     };
-  }, [activeSessionId]);
+  }, [activeKey]);
 
-  async function startSession() {
-    setError(null);
-    const picked = await window.api.acp.pickDir();
-    if (picked.canceled || !picked.path) return;
-    setStarting(true);
-    const result = await window.api.acp.start({ cwd: picked.path });
-    if (!result.ok) {
-      setStarting(false);
-      setError({ message: result.message || "ACP 会话启动失败。", hint: result.hint });
+  async function refreshStatus() {
+    if (window.api?.activity) setStatus(await window.api.activity.status());
+  }
+
+  function openConfig() {
+    setConfigResult(null);
+    setConfigOpen(true);
+    void refreshStatus();
+  }
+
+  function selectedToolList(): ActivityTool[] {
+    return (Object.keys(selectedTools) as ActivityTool[]).filter((tool) => selectedTools[tool]);
+  }
+
+  async function runConfig(action: "enable" | "disable") {
+    const tools = selectedToolList();
+    if (!tools.length) return;
+    setConfigBusy(true);
+    try {
+      const result = await window.api.activity[action]({ scope, tools });
+      setConfigResult(result);
+      setStatus(result.status);
+    } finally {
+      setConfigBusy(false);
     }
   }
 
-  async function sendPrompt() {
-    const text = draft.trim();
-    if (!activeSessionId || !text) return;
-    setDraft("");
-    await window.api.acp.prompt({ sessionId: activeSessionId, text });
-  }
-
-  async function respondPermission(req: AcpPermissionReq, optionId?: string) {
-    await window.api.acp.respondPermission({ sessionId: req.sessionId, requestId: req.requestId, optionId });
-    setConversations((prev) => {
-      const conv = prev[req.sessionId] ?? emptyConversation();
-      return {
-        ...prev,
-        [req.sessionId]: { ...conv, permissions: conv.permissions.filter((item) => item.requestId !== req.requestId) },
-      };
-    });
-  }
-
-  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? null;
-  const activeConversation = activeSessionId ? conversations[activeSessionId] ?? emptyConversation() : emptyConversation();
+  const activeSession = sessions.find((session) => session.key === activeKey) ?? sessions[0] ?? null;
+  const connectedAgents = agents.filter((agent) => sessions.some((session) => matchesAgentSession(agent, session)));
+  const selectedFiles = status ? selectedToolList().map((tool) => status.scopes[scope][tool].path) : [];
   const hasPassiveAgents = supported && agents.length > 0;
 
   return (
     <div className="monitor">
       <div className="monitor-head">
         <h2>工作站</h2>
-        <span>{agents.length} 个 agent 在跑 · {sessions.length} 个我的会话</span>
+        <span>{agents.length} 个 agent 在跑 · {sessions.length} 个活动会话</span>
       </div>
 
-      <section className="monitor-section acp-section">
-        <div className="monitor-section-head">
-          <h3>我的会话</h3>
-          <button className="btn" onClick={startSession} disabled={starting}>
-            <FolderOpen size={15} /> {starting ? "正在准备 adapter…" : "启动会话"}
-          </button>
+      <section className="activity-discovery">
+        <div>
+          <strong>检测到 {agents.length} 个本地 agent 在跑，{connectedAgents.length} 个已接入活动流</strong>
+          <span>{supported ? "Claude Code hooks 与 Codex notify 会被本地 collector 接收。" : "当前版本先支持 macOS 本地进程探测。"}</span>
         </div>
-        {error && (
-          <div className="acp-error">
-            <strong>{error.message}</strong>
-            {error.hint && <span>{error.hint}</span>}
+        <button className="btn primary" onClick={openConfig}>
+          <Power size={15} /> 启用活动流
+        </button>
+      </section>
+
+      <section className="activity-layout">
+        <div className="activity-sessions">
+          <div className="monitor-section-head">
+            <h3>会话</h3>
+            <span>{sessions.length}</span>
           </div>
-        )}
-        {sessions.length === 0 ? (
-          <div className="acp-empty">选择一个项目目录，启动由 Loom 管理的 Claude Code 会话。</div>
-        ) : (
-          <div className="acp-layout">
-            <div className="acp-session-list">
-              {sessions.map((session) => (
-                <button
-                  className={`acp-session-card ${session.id === activeSessionId ? "active" : ""}`}
-                  key={session.id}
-                  onClick={() => setActiveSessionId(session.id)}
-                >
-                  <span className={`acp-dot ${session.status}`} />
-                  <span className="acp-session-main">
-                    <strong>{session.project}</strong>
-                    <span>{session.cwd}</span>
-                  </span>
-                  <span className="acp-session-state">{statusLabel(session.status)}</span>
-                </button>
+          {sessions.length ? (
+            sessions.map((session) => (
+              <button
+                key={session.key}
+                className={`activity-session-card ${activeSession?.key === session.key ? "active" : ""}`}
+                onClick={() => setActiveKey(session.key)}
+              >
+                <span className="activity-tool">{session.tool}</span>
+                <span className="activity-session-main">
+                  <strong>{sessionTitle(session)}</strong>
+                  <span>{session.eventCount} 事件 · {formatRelative(session.lastActiveAt, now)} 前</span>
+                </span>
+              </button>
+            ))
+          ) : (
+            <div className="activity-empty">暂无活动。启用活动流后，本地 Claude Code / Codex 的动作会实时出现在这里。</div>
+          )}
+        </div>
+
+        <div className="activity-timeline">
+          <div className="activity-timeline-head">
+            <div>
+              <h3>{activeSession ? sessionTitle(activeSession) : "活动流"}</h3>
+              <span>{activeSession?.cwd || "等待本地 agent 事件"}</span>
+            </div>
+            <button className="btn" onClick={openConfig}>
+              <PowerOff size={15} /> 配置
+            </button>
+          </div>
+          {activeSession ? (
+            <div className="activity-events">
+              {activeSession.events.map((event) => {
+                const Icon = eventIcon(event.kind);
+                return (
+                  <article className="activity-event" key={event.id}>
+                    <span className={`activity-dot ${event.kind}`} />
+                    <div className="activity-event-card">
+                      <div className="activity-event-head">
+                        <span className="activity-kind"><Icon size={14} /> {kindLabel(event.kind)}</span>
+                        <time><Clock3 size={13} /> {formatRelative(event.ts, now)} 前</time>
+                      </div>
+                      <strong>{event.title}</strong>
+                      {event.detail && <p>{event.detail}</p>}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="activity-empty large">暂无活动。启用活动流后，本地 Claude Code / Codex 的动作会实时出现在这里。</div>
+          )}
+        </div>
+      </section>
+
+      {configOpen && (
+        <div className="activity-modal" role="dialog" aria-modal="true" aria-label="活动流配置">
+          <div className="activity-modal-backdrop" onClick={() => setConfigOpen(false)} />
+          <div className="activity-modal-content">
+            <div className="activity-modal-head">
+              <h3>活动流接入</h3>
+              <button onClick={() => setConfigOpen(false)}>关闭</button>
+            </div>
+            <div className="activity-config-grid">
+              <label>
+                <span>范围</span>
+                <select value={scope} onChange={(event) => setScope(event.target.value as ActivityScope)}>
+                  <option value="project">项目级</option>
+                  <option value="global">全局</option>
+                </select>
+              </label>
+              <div>
+                <span>工具</span>
+                <label className="check-field compact">
+                  <input
+                    type="checkbox"
+                    checked={selectedTools.claude}
+                    onChange={(event) => setSelectedTools((prev) => ({ ...prev, claude: event.target.checked }))}
+                  />
+                  <span>Claude Code</span>
+                </label>
+                <label className="check-field compact">
+                  <input
+                    type="checkbox"
+                    checked={selectedTools.codex}
+                    onChange={(event) => setSelectedTools((prev) => ({ ...prev, codex: event.target.checked }))}
+                  />
+                  <span>Codex</span>
+                </label>
+              </div>
+            </div>
+            <div className="activity-files">
+              <span>将改动的配置文件</span>
+              {selectedFiles.map((file) => (
+                <code key={file}>{file}</code>
               ))}
             </div>
-            <div className="acp-chat">
-              {activeSession ? (
-                <>
-                  <div className="acp-chat-head">
-                    <div>
-                      <strong>{activeSession.project}</strong>
-                      <span>{activeSession.cwd}</span>
-                    </div>
-                    <div className="acp-chat-actions">
-                      <button title="停止生成" onClick={() => window.api.acp.cancel(activeSession.id)}>
-                        <Square size={14} />
-                      </button>
-                      <button title="结束会话" onClick={() => window.api.acp.stop(activeSession.id)}>
-                        <X size={14} />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="acp-messages">
-                    {activeConversation.messages.map((message) => (
-                      <Message
-                        key={message.id}
-                        role={message.role}
-                        text={message.text}
-                        density="compact"
-                        streaming={message.streaming && activeSession.status === "thinking"}
-                      />
-                    ))}
-                    {activeConversation.tools.map((tool) => (
-                      <div className="acp-tool" key={tool.id}>
-                        <span className={`acp-dot ${tool.status}`} />
-                        <span>{tool.title}</span>
-                        {tool.kind && <em>{tool.kind}</em>}
-                      </div>
-                    ))}
-                    {activeConversation.permissions.map((req) => (
-                      <div className="acp-permission" key={req.requestId}>
-                        <div>
-                          <Shield size={15} />
-                          <strong>{req.title}</strong>
-                        </div>
-                        <div className="acp-permission-actions">
-                          {req.options.map((option) => (
-                            <button key={option.id} onClick={() => respondPermission(req, option.id)}>
-                              {option.label}
-                            </button>
-                          ))}
-                          <button onClick={() => respondPermission(req)}>拒绝</button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="acp-compose">
-                    <textarea
-                      value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
-                      placeholder="给本地 Claude Code 发送消息"
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void sendPrompt();
-                      }}
-                    />
-                    <button className="btn primary" onClick={sendPrompt} disabled={!draft.trim()}>
-                      <Send size={15} /> 发送
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="acp-empty">选择一个会话查看对话。</div>
-              )}
+            {status?.scopes[scope].codex.conflict && selectedTools.codex && (
+              <div className="activity-conflict">{status.scopes[scope].codex.conflict}</div>
+            )}
+            {configResult?.conflicts.map((conflict) => (
+              <div className="activity-conflict" key={`${conflict.tool}:${conflict.path}`}>
+                {conflict.message} <code>{conflict.path}</code>
+              </div>
+            ))}
+            <div className="activity-modal-actions">
+              <button className="btn" onClick={() => runConfig("disable")} disabled={configBusy}>
+                <PowerOff size={15} /> 关闭活动流
+              </button>
+              <button className="btn primary" onClick={() => runConfig("enable")} disabled={configBusy}>
+                <Power size={15} /> 启用活动流
+              </button>
             </div>
           </div>
-        )}
-      </section>
+        </div>
+      )}
 
       <section className="monitor-section">
         <div className="monitor-section-head">
-          <h3>在跑的</h3>
+          <h3>发现辅助</h3>
           <span>{supported ? `${agents.length} 个进程` : "当前平台暂不支持进程探测"}</span>
         </div>
         {hasPassiveAgents ? (
@@ -421,7 +402,7 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
             ))}
           </div>
         ) : (
-          <div className="acp-empty">{supported ? "暂无在跑的 agent。" : "当前版本先支持 macOS 本地进程探测。"}</div>
+          <div className="activity-empty">{supported ? "暂无在跑的 agent。" : "当前版本先支持 macOS 本地进程探测。"}</div>
         )}
       </section>
     </div>

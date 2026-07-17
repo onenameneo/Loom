@@ -21,10 +21,16 @@ export interface MonitorSettings {
   notify: boolean;
 }
 
+export interface ActivitySettings {
+  token?: string;
+  port?: number;
+}
+
 export interface Settings {
   access: AccessSettings;
   appearance: AppearanceSettings;
   monitor: MonitorSettings;
+  activity: ActivitySettings;
   apiKeyEnc?: string; // safeStorage 加密后的 base64；明文永不落盘
 }
 
@@ -99,6 +105,7 @@ export const DEFAULT_SETTINGS: Settings = {
   access: { provider: "anthropic", baseUrl: "", model: "" },
   appearance: { theme: "system", density: "comfortable" },
   monitor: { notify: true },
+  activity: {},
 };
 
 export const SCHEMA_VERSION = 1;

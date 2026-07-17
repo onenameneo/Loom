@@ -11,6 +11,30 @@ type AgentProc = {
   status: "running" | "idle";
 };
 type MonitorEvent = { type: "snapshot" | "started" | "stopped"; agents: AgentProc[]; agent?: AgentProc };
+type ActivityEvent = {
+  id: string;
+  tool: "claude" | "codex";
+  sessionId: string;
+  cwd?: string;
+  project?: string;
+  kind: "tool" | "permission" | "turn_end" | "session_start" | "stop" | "notification";
+  title: string;
+  detail?: string;
+  ts: number;
+};
+type ActivitySession = {
+  key: string;
+  tool: "claude" | "codex";
+  sessionId: string;
+  cwd?: string;
+  project?: string;
+  lastActiveAt: number;
+  eventCount: number;
+  events: ActivityEvent[];
+};
+type ActivityScope = "project" | "global";
+type ActivityTool = "claude" | "codex";
+type ActivityConfigArg = { scope?: ActivityScope; tools?: ActivityTool[] };
 type AcpSessionDto = {
   id: string;
   cwd: string;
@@ -70,6 +94,17 @@ const api = {
       return () => ipcRenderer.removeListener("monitor:event", l);
     },
     setNotify: (on: boolean): Promise<{ ok: boolean }> => ipcRenderer.invoke("monitor:setNotify", on),
+  },
+  activity: {
+    list: (): Promise<ActivitySession[]> => ipcRenderer.invoke("activity:list"),
+    status: (): Promise<any> => ipcRenderer.invoke("activity:status"),
+    enable: (arg: ActivityConfigArg): Promise<any> => ipcRenderer.invoke("activity:enable", arg),
+    disable: (arg: ActivityConfigArg): Promise<any> => ipcRenderer.invoke("activity:disable", arg),
+    onEvent: (cb: (e: ActivityEvent) => void) => {
+      const l = (_: unknown, d: ActivityEvent) => cb(d);
+      ipcRenderer.on("activity:event", l);
+      return () => ipcRenderer.removeListener("activity:event", l);
+    },
   },
   acp: {
     start: (arg: { cwd: string }): Promise<{ ok: boolean; sessionId?: string; message?: string; hint?: string }> =>

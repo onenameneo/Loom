@@ -52,6 +52,68 @@ export interface MonitorEvent {
   agent?: AgentProc;
 }
 
+export type ActivityTool = "claude" | "codex";
+export type ActivityScope = "project" | "global";
+export type ActivityKind =
+  | "tool"
+  | "permission"
+  | "turn_end"
+  | "session_start"
+  | "stop"
+  | "notification";
+
+export interface ActivityEvent {
+  id: string;
+  tool: ActivityTool;
+  sessionId: string;
+  cwd?: string;
+  project?: string;
+  kind: ActivityKind;
+  title: string;
+  detail?: string;
+  ts: number;
+}
+
+export interface ActivitySession {
+  key: string;
+  tool: ActivityTool;
+  sessionId: string;
+  cwd?: string;
+  project?: string;
+  lastActiveAt: number;
+  eventCount: number;
+  events: ActivityEvent[];
+}
+
+export interface ActivityToolStatus {
+  enabled: boolean;
+  path: string;
+  conflict?: string;
+}
+
+export interface ActivityStatus {
+  ok: boolean;
+  port: number;
+  tokenPreview: string;
+  files: string[];
+  scopes: Record<ActivityScope, Record<ActivityTool, ActivityToolStatus>>;
+}
+
+export interface ActivityConfigArg {
+  scope?: ActivityScope;
+  tools?: ActivityTool[];
+}
+
+export interface ActivityConfigResult {
+  ok: boolean;
+  port: number;
+  tokenPreview: string;
+  files: string[];
+  changed: string[];
+  conflicts: { tool: ActivityTool; path: string; message: string }[];
+  status: ActivityStatus;
+}
+
 export interface AcpSessionDto {
   id: string;
   cwd: string;
@@ -136,6 +198,13 @@ declare global {
         list: () => Promise<AgentProc[]>;
         onEvent: (cb: (e: MonitorEvent) => void) => () => void;
         setNotify: (on: boolean) => Promise<{ ok: boolean }>;
+      };
+      activity: {
+        list: () => Promise<ActivitySession[]>;
+        status: () => Promise<ActivityStatus>;
+        enable: (arg: ActivityConfigArg) => Promise<ActivityConfigResult>;
+        disable: (arg: ActivityConfigArg) => Promise<ActivityConfigResult>;
+        onEvent: (cb: (e: ActivityEvent) => void) => () => void;
       };
       acp: {
         start: (arg: { cwd: string }) => Promise<{ ok: boolean; sessionId?: string; message?: string; hint?: string }>;

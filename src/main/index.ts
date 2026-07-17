@@ -6,6 +6,7 @@ import type { Store } from "./store/store";
 import { registerCanvas } from "./canvas";
 import { registerMonitor } from "./monitor";
 import { registerAcp } from "./acp";
+import { registerCollector } from "./collector";
 import {
   accessSources,
   encryptionAvailable,
@@ -24,6 +25,7 @@ let store: Store;
 let canvas: ReturnType<typeof registerCanvas> | null = null;
 let monitor: ReturnType<typeof registerMonitor> | null = null;
 let acp: ReturnType<typeof registerAcp> | null = null;
+let collector: ReturnType<typeof registerCollector> | null = null;
 
 function resolvedTheme(): "light" | "dark" {
   const t = store.getSettings().appearance.theme;
@@ -125,8 +127,11 @@ function createWindow() {
   });
   if (store && !monitor) monitor = registerMonitor({ getWin: () => win, store });
   if (store && !acp) acp = registerAcp({ getWin: () => win, store });
+  if (store && !collector) collector = registerCollector({ getWin: () => win, store });
   win.on("ready-to-show", () => win?.show());
   win.on("closed", () => {
+    collector?.stop();
+    collector = null;
     acp?.stop();
     acp = null;
     monitor?.stop();
@@ -146,6 +151,7 @@ app.whenReady().then(() => {
   canvas = registerCanvas({ getWin: () => win, store });
   monitor = registerMonitor({ getWin: () => win, store });
   acp = registerAcp({ getWin: () => win, store });
+  collector = registerCollector({ getWin: () => win, store });
   registerIpc();
   buildMenu();
   createWindow();
@@ -155,6 +161,8 @@ app.whenReady().then(() => {
 });
 
 app.on("before-quit", () => {
+  collector?.stop();
+  collector = null;
   acp?.stop();
   acp = null;
   monitor?.stop();
