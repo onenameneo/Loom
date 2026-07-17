@@ -642,9 +642,11 @@ function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   }
 
   return (
-    <div className="settings">
-      <h2>设置</h2>
-
+    <div className="surface-fill">
+      <div className="surface-head">
+        <span className="ws-title">设置</span>
+      </div>
+      <div className="settings">
       <section>
         <h3>接入</h3>
         <label className="field">
@@ -707,6 +709,7 @@ function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
       <div className="settings-foot">
         <button className="btn primary" onClick={save}>保存</button>
         {saved && <span className="saved">已保存</span>}
+      </div>
       </div>
     </div>
   );

@@ -338,6 +338,11 @@ body {
   justify-content: space-between;
   gap: var(--s4);
   margin-bottom: var(--s5);
+  /* 顶栏兼作窗口拖拽区（hiddenInset 下无原生标题栏）；交互控件下面单独 no-drag。 */
+  -webkit-app-region: drag;
+}
+.monitor-tools {
+  -webkit-app-region: no-drag;
 }
 .monitor-title {
   min-width: 0;
@@ -972,9 +977,11 @@ button.activity-session-card {
 
 /* ---------- settings ---------- */
 .settings {
+  flex: 1;
+  min-height: 0;
   max-width: 640px;
   margin: 0 auto;
-  padding: 40px 24px 60px;
+  padding: 28px 24px 60px;
   width: 100%;
   overflow-y: auto;
 }
