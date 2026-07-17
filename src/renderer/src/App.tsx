@@ -7,7 +7,6 @@ import {
   normalizeActivitySessions,
   SURFACES,
   type SurfaceCtx,
-  type ToolFilter,
 } from "./surfaces";
 
 export default function App() {
@@ -22,7 +21,6 @@ export default function App() {
   const [activitySessions, setActivitySessions] = useState<ActivitySession[]>([]);
   const [activityStatus, setActivityStatus] = useState<ActivityStatus | null>(null);
   const [activeSessionKey, setActiveSessionKey] = useState<string | null>(null);
-  const [toolFilter, setToolFilter] = useState<ToolFilter>("all");
   const [activityNow, setActivityNow] = useState(Date.now());
 
   const reloadSettings = useCallback(async () => {
@@ -104,10 +102,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const views = getSessionViews(activitySessions, agents, toolFilter, activityNow);
+    const views = getSessionViews(activitySessions, agents, "all", activityNow);
     if (activeSessionKey && views.some((view) => view.session.key === activeSessionKey)) return;
     setActiveSessionKey(views[0]?.session.key ?? null);
-  }, [activeSessionKey, activityNow, activitySessions, agents, toolFilter]);
+  }, [activeSessionKey, activityNow, activitySessions, agents]);
 
   const refreshActivityStatus = useCallback(async () => {
     if (!window.api?.activity) return;
@@ -165,8 +163,6 @@ export default function App() {
     activityStatus,
     activeSessionKey,
     setActiveSessionKey,
-    toolFilter,
-    setToolFilter,
     activityNow,
     refreshActivityStatus,
     runActivityConfig,

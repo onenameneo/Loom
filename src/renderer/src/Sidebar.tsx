@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
-import { Bot, ChevronDown, ChevronRight, Pencil, Pin, Radio, Terminal, Trash2 } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, Pencil, Pin, Terminal, Trash2 } from "lucide-react";
 import type { ActivityTool, AgentProc, CanvasNodeDto, SettingsPayload, WorkspaceMeta } from "./env";
 import { IconMoon, IconPlus, IconSun } from "./icons";
 import {
@@ -13,7 +13,6 @@ import {
   matchesAgentSession,
   sessionTitle,
   TOOL_SHORT_LABEL,
-  toolMatchesFilter,
   SURFACES,
   type SurfaceCtx,
 } from "./surfaces";
@@ -108,7 +107,6 @@ export default function Sidebar({
     : [];
 
   const renderAgentGroup = (tool: ActivityTool) => {
-    if (!toolMatchesFilter(tool, ctx.toolFilter)) return null;
     const groupId = `agent:${tool}`;
     const isExp = expanded.has(groupId);
     const sessions = sessionViews.filter((view) => view.session.tool === tool);
@@ -285,25 +283,6 @@ export default function Sidebar({
 
       {activeSurface === "observatory" && (
         <>
-          <div className="sb-label">过滤</div>
-          <div className="sb-tool-segment" role="tablist" aria-label="工具过滤">
-            {([
-              ["all", Radio, "全部"],
-              ["claude", Bot, "Claude"],
-              ["codex", Terminal, "Codex"],
-            ] as const).map(([value, Icon, label]) => (
-              <button
-                key={value}
-                className={ctx.toolFilter === value ? "active" : ""}
-                onClick={() => ctx.setToolFilter(value)}
-                role="tab"
-                aria-selected={ctx.toolFilter === value}
-              >
-                <Icon size={13} />
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
           {agentTools.map(renderAgentGroup)}
           {sessionViews.length === 0 && unconnectedAgents.length === 0 && (
             <div className="sb-hint">暂无活动。启用后会显示本地 agent 会话。</div>

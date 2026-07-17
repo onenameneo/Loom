@@ -42,8 +42,6 @@ export interface SurfaceCtx {
   activityStatus: ActivityStatus | null;
   activeSessionKey: string | null;
   setActiveSessionKey: (key: string | null) => void;
-  toolFilter: ToolFilter;
-  setToolFilter: (filter: ToolFilter) => void;
   activityNow: number;
   refreshActivityStatus: () => Promise<void>;
   runActivityConfig: (action: "enable" | "disable", tool: ActivityTool) => Promise<void>;
@@ -349,7 +347,7 @@ function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
     await navigator.clipboard.writeText(path);
   }
 
-  const sessionViews = getSessionViews(ctx.activitySessions, ctx.agents, ctx.toolFilter, ctx.activityNow);
+  const sessionViews = getSessionViews(ctx.activitySessions, ctx.agents, "all", ctx.activityNow);
   const activeView = sessionViews.find((view) => view.session.key === ctx.activeSessionKey) ?? sessionViews[0] ?? null;
   const activeSession = activeView?.session ?? null;
   const telemetry = sessionViews.reduce(
