@@ -314,8 +314,7 @@ body {
   background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 .sb-agent-session.active {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: color-mix(in srgb, var(--text) 9%, transparent);
 }
 .sb-agent-session.muted {
   cursor: default;
