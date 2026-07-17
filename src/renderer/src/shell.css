@@ -466,6 +466,10 @@ body {
 .activity-timeline-head > div {
   min-width: 0;
 }
+.activity-timeline-config {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .activity-timeline-head h3 {
   margin: 0;
   font-size: 14px;

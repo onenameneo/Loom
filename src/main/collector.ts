@@ -245,8 +245,10 @@ function normalizeClaude(payload: unknown): ActivityEvent | null {
     title = kind === "permission" ? `需要批准: ${toolName || "Claude"}` : "Claude 通知";
     detail = compact(payload.message ?? payload.tool_input ?? payload.permission_mode);
   } else if (eventName === "Stop" || eventName === "SubagentStop") {
-    kind = "stop";
-    title = eventName === "SubagentStop" ? "Subagent 结束" : "会话结束";
+    // Stop 在主 agent 答完每一轮时触发，不是会话退出 —— 与 Codex 的
+    // agent-turn-complete 同义，统一归到 turn_end。
+    kind = eventName === "SubagentStop" ? "stop" : "turn_end";
+    title = eventName === "SubagentStop" ? "Subagent 结束" : "回合结束";
     detail = compact(payload.stop_hook_active ? "stop hook active" : undefined);
   } else if (eventName === "SessionStart") {
     kind = "session_start";

@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
-import { BellRing, CheckCircle2, Circle, Clock3, Power, PowerOff, Radio, Wrench } from "lucide-react";
+import {
+  BellRing,
+  CheckCircle2,
+  Circle,
+  Clock3,
+  Power,
+  PowerOff,
+  Radio,
+  SlidersHorizontal,
+  Wrench,
+} from "lucide-react";
 import type {
   ActivityConfigResult,
   ActivityEvent,
@@ -240,6 +250,7 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
   const connectedAgents = agents.filter((agent) => sessions.some((session) => matchesAgentSession(agent, session)));
   const selectedFiles = status ? selectedToolList().map((tool) => status.scopes[scope][tool].path) : [];
   const hasPassiveAgents = supported && agents.length > 0;
+  const allConnected = agents.length > 0 && connectedAgents.length === agents.length;
 
   return (
     <div className="monitor">
@@ -253,8 +264,8 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
           <strong>检测到 {agents.length} 个本地 agent 在跑，{connectedAgents.length} 个已接入活动流</strong>
           <span>{supported ? "Claude Code hooks 与 Codex notify 会被本地 collector 接收。" : "当前版本先支持 macOS 本地进程探测。"}</span>
         </div>
-        <button className="btn primary" onClick={openConfig}>
-          <Power size={15} /> 启用活动流
+        <button className={`btn ${allConnected ? "" : "primary"}`} onClick={openConfig}>
+          <Power size={15} /> {allConnected ? "活动流配置" : "启用活动流"}
         </button>
       </section>
 
@@ -289,8 +300,8 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
               <h3>{activeSession ? sessionTitle(activeSession) : "活动流"}</h3>
               <span>{activeSession?.cwd || "等待本地 agent 事件"}</span>
             </div>
-            <button className="btn" onClick={openConfig}>
-              <PowerOff size={15} /> 配置
+            <button className="btn activity-timeline-config" onClick={openConfig}>
+              <SlidersHorizontal size={15} /> 配置
             </button>
           </div>
           {activeSession ? (
