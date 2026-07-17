@@ -591,7 +591,7 @@ function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
             checked={monitorNotify}
             onChange={(e) => setMonitorNotify(e.target.checked)}
           />
-          <span>工作站桌面通知</span>
+          <span>工作站桌面通知（agent 回合完成 / 需要输入时响声提醒）</span>
         </label>
       </section>
 

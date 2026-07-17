@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, Notification, ipcMain } from "electron";
 import type { Store } from "./store/store";
 
 const DEFAULT_PORT = 31_577;
@@ -611,6 +611,26 @@ export function registerCollector(opts: { getWin: () => BrowserWindow | null; st
     getWin()?.webContents.send("activity:event", event);
   }
 
+  // agent 答完一轮 / 需要输入时响一声——这是用户该回去看一眼的时刻。
+  // 复用「工作站桌面通知」开关；macOS 指定系统声音名确保出声。
+  function notifyCompletion(event: ActivityEvent) {
+    if (event.kind !== "turn_end" && event.kind !== "permission") return;
+    if (!store.getSettings().monitor.notify) return;
+    if (!Notification.isSupported()) return;
+    const label = event.tool === "claude" ? "Claude" : "Codex";
+    const where = event.project || event.cwd || event.sessionId;
+    try {
+      new Notification({
+        title: `${label} · ${where}`,
+        body: event.kind === "permission" ? "需要你批准" : "回合完成",
+        silent: false,
+        sound: "Glass",
+      }).show();
+    } catch {
+      // 通知尽力而为，不能影响事件收集。
+    }
+  }
+
   function addEvent(event: ActivityEvent) {
     const key = `${event.tool}:${event.sessionId}`;
     const existing = sessions.get(key);
@@ -632,6 +652,7 @@ export function registerCollector(opts: { getWin: () => BrowserWindow | null; st
     sessions.set(key, next);
     markVerified(event.tool, event.ts);
     send(event);
+    notifyCompletion(event);
   }
 
   async function handlePost(req: IncomingMessage, res: ServerResponse, tool: ActivityTool) {
