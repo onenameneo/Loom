@@ -32,9 +32,8 @@ type ActivitySession = {
   eventCount: number;
   events: ActivityEvent[];
 };
-type ActivityScope = "project" | "global";
 type ActivityTool = "claude" | "codex";
-type ActivityConfigArg = { scope?: ActivityScope; tools?: ActivityTool[] };
+type ActivityConfigArg = { tools?: ActivityTool[] };
 type AcpSessionDto = {
   id: string;
   cwd: string;

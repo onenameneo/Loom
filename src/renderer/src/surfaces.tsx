@@ -13,10 +13,10 @@ import {
 import type {
   ActivityConfigResult,
   ActivityEvent,
-  ActivityScope,
   ActivitySession,
   ActivityStatus,
   ActivityTool,
+  ActivityToolStatus,
   AgentProc,
   SettingsPayload,
   WorkspaceMeta,
@@ -161,6 +161,55 @@ function applyActivityEvent(list: ActivitySession[], event: ActivityEvent): Acti
   return [next, ...list.filter((session) => session.key !== key)].sort((a, b) => b.lastActiveAt - a.lastActiveAt);
 }
 
+const TOOL_LABEL: Record<ActivityTool, string> = { claude: "Claude Code", codex: "Codex" };
+
+type LinkState = "off" | "pending" | "live";
+
+// 三态的依据刻意分开：configured 只说明 Loom 写过配置，verifiedAt 才说明这条链路
+// 真的通了（收到过事件）。Codex 未信任的 hook 会被静默跳过，光看配置永远发现不了。
+function linkState(status?: ActivityToolStatus): LinkState {
+  if (!status?.configured) return "off";
+  return status.verifiedAt ? "live" : "pending";
+}
+
+function linkLabel(tool: ActivityTool, status: ActivityToolStatus | undefined, now: number): string {
+  switch (linkState(status)) {
+    case "live":
+      return status?.lastEventAt ? `已接入 · ${formatRelative(status.lastEventAt, now)} 前` : "已接入";
+    case "pending":
+      return tool === "codex" ? "已写入配置 · 待信任" : "已写入配置 · 待首个事件";
+    default:
+      return "未接入";
+  }
+}
+
+// 连续的同名工具调用折叠成一条。工具事件在 PostToolUse 下会成为绝大多数，
+// 不折叠的话时间线就是一串噪音。
+interface EventGroup {
+  key: string;
+  events: ActivityEvent[];
+}
+
+function groupEvents(events: ActivityEvent[]): EventGroup[] {
+  const groups: EventGroup[] = [];
+  for (const event of events) {
+    const last = groups[groups.length - 1];
+    const foldable = event.kind === "tool" && event.toolName;
+    const lastEvent = last?.events[last.events.length - 1];
+    if (
+      foldable &&
+      lastEvent &&
+      lastEvent.kind === "tool" &&
+      lastEvent.toolName === event.toolName
+    ) {
+      last.events.push(event);
+      continue;
+    }
+    groups.push({ key: event.id, events: [event] });
+  }
+  return groups;
+}
+
 function matchesAgentSession(agent: AgentProc, session: ActivitySession): boolean {
   if (agent.tool !== session.tool) return false;
   if (agent.cwd && session.cwd) return agent.cwd === session.cwd;
@@ -175,10 +224,8 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [status, setStatus] = useState<ActivityStatus | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
-  const [scope, setScope] = useState<ActivityScope>("project");
-  const [selectedTools, setSelectedTools] = useState<Record<ActivityTool, boolean>>({ claude: true, codex: true });
-  const [configResult, setConfigResult] = useState<ActivityConfigResult | null>(null);
-  const [configBusy, setConfigBusy] = useState(false);
+  const [busyTool, setBusyTool] = useState<ActivityTool | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [now, setNow] = useState(Date.now());
   const supported = isDarwinRenderer();
 
@@ -224,33 +271,26 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
   }
 
   function openConfig() {
-    setConfigResult(null);
     setConfigOpen(true);
     void refreshStatus();
   }
 
-  function selectedToolList(): ActivityTool[] {
-    return (Object.keys(selectedTools) as ActivityTool[]).filter((tool) => selectedTools[tool]);
-  }
-
-  async function runConfig(action: "enable" | "disable") {
-    const tools = selectedToolList();
-    if (!tools.length) return;
-    setConfigBusy(true);
+  async function runConfig(action: "enable" | "disable", tool: ActivityTool) {
+    setBusyTool(tool);
     try {
-      const result = await window.api.activity[action]({ scope, tools });
-      setConfigResult(result);
+      const result = await window.api.activity[action]({ tools: [tool] });
       setStatus(result.status);
     } finally {
-      setConfigBusy(false);
+      setBusyTool(null);
     }
   }
 
   const activeSession = sessions.find((session) => session.key === activeKey) ?? sessions[0] ?? null;
   const connectedAgents = agents.filter((agent) => sessions.some((session) => matchesAgentSession(agent, session)));
-  const selectedFiles = status ? selectedToolList().map((tool) => status.scopes[scope][tool].path) : [];
-  const hasPassiveAgents = supported && agents.length > 0;
   const allConnected = agents.length > 0 && connectedAgents.length === agents.length;
+  const unconnectedAgents = supported
+    ? agents.filter((agent) => !sessions.some((session) => matchesAgentSession(agent, session)))
+    : [];
 
   return (
     <div className="monitor">
@@ -262,7 +302,7 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
       <section className="activity-discovery">
         <div>
           <strong>检测到 {agents.length} 个本地 agent 在跑，{connectedAgents.length} 个已接入活动流</strong>
-          <span>{supported ? "Claude Code hooks 与 Codex notify 会被本地 collector 接收。" : "当前版本先支持 macOS 本地进程探测。"}</span>
+          <span>{supported ? "Claude Code 与 Codex 的 hooks 会被本地 collector 接收。" : "当前版本先支持 macOS 本地进程探测。"}</span>
         </div>
         <button className={`btn ${allConnected ? "" : "primary"}`} onClick={openConfig}>
           <Power size={15} /> {allConnected ? "活动流配置" : "启用活动流"}
@@ -306,20 +346,46 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
           </div>
           {activeSession ? (
             <div className="activity-events">
-              {activeSession.events.map((event) => {
-                const Icon = eventIcon(event.kind);
+              {groupEvents(activeSession.events).map((group) => {
+                const head = group.events[0];
+                const folded = group.events.length > 1;
+                const open = expanded[group.key];
+                const shown = folded && !open ? [] : group.events;
+                const Icon = eventIcon(head.kind);
                 return (
-                  <article className="activity-event" key={event.id}>
-                    <span className={`activity-dot ${event.kind}`} />
-                    <div className="activity-event-card">
-                      <div className="activity-event-head">
-                        <span className="activity-kind"><Icon size={14} /> {kindLabel(event.kind)}</span>
-                        <time><Clock3 size={13} /> {formatRelative(event.ts, now)} 前</time>
-                      </div>
-                      <strong>{event.title}</strong>
-                      {event.detail && <p>{event.detail}</p>}
-                    </div>
-                  </article>
+                  <div key={group.key}>
+                    {folded && (
+                      <article className="activity-event">
+                        <span className={`activity-dot ${head.kind}`} />
+                        <button
+                          className="activity-event-card activity-fold"
+                          onClick={() => setExpanded((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
+                        >
+                          <div className="activity-event-head">
+                            <span className="activity-kind"><Icon size={14} /> {kindLabel(head.kind)}</span>
+                            <time><Clock3 size={13} /> {formatRelative(group.events[group.events.length - 1].ts, now)} 前</time>
+                          </div>
+                          <strong>
+                            {head.toolName} × {group.events.length}
+                          </strong>
+                          <p>{open ? "收起" : "展开逐条查看"}</p>
+                        </button>
+                      </article>
+                    )}
+                    {shown.map((event) => (
+                      <article className={`activity-event ${folded ? "nested" : ""}`} key={event.id}>
+                        <span className={`activity-dot ${event.kind}`} />
+                        <div className="activity-event-card">
+                          <div className="activity-event-head">
+                            <span className="activity-kind"><Icon size={14} /> {kindLabel(event.kind)}</span>
+                            <time><Clock3 size={13} /> {formatRelative(event.ts, now)} 前</time>
+                          </div>
+                          <strong>{event.title}</strong>
+                          {event.detail && <p>{event.detail}</p>}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
                 );
               })}
             </div>
@@ -337,87 +403,52 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
               <h3>活动流接入</h3>
               <button onClick={() => setConfigOpen(false)}>关闭</button>
             </div>
-            <div className="activity-config-grid">
-              <label>
-                <span>范围</span>
-                <select value={scope} onChange={(event) => setScope(event.target.value as ActivityScope)}>
-                  <option value="project">项目级</option>
-                  <option value="global">全局</option>
-                </select>
-              </label>
-              <div>
-                <span>工具</span>
-                <label className="check-field compact">
-                  <input
-                    type="checkbox"
-                    checked={selectedTools.claude}
-                    onChange={(event) => setSelectedTools((prev) => ({ ...prev, claude: event.target.checked }))}
-                  />
-                  <span>Claude Code</span>
-                </label>
-                <label className="check-field compact">
-                  <input
-                    type="checkbox"
-                    checked={selectedTools.codex}
-                    onChange={(event) => setSelectedTools((prev) => ({ ...prev, codex: event.target.checked }))}
-                  />
-                  <span>Codex</span>
-                </label>
-              </div>
-            </div>
-            <div className="activity-files">
-              <span>将改动的配置文件</span>
-              {selectedFiles.map((file) => (
-                <code key={file}>{file}</code>
-              ))}
-            </div>
-            {status?.scopes[scope].codex.conflict && selectedTools.codex && (
-              <div className="activity-conflict">{status.scopes[scope].codex.conflict}</div>
-            )}
-            {configResult?.conflicts.map((conflict) => (
-              <div className="activity-conflict" key={`${conflict.tool}:${conflict.path}`}>
-                {conflict.message} <code>{conflict.path}</code>
-              </div>
-            ))}
-            {configResult && (
-              <div className="activity-result">
-                {selectedToolList().map((tool) => {
-                  const st = status?.scopes[scope][tool];
-                  return (
-                    <div className="activity-result-row" key={tool}>
-                      <span className={`activity-status ${st?.enabled ? "running" : "idle"}`} />
-                      <span>{tool === "claude" ? "Claude Code" : "Codex"}</span>
-                      <small>{st?.enabled ? "已接入活动流" : "未接入"}</small>
-                    </div>
-                  );
-                })}
-                {configResult.changed.length > 0 && (
-                  <div className="activity-result-note">
-                    已更新 {configResult.changed.length} 个配置文件。对正在运行的会话，需重启该会话后才会生效；新启动的动作会实时出现。
+            {(["claude", "codex"] as ActivityTool[]).map((tool) => {
+              const st = status?.tools[tool];
+              const state = linkState(st);
+              return (
+                <section className="activity-tool-card" key={tool}>
+                  <div className="activity-tool-head">
+                    <span className={`activity-status ${state}`} />
+                    <strong>{TOOL_LABEL[tool]}</strong>
+                    <small>{linkLabel(tool, st, now)}</small>
                   </div>
-                )}
-              </div>
-            )}
-            <div className="activity-modal-actions">
-              <button className="btn" onClick={() => runConfig("disable")} disabled={configBusy}>
-                <PowerOff size={15} /> 关闭活动流
-              </button>
-              <button className="btn primary" onClick={() => runConfig("enable")} disabled={configBusy}>
-                <Power size={15} /> 启用活动流
-              </button>
-            </div>
+                  <code>{st?.path}</code>
+                  {st?.actionRequired && <p className="activity-note">{st.actionRequired}</p>}
+                  <div className="activity-tool-actions">
+                    {state === "off" ? (
+                      <button className="btn primary" disabled={busyTool === tool} onClick={() => runConfig("enable", tool)}>
+                        <Power size={15} /> 启用
+                      </button>
+                    ) : (
+                      <button className="btn" disabled={busyTool === tool} onClick={() => runConfig("disable", tool)}>
+                        <PowerOff size={15} /> 断开接入
+                      </button>
+                    )}
+                  </div>
+                </section>
+              );
+            })}
+            <p className="activity-result-note">
+              只写全局配置，覆盖本机所有 agent。配置改动对正在运行的会话不生效，需重开该会话。
+            </p>
           </div>
         </div>
       )}
 
-      <section className="monitor-section">
-        <div className="monitor-section-head">
-          <h3>发现辅助</h3>
-          <span>{supported ? `${agents.length} 个进程` : "当前平台暂不支持进程探测"}</span>
-        </div>
-        {hasPassiveAgents ? (
+      {/* 进程探测只补 hooks 的盲区：hooks 只对启用后新开的会话生效，
+          所以「在跑但没接入」只有 ps 看得见。全部接入时本段自然消失。 */}
+      {unconnectedAgents.length > 0 && (
+        <section className="monitor-section">
+          <div className="monitor-section-head">
+            <h3>未接入活动流</h3>
+            <span>{unconnectedAgents.length} 个进程</span>
+          </div>
+          <div className="activity-empty">
+            这些 agent 在启用活动流之前就已经在跑，不会加载新配置。重启它们的会话后动作才会出现在活动流里。
+          </div>
           <div className="agent-list">
-            {agents.map((agent) => (
+            {unconnectedAgents.map((agent) => (
               <article className="agent-card" key={agent.pid}>
                 <div className="agent-tool">{agent.tool}</div>
                 <div className="agent-main">
@@ -431,10 +462,8 @@ function MonitorPanel(_: { ctx: SurfaceCtx }) {
               </article>
             ))}
           </div>
-        ) : (
-          <div className="activity-empty">{supported ? "暂无在跑的 agent。" : "当前版本先支持 macOS 本地进程探测。"}</div>
-        )}
-      </section>
+        </section>
+      )}
     </div>
   );
 }

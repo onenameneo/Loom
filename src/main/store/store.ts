@@ -24,6 +24,10 @@ export interface MonitorSettings {
 export interface ActivitySettings {
   token?: string;
   port?: number;
+  // 首次真实收到该工具事件的时刻。这是「已接入」的唯一凭据 —— 配置写没写
+  // 只说明 Loom 的意图，收到过事件才说明它真的在工作。
+  // （Codex 的 hook 信任哈希是其内部算法，无法从配置反推是否已生效。）
+  verified?: { claude?: number; codex?: number };
 }
 
 export interface Settings {

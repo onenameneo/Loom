@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
-import { BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import type { Store } from "./store/store";
 
 const DEFAULT_PORT = 31_577;
@@ -10,7 +10,14 @@ const MAX_PORT_PROBES = 32;
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_EVENTS_PER_SESSION = 200;
 const LOOM_MARK = "loom-agent-activity-stream";
-const CLAUDE_EVENTS = ["PostToolUse", "Notification", "Stop", "SessionStart"] as const;
+const CLAUDE_EVENTS = ["PostToolUse", "Notification", "Stop", "SubagentStop", "SessionStart"] as const;
+// Codex 的事件集与 Claude 不完全对称：它有独立的 PermissionRequest，
+// 而不是 Claude 那种「Notification + permission_prompt matcher」。
+// 见 https://learn.chatgpt.com/docs/hooks
+const CODEX_EVENTS = ["PostToolUse", "PermissionRequest", "Stop", "SubagentStop", "SessionStart"] as const;
+// Codex hook 同步阻塞回合，这是兜底上限（秒）。省略时 Codex 默认 600s，太长。
+const CODEX_HOOK_TIMEOUT_SEC = 5;
+const CODEX_HOOK_STATUS = "Loom 活动流";
 
 export type ActivityTool = "claude" | "codex";
 export type ActivityKind =
@@ -29,6 +36,8 @@ export interface ActivityEvent {
   project?: string;
   kind: ActivityKind;
   title: string;
+  // 折叠相邻同名工具事件需要可靠依据；title 是拼过的展示串，不能拿来分组。
+  toolName?: string;
   detail?: string;
   ts: number;
 }
@@ -44,40 +53,66 @@ export interface ActivitySession {
   events: ActivityEvent[];
 }
 
-type ActivityScope = "project" | "global";
 type ActivityEnableTool = ActivityTool;
 type ActivityConfigArg = {
-  scope?: ActivityScope;
   tools?: ActivityEnableTool[];
 };
 type ToolStatus = {
-  enabled: boolean;
+  // 配置文件里有 Loom 的条目 —— 只代表意图，不代表在工作。
+  configured: boolean;
+  // 首次真实收到该工具事件的时刻；有值才等于「真的接上了」。
+  verifiedAt?: number;
+  lastEventAt?: number;
   path: string;
-  conflict?: string;
+  // 配置已写好、但仍需用户在工具里做一步动作才会生效（Codex 的 /hooks 信任）。
+  actionRequired?: string;
 };
 export type ActivityStatus = {
   ok: boolean;
   port: number;
   tokenPreview: string;
   files: string[];
-  scopes: Record<ActivityScope, Record<ActivityEnableTool, ToolStatus>>;
+  tools: Record<ActivityEnableTool, ToolStatus>;
 };
+type ConfigNote = { tool: ActivityEnableTool; path: string; message: string };
 type ConfigResult = {
   ok: boolean;
   port: number;
   tokenPreview: string;
   files: string[];
   changed: string[];
-  conflicts: { tool: ActivityEnableTool; path: string; message: string }[];
+  conflicts: ConfigNote[];
+  // 写入成功、但还差用户在工具侧的一步（目前只有 Codex 的 /hooks 信任）。
+  notes: ConfigNote[];
   status: ActivityStatus;
 };
 
-function projectRoot(): string {
-  return resolve(process.cwd());
+// Loom 自身的安装位置 —— 用来定位随应用分发的 forwarder 脚本。
+// 必须与「被观察的工作目录」区分开：cwd 在打包后的 Electron 里不可控，
+// 而 forwarder 的绝对路径是 Codex hook 命令字符串的一部分，路径一漂移，
+// 哈希就变，用户就得重新 /hooks 信任一次。
+// 注意：将来接入 electron-builder 时，scripts/ 必须 asar-unpack（asar 内的
+// 文件没法被外部 node 执行）。
+function appRoot(): string {
+  return resolve(app.getAppPath());
 }
 
 function homeDir(): string {
-  return process.env.HOME || process.env.USERPROFILE || projectRoot();
+  return process.env.HOME || process.env.USERPROFILE || resolve(process.cwd());
+}
+
+// forwarder 在运行时从这里读 port/token，而不是从命令行参数拿。
+// 这样 hook 的命令字符串恒定，端口探测或 token 轮换都不会让信任失效。
+function endpointFile(): string {
+  return join(homeDir(), ".loom", "collector.json");
+}
+
+function writeEndpointFile(port: number, token: string) {
+  try {
+    writeJsonObject(endpointFile(), { port, token });
+  } catch (err) {
+    console.log("[collector] failed to write endpoint file:", (err as Error)?.message ?? err);
+  }
 }
 
 function tokenPreview(token: string): string {
@@ -120,34 +155,37 @@ function writeText(file: string, value: string) {
   writeFileSync(file, value, "utf-8");
 }
 
-function pathsFor(scope: ActivityScope) {
-  const root = scope === "global" ? homeDir() : projectRoot();
+// 一律只写全局配置。观察哨的职责是盯住本机所有 agent，而项目级作用域只能
+// 覆盖某一个仓库；对 Codex 更是死路 —— 实测 Codex 的项目级配置层既不认
+// `notify`（启动时明确警告 "Ignored unsupported project-local config keys"），
+// 也不加载 .codex/hooks.json（/hooks 里根本不列出、拿不到信任记录）。
+function configPaths(): Record<ActivityEnableTool, string> {
   return {
-    claude: join(root, ".claude", scope === "global" ? "settings.json" : "settings.local.json"),
-    codex: join(root, ".codex", "config.toml"),
+    claude: join(homeDir(), ".claude", "settings.json"),
+    codex: join(homeDir(), ".codex", "hooks.json"),
   };
 }
 
-function allFiles(): string[] {
-  return [
-    pathsFor("project").claude,
-    pathsFor("project").codex,
-    pathsFor("global").claude,
-    pathsFor("global").codex,
-  ];
+// Loom 早期把 Codex 接在 config.toml 的 `notify` 上。notify 是单值键，
+// 会和 Codex Computer Use 之类的既有通知链互斥，且只送 agent-turn-complete
+// 一种事件。现在改用 hooks（跨层合并、永不互斥、事件粒度完整），
+// 这个路径只用于清理迁移前的残留。
+function legacyCodexConfig(): string {
+  return join(homeDir(), ".codex", "config.toml");
 }
 
-function forwarderPath(): string {
-  return join(projectRoot(), "scripts", "codex-notify-forward.mjs");
+function allFiles(): string[] {
+  const paths = configPaths();
+  return [paths.claude, paths.codex];
+}
+
+function hookForwarderPath(): string {
+  return join(appRoot(), "scripts", "codex-hook-forward.mjs");
 }
 
 function normalizeTools(tools?: ActivityEnableTool[]): ActivityEnableTool[] {
   const selected = tools?.filter((tool): tool is ActivityEnableTool => tool === "claude" || tool === "codex");
   return selected?.length ? [...new Set(selected)] : ["claude", "codex"];
-}
-
-function normalizeScope(scope?: ActivityScope): ActivityScope {
-  return scope === "global" ? "global" : "project";
 }
 
 function isObject(value: unknown): value is Record<string, any> {
@@ -223,15 +261,21 @@ function eventTarget(input: unknown): string | undefined {
   return compact(candidates.find((item) => typeof item === "string"), 90);
 }
 
-function normalizeClaude(payload: unknown): ActivityEvent | null {
+// Claude Code 与 Codex 的 hook 载荷字段同名（session_id / hook_event_name /
+// tool_name / tool_input / cwd …），所以两边共用一个归一化器。
+// 差异只有两处，在下面各自的分支里处理：
+//   - 批准：Claude 是 Notification + permission_prompt matcher，Codex 是独立的 PermissionRequest
+//   - 回合末尾的正文：Codex 的 Stop 带 last_assistant_message，Claude 不带
+function normalizeHookEvent(tool: ActivityTool, payload: unknown): ActivityEvent | null {
   if (!isObject(payload)) return null;
   const sessionId = compact(payload.session_id, 120);
   if (!sessionId) return null;
   const eventName = compact(payload.hook_event_name, 80);
   const cwd = compact(payload.cwd, 400);
   const toolName = compact(payload.tool_name, 80);
+  const toolLabel = tool === "claude" ? "Claude" : "Codex";
   let kind: ActivityKind = "notification";
-  let title = eventName || "Claude activity";
+  let title = eventName || `${toolLabel} activity`;
   let detail: string | undefined;
 
   if (eventName === "PostToolUse") {
@@ -239,17 +283,22 @@ function normalizeClaude(payload: unknown): ActivityEvent | null {
     const target = eventTarget(payload.tool_input);
     title = target ? `${toolName || "Tool"} ${target}` : toolName || "Tool used";
     detail = compact(payload.tool_output ?? payload.output ?? payload.tool_input);
+  } else if (eventName === "PermissionRequest") {
+    kind = "permission";
+    title = `需要批准: ${toolName || toolLabel}`;
+    detail = compact(payload.tool_input ?? payload.permission_mode);
   } else if (eventName === "Notification") {
     const matcher = compact(payload.matcher, 80) || compact(payload.notification_type, 80);
     kind = matcher === "permission_prompt" ? "permission" : "notification";
-    title = kind === "permission" ? `需要批准: ${toolName || "Claude"}` : "Claude 通知";
+    title = kind === "permission" ? `需要批准: ${toolName || toolLabel}` : `${toolLabel} 通知`;
     detail = compact(payload.message ?? payload.tool_input ?? payload.permission_mode);
   } else if (eventName === "Stop" || eventName === "SubagentStop") {
-    // Stop 在主 agent 答完每一轮时触发，不是会话退出 —— 与 Codex 的
-    // agent-turn-complete 同义，统一归到 turn_end。
+    // Stop 在主 agent 答完每一轮时触发，不是会话退出。
     kind = eventName === "SubagentStop" ? "stop" : "turn_end";
     title = eventName === "SubagentStop" ? "Subagent 结束" : "回合结束";
-    detail = compact(payload.stop_hook_active ? "stop hook active" : undefined);
+    detail =
+      compact(payload.last_assistant_message) ??
+      compact(payload.stop_hook_active ? "stop hook active" : undefined);
   } else if (eventName === "SessionStart") {
     kind = "session_start";
     title = "会话开始";
@@ -258,33 +307,14 @@ function normalizeClaude(payload: unknown): ActivityEvent | null {
 
   return {
     id: nextEventId(),
-    tool: "claude",
+    tool,
     sessionId,
     cwd,
     project: cwd ? basename(cwd) : undefined,
     kind,
     title,
+    toolName: kind === "tool" ? toolName : undefined,
     detail,
-    ts: Date.now(),
-  };
-}
-
-function normalizeCodex(payload: unknown): ActivityEvent | null {
-  if (!isObject(payload)) return null;
-  const type = compact(payload.type, 80);
-  if (type && type !== "agent-turn-complete") return null;
-  const sessionId = compact(payload["thread-id"] ?? payload.threadId, 120);
-  if (!sessionId) return null;
-  const cwd = compact(payload.cwd, 400);
-  return {
-    id: nextEventId(),
-    tool: "codex",
-    sessionId,
-    cwd,
-    project: cwd ? basename(cwd) : undefined,
-    kind: "turn_end",
-    title: "回合完成",
-    detail: compact(payload["last-assistant-message"] ?? payload.lastAssistantMessage),
     ts: Date.now(),
   };
 }
@@ -306,6 +336,14 @@ function loomClaudeHook(port: number, token: string) {
   };
 }
 
+// settings.json 里 hooks[事件] 的元素是「匹配器分组」而不是 hook 本身，
+// 分组的 hooks 字段必须是数组 —— 缺了它 Claude Code 的 schema 校验会
+// 报 "Expected array, but received undefined" 并丢弃整份 settings.json。
+// 省略 matcher 表示匹配全部。
+function loomClaudeGroup(port: number, token: string) {
+  return { hooks: [loomClaudeHook(port, token)] };
+}
+
 function isLoomClaudeHook(value: unknown): boolean {
   return (
     isObject(value) &&
@@ -317,17 +355,44 @@ function isLoomClaudeHook(value: unknown): boolean {
   );
 }
 
+function hasLoomClaudeGroup(entries: unknown[]): boolean {
+  return entries.some((entry) => isObject(entry) && Array.isArray(entry.hooks) && entry.hooks.some(isLoomClaudeHook));
+}
+
+// 清掉一个事件里所有 Loom 痕迹。除了正常的分组，还要认早期版本平铺写进
+// 事件数组的裸 hook —— 那种记录正是让 settings.json 整份失效的元凶，
+// 必须能被识别才清得掉。同时只摘走分组里的 Loom hook，保留用户自己的。
+function stripLoomClaude(entries: unknown[]): unknown[] {
+  const kept: unknown[] = [];
+  for (const entry of entries) {
+    if (isLoomClaudeHook(entry)) continue;
+    if (isObject(entry) && Array.isArray(entry.hooks)) {
+      const hooks = entry.hooks.filter((hook: unknown) => !isLoomClaudeHook(hook));
+      if (!hooks.length) continue;
+      if (hooks.length !== entry.hooks.length) {
+        kept.push({ ...entry, hooks });
+        continue;
+      }
+    }
+    kept.push(entry);
+  }
+  return kept;
+}
+
 function ensureClaudeEnabled(file: string, port: number, token: string): boolean {
   const settings = readJsonObject(file);
   const hooks = isObject(settings.hooks) ? settings.hooks : {};
   let changed = settings.hooks !== hooks;
-  const hook = loomClaudeHook(port, token);
+  const group = loomClaudeGroup(port, token);
 
   for (const name of CLAUDE_EVENTS) {
     const current = Array.isArray(hooks[name]) ? hooks[name] : [];
-    const withoutOld = current.filter((item: unknown) => !isLoomClaudeHook(item));
-    const next = [...withoutOld, hook];
-    if (current.length !== next.length || !current.some(isLoomClaudeHook)) changed = true;
+    const next = [...stripLoomClaude(current), group];
+    // 必须按内容比对：isLoomClaudeHook 只认 X-Loom 标记、不看 port/token，
+    // 所以「已存在一条指向旧端口的 Loom hook」在长度和存在性上都看不出差别。
+    // 早先按长度比对会让端口探测（31577 被占 → 31578）后的重新启用静默 no-op，
+    // 而状态照样报「已接入」—— hook 却在往死端口 POST。
+    if (JSON.stringify(current) !== JSON.stringify(next)) changed = true;
     hooks[name] = next;
   }
 
@@ -343,8 +408,8 @@ function disableClaude(file: string): boolean {
   let changed = false;
   for (const name of CLAUDE_EVENTS) {
     if (!Array.isArray(hooks[name])) continue;
-    const next = hooks[name].filter((item: unknown) => !isLoomClaudeHook(item));
-    if (next.length !== hooks[name].length) {
+    const next = stripLoomClaude(hooks[name]);
+    if (JSON.stringify(next) !== JSON.stringify(hooks[name])) {
       changed = true;
       if (next.length) hooks[name] = next;
       else delete hooks[name];
@@ -357,98 +422,137 @@ function disableClaude(file: string): boolean {
 function isClaudeEnabled(file: string): boolean {
   if (!existsSync(file)) return false;
   const hooks = readJsonObject(file).hooks;
-  return isObject(hooks) && CLAUDE_EVENTS.every((name) => Array.isArray(hooks[name]) && hooks[name].some(isLoomClaudeHook));
+  return isObject(hooks) && CLAUDE_EVENTS.every((name) => Array.isArray(hooks[name]) && hasLoomClaudeGroup(hooks[name]));
 }
 
-function notifyArray(port: number, token: string): string[] {
-  return ["node", forwarderPath(), token, String(port)];
+function shQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-function isSameArray(a: string[], b: string[]): boolean {
-  return a.length === b.length && a.every((item, index) => item === b[index]);
+// 命令里刻意不带 port/token —— Codex 按命令字符串的哈希记账信任，
+// 参数一变就要重新 /hooks 信任。port/token 由 forwarder 运行时从
+// ~/.loom/collector.json 读。详见 scripts/codex-hook-forward.mjs。
+function codexHookCommand(): string {
+  return `node ${shQuote(hookForwarderPath())}`;
 }
 
-function parseTomlStringArray(source: string): string[] | null {
-  const trimmed = source.trim();
-  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return null;
-  try {
-    const jsonish = trimmed.replace(/'/g, '"');
-    const parsed = JSON.parse(jsonish);
-    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string") ? parsed : null;
-  } catch {
-    return null;
-  }
+function loomCodexHook() {
+  return {
+    type: "command",
+    command: codexHookCommand(),
+    timeout: CODEX_HOOK_TIMEOUT_SEC,
+    statusMessage: CODEX_HOOK_STATUS,
+  };
 }
 
-function formatTomlArray(values: string[]): string {
-  return `[${values.map((value) => JSON.stringify(value)).join(", ")}]`;
+function isLoomCodexHook(value: unknown): boolean {
+  return isObject(value) && value.type === "command" && value.command === codexHookCommand();
 }
 
-function findNotifyLine(text: string): { line: number; value: string; arr: string[] | null } | null {
-  const lines = text.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i += 1) {
-    const match = lines[i].match(/^\s*notify\s*=\s*(.+?)\s*$/);
-    if (match) return { line: i, value: match[1], arr: parseTomlStringArray(match[1]) };
-  }
-  return null;
+function isLoomCodexGroup(value: unknown): boolean {
+  return isObject(value) && Array.isArray(value.hooks) && value.hooks.some(isLoomCodexHook);
 }
 
-function isLoomNotify(arr: string[] | null): boolean {
-  return Boolean(arr && arr[0] === "node" && arr[1] === forwarderPath() && arr.length >= 4);
+function loomCodexGroup() {
+  // matcher 省略 = 匹配全部工具。
+  return { hooks: [loomCodexHook()] };
 }
 
-function ensureCodexEnabled(file: string, port: number, token: string): { changed: boolean; conflict?: string } {
-  const existing = readText(file);
-  const lines = existing ? existing.split(/\r?\n/) : [];
-  const notify = findNotifyLine(existing);
-  const nextArr = notifyArray(port, token);
-  const nextLine = `notify = ${formatTomlArray(nextArr)}`;
+// Codex 的 hooks 跨配置层合并、不互相覆盖，所以这里永远不会和别人冲突
+// ——这正是从 notify（单值键，会被 Codex Computer Use 之类占用）迁过来的原因。
+function ensureCodexEnabled(file: string): boolean {
+  const config = readJsonObject(file);
+  const hooks = isObject(config.hooks) ? config.hooks : {};
+  let changed = config.hooks !== hooks;
 
-  if (notify) {
-    if (!isLoomNotify(notify.arr)) return { changed: false, conflict: "Codex notify 已存在且不是 Loom 写入，未覆盖。" };
-    if (isSameArray(notify.arr ?? [], nextArr)) return { changed: false };
-    lines[notify.line] = nextLine;
-    writeText(file, `${lines.join("\n").replace(/\n*$/, "")}\n`);
-    return { changed: true };
+  for (const name of CODEX_EVENTS) {
+    const current = Array.isArray(hooks[name]) ? hooks[name] : [];
+    const withoutOld = current.filter((item: unknown) => !isLoomCodexGroup(item));
+    const next = [...withoutOld, loomCodexGroup()];
+    if (JSON.stringify(current) !== JSON.stringify(next)) changed = true;
+    hooks[name] = next;
   }
 
-  lines.push(nextLine);
-  writeText(file, `${lines.join("\n").replace(/^\n+|\n*$/g, "")}\n`);
-  return { changed: true };
+  config.hooks = hooks;
+  if (changed || !existsSync(file)) writeJsonObject(file, config);
+  return changed || !existsSync(file);
 }
 
 function disableCodex(file: string): boolean {
   if (!existsSync(file)) return false;
+  const config = readJsonObject(file);
+  const hooks = isObject(config.hooks) ? config.hooks : {};
+  let changed = false;
+  for (const name of CODEX_EVENTS) {
+    if (!Array.isArray(hooks[name])) continue;
+    const next = hooks[name].filter((item: unknown) => !isLoomCodexGroup(item));
+    if (next.length !== hooks[name].length) {
+      changed = true;
+      if (next.length) hooks[name] = next;
+      else delete hooks[name];
+    }
+  }
+  if (changed) writeJsonObject(file, config);
+  return changed;
+}
+
+function isCodexEnabled(file: string): boolean {
+  if (!existsSync(file)) return false;
+  const hooks = readJsonObject(file).hooks;
+  return isObject(hooks) && CODEX_EVENTS.every((name) => Array.isArray(hooks[name]) && hooks[name].some(isLoomCodexGroup));
+}
+
+// 迁移：抹掉 Loom 早期写在 config.toml 里的 notify 行。只删自己写的那条，
+// 别人的（例如 Codex Computer Use 的）一律不碰。
+function removeLegacyLoomNotify(file: string): boolean {
+  if (!existsSync(file)) return false;
   const text = readText(file);
   const lines = text.split(/\r?\n/);
-  const notify = findNotifyLine(text);
-  if (!notify || !isLoomNotify(notify.arr)) return false;
-  lines.splice(notify.line, 1);
+  const index = lines.findIndex(
+    (line) => /^\s*notify\s*=/.test(line) && line.includes("codex-notify-forward.mjs"),
+  );
+  if (index < 0) return false;
+  lines.splice(index, 1);
   writeText(file, `${lines.join("\n").replace(/\n*$/, "")}\n`);
   return true;
 }
 
-function codexStatus(file: string): ToolStatus {
-  const notify = findNotifyLine(readText(file));
-  if (!notify) return { enabled: false, path: file };
-  if (isLoomNotify(notify.arr)) return { enabled: true, path: file };
-  return { enabled: false, path: file, conflict: "Codex notify 已被其它命令占用。" };
-}
+// Codex 只在「审阅并信任过 hook 的当前哈希」之后才会执行它；未信任的 hook
+// 会被静默跳过 —— 实测在 codex exec 下连一行警告都没有。信任状态记在
+// config.toml 的 [hooks.state] 里，但哈希是 Codex 内部算法，Loom 无从复算，
+// 所以「是否已生效」只能靠有没有真收到事件来判断，不能从配置反推。
+const CODEX_TRUST_HINT = "Codex 要求先信任 hook 才会执行，未信任会被静默跳过。在终端运行 codex，输入 /hooks 信任「Loom 活动流」。";
 
-function buildStatus(port: number, token: string): ActivityStatus {
+type VerifiedMap = { claude?: number; codex?: number };
+
+function buildStatus(
+  port: number,
+  token: string,
+  verified: VerifiedMap,
+  lastEventAt: VerifiedMap,
+): ActivityStatus {
+  const paths = configPaths();
+  const claudeConfigured = isClaudeEnabled(paths.claude);
+  const codexConfigured = isCodexEnabled(paths.codex);
   return {
     ok: true,
     port,
     tokenPreview: tokenPreview(token),
     files: allFiles(),
-    scopes: {
-      project: {
-        claude: { enabled: isClaudeEnabled(pathsFor("project").claude), path: pathsFor("project").claude },
-        codex: codexStatus(pathsFor("project").codex),
+    tools: {
+      claude: {
+        configured: claudeConfigured,
+        verifiedAt: verified.claude,
+        lastEventAt: lastEventAt.claude,
+        path: paths.claude,
       },
-      global: {
-        claude: { enabled: isClaudeEnabled(pathsFor("global").claude), path: pathsFor("global").claude },
-        codex: codexStatus(pathsFor("global").codex),
+      codex: {
+        configured: codexConfigured,
+        verifiedAt: verified.codex,
+        lastEventAt: lastEventAt.codex,
+        path: paths.codex,
+        // 已写入但从未收到过事件 —— 最可能的原因就是还没信任。
+        actionRequired: codexConfigured && !verified.codex ? CODEX_TRUST_HINT : undefined,
       },
     },
   };
@@ -486,7 +590,18 @@ export function registerCollector(opts: { getWin: () => BrowserWindow | null; st
   const token = ensureToken(store);
   let port = store.getSettings().activity.port || DEFAULT_PORT;
   const sessions = new Map<string, ActivitySession>();
+  const verified: VerifiedMap = { ...(store.getSettings().activity.verified ?? {}) };
+  const lastEventAt: VerifiedMap = {};
   let stopped = false;
+
+  // 收到事件 = 这条链路真的通了。这是「已接入」唯一站得住的凭据：
+  // 配置写没写只说明 Loom 的意图，Codex 那边未信任的 hook 是被静默跳过的。
+  function markVerified(tool: ActivityTool, ts: number) {
+    lastEventAt[tool] = ts;
+    if (verified[tool]) return;
+    verified[tool] = ts;
+    store.patchSettings({ activity: { verified: { ...verified } } });
+  }
 
   function snapshot(): ActivitySession[] {
     return [...sessions.values()].sort((a, b) => b.lastActiveAt - a.lastActiveAt);
@@ -515,6 +630,7 @@ export function registerCollector(opts: { getWin: () => BrowserWindow | null; st
     next.eventCount += 1;
     next.events = [...next.events, event].slice(-MAX_EVENTS_PER_SESSION);
     sessions.set(key, next);
+    markVerified(event.tool, event.ts);
     send(event);
   }
 
@@ -525,7 +641,7 @@ export function registerCollector(opts: { getWin: () => BrowserWindow | null; st
     }
     try {
       const body = await readBody(req);
-      const event = tool === "claude" ? normalizeClaude(body) : normalizeCodex(body);
+      const event = normalizeHookEvent(tool, body);
       if (event) addEvent(event);
       jsonResponse(res, 200);
     } catch {
@@ -549,45 +665,30 @@ export function registerCollector(opts: { getWin: () => BrowserWindow | null; st
     .then((actualPort) => {
       port = actualPort;
       savePort(store, port);
+      // 端口可能被探测改过，forwarder 靠这个文件找到我们 —— 必须在这里落盘，
+      // 而不是只在启用时写，否则换端口后已信任的 hook 会指向旧端口。
+      writeEndpointFile(port, token);
       console.log(`[collector] listening on 127.0.0.1:${port}`);
     })
     .catch((err) => console.log("[collector] failed to listen:", (err as Error)?.message ?? err));
 
   ipcMain.handle("activity:list", () => snapshot());
-  ipcMain.handle("activity:status", () => buildStatus(port, token));
+  ipcMain.handle("activity:status", () => buildStatus(port, token, verified, lastEventAt));
   ipcMain.handle("activity:enable", (_e, arg?: ActivityConfigArg): ConfigResult => {
-    const scope = normalizeScope(arg?.scope);
     const tools = normalizeTools(arg?.tools);
-    const files = pathsFor(scope);
+    const files = configPaths();
     const changed: string[] = [];
-    const conflicts: ConfigResult["conflicts"] = [];
+    const notes: ConfigResult["notes"] = [];
+
+    // forwarder 只认这个文件；它得先在，hook 才有意义。
+    writeEndpointFile(port, token);
 
     if (tools.includes("claude") && ensureClaudeEnabled(files.claude, port, token)) changed.push(files.claude);
     if (tools.includes("codex")) {
-      const result = ensureCodexEnabled(files.codex, port, token);
-      if (result.changed) changed.push(files.codex);
-      if (result.conflict) conflicts.push({ tool: "codex", path: files.codex, message: result.conflict });
+      if (ensureCodexEnabled(files.codex)) changed.push(files.codex);
+      if (removeLegacyLoomNotify(legacyCodexConfig())) changed.push(legacyCodexConfig());
+      notes.push({ tool: "codex", path: files.codex, message: CODEX_TRUST_HINT });
     }
-
-    return {
-      ok: conflicts.length === 0,
-      port,
-      tokenPreview: tokenPreview(token),
-      files: tools.map((tool) => files[tool]),
-      changed,
-      conflicts,
-      status: buildStatus(port, token),
-    };
-  });
-  ipcMain.handle("activity:disable", (_e, arg?: ActivityConfigArg): ConfigResult => {
-    const scope = normalizeScope(arg?.scope);
-    const tools = normalizeTools(arg?.tools);
-    const files = pathsFor(scope);
-    const changed: string[] = [];
-    const conflicts: ConfigResult["conflicts"] = [];
-
-    if (tools.includes("claude") && disableClaude(files.claude)) changed.push(files.claude);
-    if (tools.includes("codex") && disableCodex(files.codex)) changed.push(files.codex);
 
     return {
       ok: true,
@@ -595,8 +696,36 @@ export function registerCollector(opts: { getWin: () => BrowserWindow | null; st
       tokenPreview: tokenPreview(token),
       files: tools.map((tool) => files[tool]),
       changed,
-      conflicts,
-      status: buildStatus(port, token),
+      conflicts: [],
+      notes,
+      status: buildStatus(port, token, verified, lastEventAt),
+    };
+  });
+  ipcMain.handle("activity:disable", (_e, arg?: ActivityConfigArg): ConfigResult => {
+    const tools = normalizeTools(arg?.tools);
+    const files = configPaths();
+    const changed: string[] = [];
+
+    if (tools.includes("claude") && disableClaude(files.claude)) changed.push(files.claude);
+    if (tools.includes("codex")) {
+      if (disableCodex(files.codex)) changed.push(files.codex);
+      if (removeLegacyLoomNotify(legacyCodexConfig())) changed.push(legacyCodexConfig());
+    }
+
+    // 断开后「曾经验证过」不再成立 —— 留着会让重新启用时直接显示已接入，
+    // 掩盖 Codex 需要重新信任这件事。
+    for (const tool of tools) delete verified[tool];
+    store.patchSettings({ activity: { verified: { ...verified } } });
+
+    return {
+      ok: true,
+      port,
+      tokenPreview: tokenPreview(token),
+      files: tools.map((tool) => files[tool]),
+      changed,
+      conflicts: [],
+      notes: [],
+      status: buildStatus(port, token, verified, lastEventAt),
     };
   });
 

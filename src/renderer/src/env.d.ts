@@ -53,7 +53,6 @@ export interface MonitorEvent {
 }
 
 export type ActivityTool = "claude" | "codex";
-export type ActivityScope = "project" | "global";
 export type ActivityKind =
   | "tool"
   | "permission"
@@ -70,6 +69,7 @@ export interface ActivityEvent {
   project?: string;
   kind: ActivityKind;
   title: string;
+  toolName?: string;
   detail?: string;
   ts: number;
 }
@@ -86,9 +86,11 @@ export interface ActivitySession {
 }
 
 export interface ActivityToolStatus {
-  enabled: boolean;
+  configured: boolean;
+  verifiedAt?: number;
+  lastEventAt?: number;
   path: string;
-  conflict?: string;
+  actionRequired?: string;
 }
 
 export interface ActivityStatus {
@@ -96,12 +98,17 @@ export interface ActivityStatus {
   port: number;
   tokenPreview: string;
   files: string[];
-  scopes: Record<ActivityScope, Record<ActivityTool, ActivityToolStatus>>;
+  tools: Record<ActivityTool, ActivityToolStatus>;
 }
 
 export interface ActivityConfigArg {
-  scope?: ActivityScope;
   tools?: ActivityTool[];
+}
+
+export interface ActivityConfigNote {
+  tool: ActivityTool;
+  path: string;
+  message: string;
 }
 
 export interface ActivityConfigResult {
@@ -110,7 +117,8 @@ export interface ActivityConfigResult {
   tokenPreview: string;
   files: string[];
   changed: string[];
-  conflicts: { tool: ActivityTool; path: string; message: string }[];
+  conflicts: ActivityConfigNote[];
+  notes: ActivityConfigNote[];
   status: ActivityStatus;
 }
 

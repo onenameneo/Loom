@@ -502,8 +502,11 @@ body {
   border-radius: var(--r-pill);
   background: var(--faint);
 }
+/* 颜色纪律：工具调用是流水不是状态，且会占据事件的绝大多数 —— 给它 accent
+   会让整条时间线变成蓝梯子，违背「accent 面积极小」。中性点留给流水，
+   彩色只落在真正的状态上。 */
 .activity-dot.tool {
-  background: var(--accent);
+  background: var(--faint);
 }
 .activity-dot.permission {
   background: var(--warn);
@@ -511,6 +514,9 @@ body {
 .activity-dot.turn_end,
 .activity-dot.stop {
   background: var(--ok);
+}
+.activity-dot.session_start {
+  background: var(--accent);
 }
 .activity-event-card,
 .activity-empty {
@@ -645,6 +651,77 @@ body {
   padding: var(--s3);
   color: var(--warn);
   font-size: 12px;
+}
+/* 「已写入、但还差一步」的说明。按颜色纪律，说明文字属于 chrome、保持无色，
+   状态由圆点承担。 */
+.activity-note {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: var(--s3);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.activity-status {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--faint);
+  flex: none;
+}
+.activity-status.live {
+  background: var(--ok);
+}
+.activity-status.pending {
+  background: var(--warn);
+}
+.activity-status.off {
+  background: var(--faint);
+}
+.activity-tool-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: var(--s3);
+  background: var(--surface);
+}
+.activity-tool-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.activity-tool-head small {
+  margin-left: auto;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.activity-tool-card code {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.activity-tool-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+/* 折叠头本身是按钮，但要读起来和普通事件卡一致。 */
+.activity-fold {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.activity-event.nested {
+  margin-left: var(--s4);
 }
 .activity-result {
   display: flex;
