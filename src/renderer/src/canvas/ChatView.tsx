@@ -32,6 +32,9 @@ export default function ChatView({
   goSettings: () => void;
 }) {
   const idRef = useRef(1);
+  const initialMessagesRef = useRef({ nodeId, messages: initialMessages });
+  const goSettingsRef = useRef(goSettings);
+  goSettingsRef.current = goSettings;
   const seed = (initialMessages ?? []).map((m) => ({
     id: idRef.current++,
     role: m.role as Role,
@@ -55,6 +58,10 @@ export default function ChatView({
   const threadRef = useRef<HTMLDivElement>(null);
   const [tb, setTb] = useState<{ text: string; x: number; y: number } | null>(null);
 
+  const openSettings = useCallback(() => {
+    goSettingsRef.current();
+  }, []);
+
   const titlebarActions = useMemo(
     () => (
       <>
@@ -67,13 +74,13 @@ export default function ChatView({
           展开画布
         </button>
         {noKey && (
-          <button className="chip-warn" type="button" onClick={goSettings}>
+          <button className="chip-warn" type="button" onClick={openSettings}>
             未配置 API key · 去设置
           </button>
         )}
       </>
     ),
-    [goSettings, noKey, onExpandCanvas],
+    [noKey, onExpandCanvas, openSettings],
   );
   useTitlebarActions(titlebarActions);
 
@@ -86,8 +93,11 @@ export default function ChatView({
   }, [nodeId]);
 
   useEffect(() => {
+    const previous = initialMessagesRef.current;
+    if (previous.nodeId === nodeId && previous.messages === initialMessages) return;
+    initialMessagesRef.current = { nodeId, messages: initialMessages };
     reloadFromInitial(initialMessages ?? []);
-  }, [initialMessages, reloadFromInitial]);
+  }, [initialMessages, nodeId, reloadFromInitial]);
 
   useEffect(() => {
     setInput(localStorage.getItem(`loom:draft:${nodeId}`) ?? "");

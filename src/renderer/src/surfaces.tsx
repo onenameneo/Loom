@@ -347,6 +347,9 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
   const sessionViews = getSessionViews(ctx.activitySessions, ctx.agents, "all", ctx.activityNow);
   const activeView = sessionViews.find((view) => view.session.key === ctx.activeSessionKey) ?? sessionViews[0] ?? null;
   const activeSession = activeView?.session ?? null;
+  const activeTitle = activeSession ? sessionTitle(activeSession) : "工作站";
+  const activeCwd = activeSession?.cwd;
+  const activeLiveness = activeView?.liveness;
   const telemetry = sessionViews.reduce(
     (acc, view) => {
       acc[view.liveness] += 1;
@@ -357,26 +360,26 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
 
   const titlebarContext = useMemo(
     () => ({
-      title: activeSession ? sessionTitle(activeSession) : "工作站",
-      subtitle: activeSession?.cwd || "等待本地 agent 事件",
+      title: activeTitle,
+      subtitle: activeCwd || "等待本地 agent 事件",
     }),
-    [activeSession],
+    [activeCwd, activeTitle],
   );
   const titlebarActions = useMemo(
     () => (
       <>
-        {activeView && (
-          <span className={`liveness-pill ${activeView.liveness}`}>
-            <span className={`state-dot ${activeView.liveness}`} />
-            {LIVENESS_LABEL[activeView.liveness]}
+        {activeLiveness && (
+          <span className={`liveness-pill ${activeLiveness}`}>
+            <span className={`state-dot ${activeLiveness}`} />
+            {LIVENESS_LABEL[activeLiveness]}
           </span>
         )}
         <button
           className="icon-btn"
           type="button"
-          onClick={() => copyPath(activeSession?.cwd)}
+          onClick={() => copyPath(activeCwd)}
           aria-label="复制 cwd"
-          disabled={!activeSession?.cwd}
+          disabled={!activeCwd}
         >
           <Copy size={15} />
         </button>
@@ -390,7 +393,7 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
         </button>
       </>
     ),
-    [activeSession, activeView, copyPath, openConfig],
+    [activeCwd, activeLiveness, copyPath, openConfig],
   );
   useTitlebarContext(titlebarContext);
   useTitlebarActions(titlebarActions);
