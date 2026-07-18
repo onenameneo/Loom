@@ -13,7 +13,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { CanvasNodeDto } from "../env";
-import { CanvasControls } from "./CanvasControls";
+import { useTitlebarActions } from "../titlebar/Titlebar";
+import { CanvasTitlebarActions, CanvasZoomControls } from "./CanvasControls";
 import { useCanvasLayoutStore } from "./CanvasLayoutContext";
 import { ChatThreadNode } from "./ChatThreadNode";
 import { BranchContext } from "./branch";
@@ -29,6 +30,10 @@ const CARD_W = 360;
 const NODE_H = 440; // 卡片默认高度（更高；可经 NodeResizer 拖拽改）
 const GAP_X = 150; // 父子之间的水平间距（子节点在父的右侧，拉开距离）
 const ROW_H = 300; // 兄弟/叶子之间的纵向间距（配合更高的卡片）
+
+function viewportDuration() {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : 220;
+}
 
 type CanvasInteraction =
   | { kind: "idle" }
@@ -526,9 +531,23 @@ export default function Canvas({
     });
   }, [nodes, setNodes, workspaceId, layoutStore]);
 
+  const titlebarCallbacksRef = useRef({ onFit: () => {}, onTidy: () => {} });
+  titlebarCallbacksRef.current.onFit = () => {
+    void flowRef.current?.fitView({ padding: 0.28, maxZoom: 1, duration: viewportDuration() });
+  };
+  titlebarCallbacksRef.current.onTidy = tidyLayout;
+  const titlebarActions = useMemo(
+    () => (
+      <CanvasTitlebarActions
+        onFit={() => titlebarCallbacksRef.current.onFit()}
+        onTidy={() => titlebarCallbacksRef.current.onTidy()}
+      />
+    ),
+    [],
+  );
+  useTitlebarActions(titlebarActions);
+
   const branchContext = useMemo(() => ({ onBranch, onFocusNode: focusNode }), [focusNode, onBranch]);
-  const viewportDuration = () =>
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : 220;
 
   return (
     <BranchContext.Provider value={branchContext}>
@@ -568,12 +587,8 @@ export default function Canvas({
         maxZoom={1.6}
         proOptions={{ hideAttribution: true }}
       >
-        <CanvasControls
+        <CanvasZoomControls
           zoom={zoom}
-          onFit={() =>
-            void flowRef.current?.fitView({ padding: 0.28, maxZoom: 1, duration: viewportDuration() })
-          }
-          onTidy={tidyLayout}
           onZoomOut={() => void flowRef.current?.zoomOut({ duration: viewportDuration() })}
           onZoomIn={() => void flowRef.current?.zoomIn({ duration: viewportDuration() })}
           onResetZoom={() => void flowRef.current?.zoomTo(1, { duration: viewportDuration() })}

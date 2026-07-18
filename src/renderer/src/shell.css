@@ -229,6 +229,40 @@ body {
   align-items: center;
   gap: var(--s2);
 }
+.canvas-titlebar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+}
+.canvas-titlebar-action:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--accent);
+}
+.app-overlay-root {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  pointer-events: none;
+  -webkit-app-region: no-drag;
+}
+.app-overlay-root > * {
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+.canvas-help {
+  width: 240px;
+  padding: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-float);
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+  user-select: text;
+  -webkit-user-select: text;
+}
 .titlebar-drag-space,
 .titlebar-flex-space {
   align-self: stretch;

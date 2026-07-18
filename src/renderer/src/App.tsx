@@ -198,6 +198,7 @@ export default function App() {
     <TitlebarProvider defaultDescriptor={defaultTitlebar}>
       <CanvasLayoutProvider>
         <div className="app" data-theme={theme} data-platform={platform}>
+          <div id="app-overlay-root" className="app-overlay-root chrome-no-drag" />
           <div className="wallpaper" />
           <AppChrome
             shell={shellController.shell}
