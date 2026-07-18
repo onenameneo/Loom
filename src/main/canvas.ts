@@ -1,7 +1,8 @@
 import { BrowserWindow, ipcMain } from "electron";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { ImageContent, Message, TextContent } from "@mariozechner/pi-ai";
-import type { NodeRecord, PersistedMessage, Store } from "./store/store";
+import type { NodeLayout, NodeRecord, PersistedMessage, Store } from "./store/store";
+import { saveNodeLayout, saveNodeLayouts } from "./store/layoutPersistence";
 import { resolveModelConfig } from "./settings";
 
 // ---------------------------------------------------------------------------
@@ -30,6 +31,7 @@ interface CanvasNode {
   systemPrompt?: string;
   model?: string;
   color?: string;
+  layout?: NodeLayout;
   mountAncestors: boolean;
   messages: AgentMessage[];
   messageMeta: unknown[];
@@ -86,6 +88,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
       systemPrompt: record.systemPrompt,
       model: record.model,
       color: record.color,
+      layout: record.layout,
       mountAncestors: record.mountAncestors,
       messages: record.messages.map((m) => m.content),
       messageMeta: record.messages.map((m) => m.meta),
@@ -265,6 +268,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     systemPrompt: n.systemPrompt,
     model: n.model,
     color: n.color,
+    layout: n.layout,
     messages: n.messages.flatMap((m, seq) => {
       const role = roleOf(m);
       if (role !== "user" && role !== "assistant") return [];
@@ -470,6 +474,30 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     }
     return { ok: true, node: dto(node) };
   });
+
+  ipcMain.handle("node:updateLayout", (_e, arg: { nodeId: string; layout: NodeLayout }) => {
+    const result = saveNodeLayout(store, arg?.nodeId, arg?.layout);
+    if (result.ok) {
+      const node = nodes.get(arg.nodeId);
+      if (node) node.layout = arg.layout;
+    }
+    return result;
+  });
+
+  ipcMain.handle(
+    "node:updateLayouts",
+    (_e, items: Array<{ id: string; layout: NodeLayout }>) => {
+      const result = saveNodeLayouts(store, items);
+      if (result.ok) {
+        const updated = new Set(result.updatedIds);
+        for (const item of items) {
+          const node = nodes.get(item.id);
+          if (node && updated.has(item.id)) node.layout = item.layout;
+        }
+      }
+      return result;
+    },
+  );
 
   ipcMain.handle("node:delete", (_e, nodeId: string) => {
     const target = loadNode(nodeId);

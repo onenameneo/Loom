@@ -13,6 +13,7 @@ import {
   resolveModelConfig,
   saveApiKey,
 } from "./settings";
+import { platformWindowOptions } from "./windowOptions";
 
 // ---------------------------------------------------------------------------
 // 主进程：持久化(store) + 设置(safeStorage) + 会话 + 画布引擎(pi 多节点)。
@@ -105,6 +106,8 @@ function buildMenu() {
     {
       label: "视图",
       submenu: [
+        { label: "切换侧栏", accelerator: "CmdOrCtrl+\\", click: menuAction("toggle-sidebar") },
+        { type: "separator" as const },
         { label: "会话", accelerator: "CmdOrCtrl+1", click: menuAction("surface:workspace") },
         { label: "工作站", accelerator: "CmdOrCtrl+2", click: menuAction("surface:observatory") },
         { type: "separator" as const },
@@ -124,12 +127,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 560,
     show: false,
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 14, y: 16 },
-    vibrancy: "sidebar",
-    visualEffectState: "active",
-    // 透明窗底，让 macOS 原生 vibrancy 材质透过半透明侧栏显出来（不透明底会盖掉毛玻璃）。
-    backgroundColor: "#00000000",
+    ...platformWindowOptions(process.platform, resolvedTheme() === "dark"),
     webPreferences: { preload: join(__dirname, "../preload/index.js"), sandbox: false },
   });
   if (store && !monitor) monitor = registerMonitor({ getWin: () => win, store });

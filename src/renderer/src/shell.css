@@ -33,9 +33,119 @@ body {
 
 .app {
   display: flex;
+  flex-direction: column;
   height: 100vh;
   width: 100vw;
   position: relative;
+}
+.app-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* ---------- global app titlebar ---------- */
+.app-titlebar {
+  position: relative;
+  z-index: 100;
+  height: 48px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 0 var(--s3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.app-titlebar.is-mac-electron {
+  -webkit-app-region: drag;
+}
+.app-titlebar.is-mac-electron:not(.is-sidebar-collapsed)::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 244px;
+  background: var(--sidebar-glass);
+  backdrop-filter: blur(40px) saturate(1.5);
+  -webkit-backdrop-filter: blur(40px) saturate(1.5);
+  border-right: 1px solid var(--border);
+  pointer-events: none;
+}
+.titlebar-native-space,
+.titlebar-nav,
+.titlebar-context,
+.titlebar-actions {
+  position: relative;
+  z-index: 1;
+}
+.titlebar-native-space {
+  width: 62px;
+  flex: none;
+}
+.titlebar-interactive {
+  -webkit-app-region: no-drag;
+}
+.titlebar-nav {
+  display: flex;
+  align-items: center;
+}
+.titlebar-button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.titlebar-button:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.titlebar-context {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  overflow: hidden;
+}
+.titlebar-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+.titlebar-mode {
+  flex: none;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.titlebar-subtitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.titlebar-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
 }
 .wallpaper {
   position: fixed;
@@ -54,7 +164,7 @@ body {
   backdrop-filter: blur(40px) saturate(1.5);
   -webkit-backdrop-filter: blur(40px) saturate(1.5);
   border-right: 1px solid var(--border);
-  padding: 30px 10px 10px;
+  padding: 6px 10px 10px;
   gap: 2px;
 }
 .sb-head {
@@ -405,20 +515,6 @@ body {
   height: 100%;
   min-height: 0;
 }
-.surface-head {
-  height: 46px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 20px 0 84px;
-  border-bottom: 1px solid var(--border);
-  -webkit-app-region: drag;
-}
-.ws-title {
-  font-size: 13px;
-  font-weight: 600;
-}
 .chip-warn {
   -webkit-app-region: no-drag;
   margin-left: auto;
@@ -458,31 +554,6 @@ body {
 /* ---------- monitor ---------- */
 .monitor-surface {
   min-width: 0;
-}
-.monitor-surface-head {
-  justify-content: space-between;
-}
-.monitor-head-title {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: var(--s3);
-}
-.monitor-cwd {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--faint);
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-.monitor-head-actions {
-  -webkit-app-region: no-drag;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s2);
 }
 .monitor {
   flex: 1;
@@ -1051,8 +1122,6 @@ button.activity-session-card {
     align-items: stretch;
     flex-direction: column;
   }
-  .monitor-head-title,
-  .monitor-head-actions,
   .monitor-telemetry {
     flex-wrap: wrap;
   }

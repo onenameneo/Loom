@@ -1,6 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ActivitySession, ActivityStatus, ActivityTool, AgentProc, SettingsPayload, WorkspaceMeta } from "./env";
 import Sidebar from "./Sidebar";
+import { CanvasLayoutProvider } from "./canvas/CanvasLayoutContext";
+import { AppTitlebar, TitlebarProvider } from "./titlebar/Titlebar";
+import {
+  isBrowserSidebarShortcut,
+  readSidebarCollapsed,
+  SIDEBAR_STORAGE_KEY,
+} from "./titlebar/sidebarState";
 import {
   applyActivityEvent,
   getSessionViews,
@@ -22,6 +29,21 @@ export default function App() {
   const [activityStatus, setActivityStatus] = useState<ActivityStatus | null>(null);
   const [activeSessionKey, setActiveSessionKey] = useState<string | null>(null);
   const [activityNow, setActivityNow] = useState(Date.now());
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+    readSidebarCollapsed(window.localStorage),
+  );
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem(SIDEBAR_STORAGE_KEY, next ? "1" : "0");
+      } catch {
+        // localStorage unavailable: keep the in-memory shell state.
+      }
+      return next;
+    });
+  }, []);
 
   const reloadSettings = useCallback(async () => {
     if (!window.api) {
@@ -134,8 +156,20 @@ export default function App() {
       else if (action === "settings") setActiveSurface("settings");
       else if (action === "surface:workspace") setActiveSurface("workspace");
       else if (action === "surface:observatory") setActiveSurface("observatory");
+      else if (action === "toggle-sidebar") toggleSidebar();
     });
-  }, [createWorkspace]);
+  }, [createWorkspace, toggleSidebar]);
+
+  useEffect(() => {
+    if (window.api) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isBrowserSidebarShortcut(event)) return;
+      event.preventDefault();
+      toggleSidebar();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [toggleSidebar]);
 
   const toggleTheme = useCallback(async () => {
     const next = theme === "light" ? "dark" : "light";
@@ -169,44 +203,59 @@ export default function App() {
   };
 
   const Active = SURFACES.find((s) => s.id === activeSurface) ?? SURFACES[0];
+  const defaultTitlebar = useMemo(() => ({ title: Active.label }), [Active.label]);
+  const platform = window.api?.platform ?? "browser";
 
   return (
-    <div className="app" data-theme={theme}>
-      <div className="wallpaper" />
-      <Sidebar
-        activeSurface={activeSurface}
-        setSurface={setActiveSurface}
-        ctx={ctx}
-        onSelectWorkspace={(id) => {
-          setActiveWorkspaceId(id);
-          setFocusNodeId(null);
-        }}
-        onFocusNode={(workspaceId, nodeId) => {
-          setActiveWorkspaceId(workspaceId);
-          setActiveSurface("workspace");
-          setFocusNodeId(nodeId);
-        }}
-        onCreateWorkspace={createWorkspace}
-        onRenameWorkspace={async (id, name) => {
-          await window.api.workspaces.rename(id, name);
-          reloadWorkspaces();
-        }}
-        onDeleteWorkspace={async (id) => {
-          await window.api.workspaces.delete(id);
-          setActiveWorkspaceId((cur) => (cur === id ? null : cur));
-          reloadWorkspaces();
-        }}
-        onPinWorkspace={async (id, pinned) => {
-          await window.api.workspaces.pin(id, pinned);
-          reloadWorkspaces();
-        }}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        settings={settings}
-      />
-      <main className="main">
-        <Active.Panel ctx={ctx} />
-      </main>
-    </div>
+    <TitlebarProvider defaultDescriptor={defaultTitlebar}>
+      <CanvasLayoutProvider>
+        <div className="app" data-theme={theme} data-platform={platform}>
+          <div className="wallpaper" />
+          <AppTitlebar
+            collapsed={sidebarCollapsed}
+            onToggleSidebar={toggleSidebar}
+            platform={platform}
+          />
+          <div className="app-body">
+            {!sidebarCollapsed && (
+              <Sidebar
+                activeSurface={activeSurface}
+                setSurface={setActiveSurface}
+                ctx={ctx}
+                onSelectWorkspace={(id) => {
+                  setActiveWorkspaceId(id);
+                  setFocusNodeId(null);
+                }}
+                onFocusNode={(workspaceId, nodeId) => {
+                  setActiveWorkspaceId(workspaceId);
+                  setActiveSurface("workspace");
+                  setFocusNodeId(nodeId);
+                }}
+                onCreateWorkspace={createWorkspace}
+                onRenameWorkspace={async (id, name) => {
+                  await window.api.workspaces.rename(id, name);
+                  reloadWorkspaces();
+                }}
+                onDeleteWorkspace={async (id) => {
+                  await window.api.workspaces.delete(id);
+                  setActiveWorkspaceId((cur) => (cur === id ? null : cur));
+                  reloadWorkspaces();
+                }}
+                onPinWorkspace={async (id, pinned) => {
+                  await window.api.workspaces.pin(id, pinned);
+                  reloadWorkspaces();
+                }}
+                theme={theme}
+                toggleTheme={toggleTheme}
+                settings={settings}
+              />
+            )}
+            <main className="main">
+              <Active.Panel ctx={ctx} />
+            </main>
+          </div>
+        </div>
+      </CanvasLayoutProvider>
+    </TitlebarProvider>
   );
 }

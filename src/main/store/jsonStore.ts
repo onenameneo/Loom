@@ -3,6 +3,7 @@ import { dirname, join } from "path";
 import {
   DEFAULT_SETTINGS,
   SCHEMA_VERSION,
+  type NodeLayout,
   type NodeRecord,
   type PersistedMessage,
   type Settings,
@@ -124,6 +125,12 @@ export class JsonStore implements Store {
     _id: string,
     _patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: string; color: string }>,
   ): void {}
+  updateNodeLayout(_id: string, _layout: NodeLayout): boolean {
+    return false;
+  }
+  updateNodeLayouts(_items: Array<{ id: string; layout: NodeLayout }>): string[] {
+    return [];
+  }
   deleteNode(_id: string): void {}
   appendMessages(_nodeId: string, _msgs: PersistedMessage[]): void {}
   deleteMessagesFrom(_nodeId: string, _seq: number): void {}

@@ -3,9 +3,9 @@ import {
   Background,
   BackgroundVariant,
   MiniMap,
-  Panel,
   ReactFlow,
   type ReactFlowInstance,
+  type ResizeParams,
   useEdgesState,
   useNodesState,
   type Edge,
@@ -13,9 +13,12 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { CanvasNodeDto } from "../env";
-import { IconRefresh } from "../icons";
+import { CanvasControls } from "./CanvasControls";
+import { useCanvasLayoutStore } from "./CanvasLayoutContext";
 import { ChatThreadNode } from "./ChatThreadNode";
 import { BranchContext } from "./branch";
+import { applyTidyPositions, readNodeLayout, resolveNodeLayout } from "./layout";
+import { ResizeSession } from "./resizeSession";
 
 const nodeTypes = { chatThread: ChatThreadNode };
 const defaultEdgeOptions = { type: "default" as const };
@@ -26,6 +29,11 @@ const CARD_W = 360;
 const NODE_H = 440; // 卡片默认高度（更高；可经 NodeResizer 拖拽改）
 const GAP_X = 150; // 父子之间的水平间距（子节点在父的右侧，拉开距离）
 const ROW_H = 300; // 兄弟/叶子之间的纵向间距（配合更高的卡片）
+
+type CanvasInteraction =
+  | { kind: "idle" }
+  | { kind: "dragging"; nodeId: string }
+  | { kind: "resizing"; nodeId: string };
 
 // 从左到右生长的树布局：子节点在父的右侧、拉开水平距离；兄弟节点纵向错开，
 // 父节点纵向对齐到其子节点的中点。位置是纯 renderer 关注点（图存储不落盘位置）。
@@ -64,13 +72,19 @@ function toNode(
   fallbackModel?: string,
   fresh = false,
   actions?: Record<string, unknown>,
+  dirtyLayout?: { x: number; y: number; width: number; height: number },
 ): Node {
+  const resolved = resolveNodeLayout(
+    dto,
+    { x: pos.x, y: pos.y, width: CARD_W, height: NODE_H },
+    dirtyLayout,
+  );
   return {
     id: dto.id,
     type: "chatThread",
-    position: pos,
+    position: { x: resolved.x, y: resolved.y },
     dragHandle: ".card__head", // 只有标题栏可拖，正文/输入框正常交互
-    style: { width: CARD_W, height: NODE_H },
+    style: { width: resolved.width, height: resolved.height },
     data: {
       workspaceId: dto.workspaceId,
       parentId: dto.parentId,
@@ -107,14 +121,12 @@ function classNames(...items: Array<string | false | null | undefined>) {
 export default function Canvas({
   workspaceId,
   model,
-  isDark,
   focusNodeId,
   onFocused,
   onTreeChange,
 }: {
   workspaceId: string;
   model?: string;
-  isDark: boolean;
   focusNodeId?: string | null;
   onFocused?: () => void;
   onTreeChange?: () => void;
@@ -124,9 +136,17 @@ export default function Canvas({
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [interaction, setInteraction] = useState<CanvasInteraction>({ kind: "idle" });
+  const [zoom, setZoom] = useState(1);
   const titleRef = useRef(new Map<string, string>());
   const flowRef = useRef<ReactFlowInstance | null>(null);
   const flashTimerRef = useRef<number | null>(null);
+  const treeChangeRef = useRef(onTreeChange);
+  const modelRef = useRef(model);
+  const layoutStore = useCanvasLayoutStore();
+  const resizeSessionRef = useRef(new ResizeSession());
+  treeChangeRef.current = onTreeChange;
+  modelRef.current = model;
 
   const pathIds = useCallback((targetId: string) => {
     const byId = new Map(nodes.map((n) => [n.id, n]));
@@ -206,7 +226,7 @@ export default function Canvas({
 
   // 路径高亮只跟随 hover（探索性）；选中只显示光晕，不淡化其他节点——
   // 否则选一个节点会把整条祖先链点亮，看起来像“多选”。
-  const highlightTargetId = hoverId;
+  const highlightTargetId = interaction.kind === "idle" ? hoverId : null;
   const highlightPath = useMemo(
     () => (highlightTargetId ? pathIds(highlightTargetId) : null),
     [highlightTargetId, pathIds],
@@ -232,10 +252,12 @@ export default function Canvas({
             onPath && "is-onpath",
             dimmed && "is-dimmed",
             flashId === node.id && "is-flash",
+            interaction.kind === "dragging" && interaction.nodeId === node.id && "is-dragging",
+            interaction.kind === "resizing" && interaction.nodeId === node.id && "is-resizing",
           ),
         };
       }),
-    [collapsed, descendantCounts, flashId, hiddenNodeIds, highlightPath, nodes, onToggleCollapse],
+    [collapsed, descendantCounts, flashId, hiddenNodeIds, highlightPath, interaction, nodes, onToggleCollapse],
   );
 
   const displayEdges = useMemo<Edge[]>(
@@ -262,8 +284,9 @@ export default function Canvas({
         return next;
       });
       for (const id of ids) titleRef.current.delete(id);
+      layoutStore.remove(workspaceId, ids);
     },
-    [setNodes, setEdges],
+    [layoutStore, setNodes, setEdges, workspaceId],
   );
 
   const focusNode = useCallback(
@@ -305,11 +328,57 @@ export default function Canvas({
     [],
   );
 
+  const applyResizeLayout = useCallback(
+    (id: string, next: ResizeParams) => {
+      setNodes((nds) =>
+        nds.map((node) =>
+          node.id === id
+            ? {
+                ...node,
+                position: { x: next.x, y: next.y },
+                style: { ...node.style, width: next.width, height: next.height },
+              }
+            : node,
+        ),
+      );
+    },
+    [setNodes],
+  );
+
+  useEffect(() => {
+    const cancelResize = () => {
+      const cancelled = resizeSessionRef.current.cancel();
+      if (cancelled) layoutStore.enqueue(workspaceId, cancelled.nodeId, cancelled.layout);
+      setInteraction({ kind: "idle" });
+    };
+    window.addEventListener("blur", cancelResize);
+    return () => {
+      window.removeEventListener("blur", cancelResize);
+      cancelResize();
+    };
+  }, [layoutStore, workspaceId]);
+
   const actions = useCallback(
     () => ({
-      onTreeChange,
+      onTreeChange: () => treeChangeRef.current?.(),
       onSelect: (id: string) => {
         setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })));
+      },
+      onResizeStart: (id: string) => {
+        const token = resizeSessionRef.current.start(id);
+        setInteraction({ kind: "resizing", nodeId: id });
+        return token;
+      },
+      onResize: (id: string, token: number, params: ResizeParams) => {
+        const next = resizeSessionRef.current.update(token, id, params);
+        if (next) applyResizeLayout(id, next);
+      },
+      onResizeEnd: (id: string, token: number, params: ResizeParams) => {
+        const next = resizeSessionRef.current.finish(token, id, params);
+        if (!next) return;
+        applyResizeLayout(id, next);
+        layoutStore.enqueue(workspaceId, id, next);
+        setInteraction({ kind: "idle" });
       },
       onRename: async (id: string, title: string) => {
         if (window.api) await window.api.canvas.update(id, { title });
@@ -317,7 +386,7 @@ export default function Canvas({
         setNodes((nds) =>
           nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, title } } : n)),
         );
-        onTreeChange?.();
+        treeChangeRef.current?.();
       },
       onSetColor: async (id: string, color: string) => {
         if (window.api) await window.api.canvas.update(id, { color });
@@ -333,10 +402,10 @@ export default function Canvas({
         } else {
           removeIds([id]);
         }
-        onTreeChange?.();
+        treeChangeRef.current?.();
       },
     }),
-    [onTreeChange, removeIds, setNodes],
+    [applyResizeLayout, layoutStore, removeIds, setNodes, workspaceId],
   );
 
   // 载入（或初始化）本会话的节点树
@@ -355,13 +424,24 @@ export default function Canvas({
       const pos = layout(dtos);
       titleRef.current = new Map(dtos.map((d) => [d.id, d.title]));
       const nodeActions = actions();
-      setNodes(dtos.map((d) => toNode(d, pos[d.id] ?? { x: ROOT_X, y: ROOT_Y }, model, false, nodeActions)));
+      setNodes(
+        dtos.map((d) =>
+          toNode(
+            d,
+            pos[d.id] ?? { x: ROOT_X, y: ROOT_Y },
+            modelRef.current,
+            false,
+            nodeActions,
+            layoutStore.getDirty(workspaceId, d.id),
+          ),
+        ),
+      );
       setEdges(edgesFrom(dtos));
     })();
     return () => {
       alive = false;
     };
-  }, [workspaceId, model, setNodes, setEdges, actions]);
+  }, [workspaceId, setNodes, setEdges, actions, layoutStore]);
 
   useEffect(() => {
     if (!focusNodeId) return;
@@ -382,18 +462,24 @@ export default function Canvas({
       }
       titleRef.current.set(id, "新分支");
       const nodeActions = actions();
+      const src = nodes.find((n) => n.id === sourceId);
+      const baseX = src ? src.position.x : ROOT_X;
+      const baseY = src ? src.position.y : ROOT_Y;
+      const siblings = nodes.filter((n) => (n.data as any)?.seed?.parent === sourceId).length;
+      const initialLayout = {
+        x: baseX + CARD_W + GAP_X,
+        y: baseY + siblings * ROW_H,
+        width: CARD_W,
+        height: NODE_H,
+      };
       setNodes((nds) => {
-        const src = nds.find((n) => n.id === sourceId);
-        const baseX = src ? src.position.x : ROOT_X;
-        const baseY = src ? src.position.y : ROOT_Y;
-        const siblings = nds.filter((n) => (n.data as any)?.seed?.parent === sourceId).length;
         const newNode: Node = {
           id,
           type: "chatThread",
           dragHandle: ".card__head",
-          style: { width: CARD_W, height: NODE_H },
+          style: { width: initialLayout.width, height: initialLayout.height },
           // 出现在来源节点的右侧、拉开距离；多个兄弟纵向错开
-          position: { x: baseX + CARD_W + GAP_X, y: baseY + siblings * ROW_H },
+          position: { x: initialLayout.x, y: initialLayout.y },
           data: {
             workspaceId,
             parentId: sourceId,
@@ -409,11 +495,12 @@ export default function Canvas({
         };
         return nds.concat(newNode);
       });
+      layoutStore.enqueue(workspaceId, id, initialLayout);
       const label = seedText.length > 14 ? `${seedText.slice(0, 14)}…` : seedText;
       setEdges((eds) => eds.concat({ id: `e-${sourceId}-${id}`, source: sourceId, target: id, label }));
-      onTreeChange?.();
+      treeChangeRef.current?.();
     },
-    [workspaceId, model, setNodes, setEdges, actions, onTreeChange],
+    [workspaceId, model, nodes, setNodes, setEdges, actions, layoutStore],
   );
 
   const tidyLayout = useCallback(() => {
@@ -429,24 +516,51 @@ export default function Canvas({
       messages: ((node.data as any)?.messages ?? []) as CanvasNodeDto["messages"],
     }));
     const pos = layout(dtos);
-    setNodes((nds) => nds.map((node) => ({ ...node, position: pos[node.id] ?? node.position })));
-  }, [nodes, setNodes, workspaceId]);
+    setNodes((nds) => {
+      const tidied = applyTidyPositions(nds, pos);
+      layoutStore.enqueueMany(
+        workspaceId,
+        tidied.map((node) => ({ id: node.id, layout: readNodeLayout(node) })),
+      );
+      return tidied;
+    });
+  }, [nodes, setNodes, workspaceId, layoutStore]);
 
   const branchContext = useMemo(() => ({ onBranch, onFocusNode: focusNode }), [focusNode, onBranch]);
+  const viewportDuration = () =>
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : 220;
 
   return (
     <BranchContext.Provider value={branchContext}>
       <ReactFlow
+        className={classNames(
+          "loom-canvas",
+          interaction.kind === "dragging" && "is-dragging",
+          interaction.kind === "resizing" && "is-resizing",
+        )}
         nodes={displayNodes}
         edges={displayEdges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        nodesDraggable={interaction.kind !== "resizing"}
+        panOnDrag={interaction.kind !== "resizing"}
+        onPaneClick={() => {
+          setNodes((nds) => nds.map((node) => (node.selected ? { ...node, selected: false } : node)));
+        }}
         onNodeMouseEnter={(_, node) => setHoverId(node.id)}
         onNodeMouseLeave={() => setHoverId(null)}
+        onNodeDragStart={(_, node) => {
+          setInteraction({ kind: "dragging", nodeId: node.id });
+        }}
+        onNodeDragStop={(_, node) => {
+          layoutStore.enqueue(workspaceId, node.id, readNodeLayout(node));
+          setInteraction({ kind: "idle" });
+        }}
         onInit={(instance) => {
           flowRef.current = instance;
         }}
+        onMove={(_, viewport) => setZoom(viewport.zoom)}
         defaultEdgeOptions={defaultEdgeOptions}
         fitView
         fitViewOptions={{ padding: 0.28, maxZoom: 1 }}
@@ -454,24 +568,28 @@ export default function Canvas({
         maxZoom={1.6}
         proOptions={{ hideAttribution: true }}
       >
-        <Panel position="top-right" className="canvas-tools">
-          <button className="canvas-tool-btn nodrag" type="button" onClick={tidyLayout} title="整理布局">
-            <IconRefresh size={14} /> 整理布局
-          </button>
-        </Panel>
+        <CanvasControls
+          zoom={zoom}
+          onFit={() =>
+            void flowRef.current?.fitView({ padding: 0.28, maxZoom: 1, duration: viewportDuration() })
+          }
+          onTidy={tidyLayout}
+          onZoomOut={() => void flowRef.current?.zoomOut({ duration: viewportDuration() })}
+          onZoomIn={() => void flowRef.current?.zoomIn({ duration: viewportDuration() })}
+          onResetZoom={() => void flowRef.current?.zoomTo(1, { duration: viewportDuration() })}
+        />
         <Background
           variant={BackgroundVariant.Dots}
           gap={26}
           size={1}
-          color={isDark ? "rgba(255,255,255,0.07)" : "rgba(28,26,20,0.10)"}
+          color="var(--canvas-dot)"
         />
         <MiniMap
           pannable
           zoomable
-          nodeColor={() => (isDark ? "rgba(51,156,255,0.55)" : "rgba(1,105,204,0.45)")}
+          nodeColor={(node) => (node.selected ? "var(--accent)" : "var(--minimap-node)")}
           nodeStrokeWidth={0}
-          maskColor={isDark ? "rgba(24,24,24,0.7)" : "rgba(233,232,228,0.6)"}
-          style={{ background: isDark ? "#202020" : "#ffffff", borderRadius: 12, border: "1px solid var(--border)" }}
+          maskColor="var(--minimap-mask)"
         />
       </ReactFlow>
     </BranchContext.Provider>
