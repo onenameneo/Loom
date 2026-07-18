@@ -15,6 +15,8 @@ type ShellTransitionEvent = {
   propertyName: string;
 };
 
+export type { ShellTransitionEvent };
+
 type AppShellControllerOptions = {
   toggleRef: RefObject<HTMLButtonElement>;
   sidebarContentRef: RefObject<HTMLElement>;
@@ -22,8 +24,17 @@ type AppShellControllerOptions = {
   storage?: Pick<Storage, "getItem" | "setItem">;
 };
 
+const NOOP_STORAGE: Pick<Storage, "getItem" | "setItem"> = {
+  getItem: () => null,
+  setItem: () => {},
+};
+
 function getDefaultStorage(): Pick<Storage, "getItem" | "setItem"> {
-  return window.localStorage;
+  try {
+    return window.localStorage;
+  } catch {
+    return NOOP_STORAGE;
+  }
 }
 
 function getInitialReducedMotion(): boolean {
@@ -44,14 +55,30 @@ export function useAppShellController({
   const [detectedReducedMotion, setDetectedReducedMotion] = useState(getInitialReducedMotion);
   const reducedMotion = reducedMotionOverride ?? detectedReducedMotion;
 
+  const settleActiveTransition = useCallback(() => {
+    const current = shellRef.current;
+    const next = completeShellTransition(current, {
+      targetIsShell: true,
+      propertyName: "--sidebar-width",
+      version: current.version,
+    });
+    if (next === current) return false;
+    shellRef.current = next;
+    setShell(next);
+    return true;
+  }, []);
+
   useEffect(() => {
     if (reducedMotionOverride !== undefined || !window.matchMedia) return;
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => setDetectedReducedMotion(query.matches);
+    const update = () => {
+      if (query.matches) settleActiveTransition();
+      setDetectedReducedMotion(query.matches);
+    };
     update();
     query.addEventListener?.("change", update);
     return () => query.removeEventListener?.("change", update);
-  }, [reducedMotionOverride]);
+  }, [reducedMotionOverride, settleActiveTransition]);
 
   const requestToggle = useCallback(
     (source: ShellCommandSource): boolean => {

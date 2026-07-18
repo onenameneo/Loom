@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useRef } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SIDEBAR_STORAGE_KEY } from "./sidebarState";
 import { useAppShellController, type ShellCommandSource } from "./useAppShellController";
@@ -9,9 +9,10 @@ afterEach(() => {
   cleanup();
   window.localStorage.clear();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
-function ControllerHarness({ reducedMotion = false }: { reducedMotion?: boolean }) {
+function ControllerHarness({ reducedMotion }: { reducedMotion?: boolean }) {
   const toggleRef = useRef<HTMLButtonElement>(null);
   const sidebarContentRef = useRef<HTMLDivElement>(null);
   const shellElementRef = useRef<HTMLDivElement>(null);
@@ -75,6 +76,34 @@ function ControllerHarness({ reducedMotion = false }: { reducedMotion?: boolean 
   );
 }
 
+function installReducedMotionQuery(initial: boolean) {
+  let matches = initial;
+  const listeners = new Set<EventListener>();
+  const query = {
+    get matches() {
+      return matches;
+    },
+    media: "(prefers-reduced-motion: reduce)",
+    onchange: null,
+    addEventListener: (_type: string, listener: EventListener) => {
+      listeners.add(listener);
+    },
+    removeEventListener: (_type: string, listener: EventListener) => {
+      listeners.delete(listener);
+    },
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => true,
+  } as unknown as MediaQueryList;
+  vi.stubGlobal("matchMedia", vi.fn(() => query));
+  return {
+    setMatches(next: boolean) {
+      matches = next;
+      listeners.forEach((listener) => listener(new Event("change")));
+    },
+  };
+}
+
 function phase() {
   return screen.getByTestId("shell").getAttribute("data-phase");
 }
@@ -95,6 +124,23 @@ describe("useAppShellController", () => {
     window.localStorage.setItem(SIDEBAR_STORAGE_KEY, "1");
     render(<ControllerHarness />);
     expect(phase()).toBe("collapsed");
+  });
+
+  it("falls back to no-op storage when the localStorage getter throws", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(window, "localStorage")!;
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("blocked", "SecurityError");
+      },
+    });
+    try {
+      expect(() => render(<ControllerHarness />)).not.toThrow();
+      expect(phase()).toBe("expanded");
+      expect(() => fireEvent.click(commandButton("button"))).not.toThrow();
+    } finally {
+      Object.defineProperty(window, "localStorage", descriptor);
+    }
   });
 
   it.each(["button", "menu", "browser"] as const)(
@@ -190,4 +236,23 @@ describe("useAppShellController", () => {
     expect(phase()).toBe("collapsed");
     expect(screen.queryByTestId("sidebar-content")).toBeNull();
   });
+
+  it.each([
+    { persisted: null, start: "collapsing", settled: "collapsed" },
+    { persisted: "1", start: "expanding", settled: "expanded" },
+  ])(
+    "settles a live $start transition when reduced motion becomes true",
+    ({ persisted, start, settled }) => {
+      if (persisted) window.localStorage.setItem(SIDEBAR_STORAGE_KEY, persisted);
+      const media = installReducedMotionQuery(false);
+      render(<ControllerHarness />);
+      fireEvent.click(commandButton("button"));
+      expect(phase()).toBe(start);
+
+      act(() => media.setMatches(true));
+
+      expect(phase()).toBe(settled);
+    },
+  );
+
 });

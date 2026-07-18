@@ -3,10 +3,11 @@ import type {
   CSSProperties,
   ReactNode,
   RefObject,
-  TransitionEvent as ReactTransitionEvent,
 } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { useResolvedTitlebar } from "./TitlebarContext";
 import type { ShellState } from "./shellState";
+import type { ShellTransitionEvent } from "./useAppShellController";
 
 type RendererPlatform = NodeJS.Platform | "browser";
 
@@ -33,6 +34,8 @@ export function WindowControlsChrome({
   const transitioning = isTransitioning(shell);
   const expandedTarget = targetsExpanded(shell);
   const label = expandedTarget ? "折叠侧栏" : "展开侧栏";
+  const shortcut =
+    platform === "darwin" ? "⌘\\" : platform === "browser" ? "Cmd/Ctrl+\\" : "Ctrl+\\";
 
   return (
     <div
@@ -54,7 +57,7 @@ export function WindowControlsChrome({
         aria-label={label}
         aria-expanded={expandedTarget}
         aria-disabled={transitioning ? "true" : undefined}
-        title={`${label} (⌘\\)`}
+        title={`${label} (${shortcut})`}
       >
         <PanelLeft size={16} />
       </button>
@@ -68,7 +71,6 @@ export function AppTitlebar({
 }: {
   collapsed: boolean;
   platform: RendererPlatform;
-  onToggleSidebar?: () => void;
 }) {
   const { context, actions } = useResolvedTitlebar();
   const isMacElectron = platform === "darwin";
@@ -108,23 +110,49 @@ export function AppChrome({
   toggleRef: RefObject<HTMLButtonElement>;
   sidebarContentRef: RefObject<HTMLDivElement>;
   onToggleSidebar: () => void;
-  onTransitionComplete: (event: ReactTransitionEvent<HTMLDivElement>, version: number) => void;
+  onTransitionComplete: (event: ShellTransitionEvent, version: number) => void;
   sidebar: ReactNode;
   main: ReactNode;
 }) {
   const transitioning = isTransitioning(shell);
   const sidebarMounted = shell.phase !== "collapsed";
+  const shellRef = useRef<HTMLDivElement>(null);
   const shellStyle = {
     "--window-controls-width": platform === "darwin" ? "104px" : "44px",
+    "--sidebar-width": targetsExpanded(shell) ? "244px" : "0px",
   } as CSSProperties;
   const inertProps = transitioning ? ({ inert: "" } as Record<string, string>) : {};
 
+  useLayoutEffect(() => {
+    const shellElement = shellRef.current;
+    if (!shellElement || !transitioning) return;
+    const transitionVersion = shell.version;
+    const completeBoundTransition = (event: Event) => {
+      const transitionEvent = event as TransitionEvent;
+      onTransitionComplete(
+        {
+          currentTarget: shellElement,
+          target: event.target ?? shellElement,
+          propertyName: transitionEvent.propertyName,
+        },
+        transitionVersion,
+      );
+    };
+    shellElement.addEventListener("transitionend", completeBoundTransition);
+    shellElement.addEventListener("transitioncancel", completeBoundTransition);
+    return () => {
+      shellElement.removeEventListener("transitionend", completeBoundTransition);
+      shellElement.removeEventListener("transitioncancel", completeBoundTransition);
+    };
+  }, [onTransitionComplete, shell.phase, shell.version, transitioning]);
+
   return (
     <div
+      ref={shellRef}
       className={`app-shell shell-${shell.phase} platform-${platform}`}
       data-shell-phase={shell.phase}
+      data-transition-version={transitioning ? shell.version : undefined}
       style={shellStyle}
-      onTransitionEnd={(event) => onTransitionComplete(event, shell.version)}
     >
       <WindowControlsChrome
         shell={shell}

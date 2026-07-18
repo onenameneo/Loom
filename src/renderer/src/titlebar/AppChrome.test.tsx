@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
-import { createRef } from "react";
+import { createRef, useRef } from "react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TitlebarProvider } from "./TitlebarContext";
 import { AppChrome } from "./AppChrome";
 import type { ShellState } from "./shellState";
+import { useAppShellController } from "./useAppShellController";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const expanded: ShellState = { phase: "expanded", version: 0 };
 const collapsed: ShellState = { phase: "collapsed", version: 1 };
@@ -138,6 +142,26 @@ describe("adaptive AppChrome", () => {
     expect(Boolean(container.querySelector(".chrome-drag-region"))).toBe(mac);
   });
 
+  it.each([
+    { phase: "expanded" as const, width: "244px" },
+    { phase: "expanding" as const, width: "244px" },
+    { phase: "collapsed" as const, width: "0px" },
+    { phase: "collapsing" as const, width: "0px" },
+  ])("maps $phase to the $width sidebar target on the persistent shell", ({ phase, width }) => {
+    const { container } = renderChrome({ phase, version: 3 });
+    const shell = container.querySelector(".app-shell") as HTMLElement;
+    expect(shell.style.getPropertyValue("--sidebar-width")).toBe(width);
+  });
+
+  it.each([
+    { platform: "darwin" as const, shortcut: "⌘\\" },
+    { platform: "win32" as const, shortcut: "Ctrl+\\" },
+    { platform: "browser" as const, shortcut: "Cmd/Ctrl+\\" },
+  ])("uses a platform-aware toggle tooltip on $platform", ({ platform, shortcut }) => {
+    renderChrome(expanded, platform);
+    expect(screen.getByRole("button", { name: "折叠侧栏" }).getAttribute("title")).toContain(shortcut);
+  });
+
   it("switches the macOS safe backdrop to content material only when settled collapsed", () => {
     const { container, rerender } = renderChrome(expanded, "darwin");
     const chrome = container.querySelector(".window-controls-chrome")!;
@@ -169,5 +193,129 @@ describe("adaptive AppChrome", () => {
 
     expect(onTransitionComplete).toHaveBeenCalledTimes(1);
     expect(onTransitionComplete.mock.calls[0][1]).toBe(7);
+  });
+
+  it("binds completion events to their production transition epoch", () => {
+    const boundEndListeners: EventListener[] = [];
+    const originalAdd = HTMLElement.prototype.addEventListener;
+    vi.spyOn(HTMLElement.prototype, "addEventListener").mockImplementation(function (
+      this: HTMLElement,
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: boolean | AddEventListenerOptions,
+    ) {
+      if (type === "transitionend" && this.classList.contains("app-shell")) {
+        boundEndListeners.push(listener as EventListener);
+      }
+      return originalAdd.call(this, type, listener, options);
+    });
+
+    function IntegratedChrome() {
+      const toggleRef = useRef<HTMLButtonElement>(null);
+      const sidebarContentRef = useRef<HTMLDivElement>(null);
+      const controller = useAppShellController({
+        toggleRef,
+        sidebarContentRef,
+        reducedMotion: false,
+      });
+      return (
+        <TitlebarProvider defaultDescriptor={{ title: "Loom" }}>
+          <AppChrome
+            shell={controller.shell}
+            platform="browser"
+            toggleRef={toggleRef}
+            sidebarContentRef={sidebarContentRef}
+            onToggleSidebar={() => controller.requestToggle("button")}
+            onTransitionComplete={controller.completeTransition}
+            sidebar={<button>inside</button>}
+            main={<div>main</div>}
+          />
+        </TitlebarProvider>
+      );
+    }
+
+    const { container } = render(<IntegratedChrome />);
+    fireEvent.click(screen.getByRole("button", { name: "折叠侧栏" }));
+    expect(boundEndListeners).toHaveLength(1);
+    const v1 = boundEndListeners[0];
+    const shell = container.querySelector(".app-shell") as HTMLElement;
+    const completion = new Event("transitionend");
+    Object.defineProperties(completion, {
+      target: { value: shell },
+      propertyName: { value: "--sidebar-width" },
+    });
+    act(() => v1.call(shell, completion));
+    expect(shell.getAttribute("data-shell-phase")).toBe("collapsed");
+
+    fireEvent.click(screen.getByRole("button", { name: "展开侧栏" }));
+    expect(boundEndListeners).toHaveLength(2);
+    const v2 = boundEndListeners[1];
+    act(() => v1.call(shell, completion));
+    expect(shell.getAttribute("data-shell-phase")).toBe("expanding");
+
+    act(() => v2.call(shell, completion));
+    expect(shell.getAttribute("data-shell-phase")).toBe("expanded");
+  });
+
+  it("settles only a matching production transitioncancel", () => {
+    const boundCancelListeners: EventListener[] = [];
+    const originalAdd = HTMLElement.prototype.addEventListener;
+    vi.spyOn(HTMLElement.prototype, "addEventListener").mockImplementation(function (
+      this: HTMLElement,
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: boolean | AddEventListenerOptions,
+    ) {
+      if (type === "transitioncancel" && this.classList.contains("app-shell")) {
+        boundCancelListeners.push(listener as EventListener);
+      }
+      return originalAdd.call(this, type, listener, options);
+    });
+
+    function IntegratedChrome() {
+      const toggleRef = useRef<HTMLButtonElement>(null);
+      const sidebarContentRef = useRef<HTMLDivElement>(null);
+      const controller = useAppShellController({
+        toggleRef,
+        sidebarContentRef,
+        reducedMotion: false,
+      });
+      return (
+        <TitlebarProvider defaultDescriptor={{ title: "Loom" }}>
+          <AppChrome
+            shell={controller.shell}
+            platform="browser"
+            toggleRef={toggleRef}
+            sidebarContentRef={sidebarContentRef}
+            onToggleSidebar={() => controller.requestToggle("button")}
+            onTransitionComplete={controller.completeTransition}
+            sidebar={<button>inside</button>}
+            main={<div>main</div>}
+          />
+        </TitlebarProvider>
+      );
+    }
+
+    const { container } = render(<IntegratedChrome />);
+    fireEvent.click(screen.getByRole("button", { name: "折叠侧栏" }));
+    expect(boundCancelListeners).toHaveLength(1);
+    const cancel = boundCancelListeners[0];
+    const shell = container.querySelector(".app-shell") as HTMLElement;
+    const sidebar = container.querySelector(".sidebar-content") as HTMLElement;
+    const cancellation = (target: Element, propertyName: string) => {
+      const event = new Event("transitioncancel");
+      Object.defineProperties(event, {
+        target: { value: target },
+        propertyName: { value: propertyName },
+      });
+      act(() => cancel.call(shell, event));
+    };
+
+    cancellation(sidebar, "--sidebar-width");
+    cancellation(shell, "opacity");
+    expect(shell.getAttribute("data-shell-phase")).toBe("collapsing");
+
+    cancellation(shell, "--sidebar-width");
+    expect(shell.getAttribute("data-shell-phase")).toBe("collapsed");
   });
 });
