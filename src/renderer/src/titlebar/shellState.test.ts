@@ -40,6 +40,36 @@ describe("shell state", () => {
     ).toEqual({ phase: "expanded", version: 1 });
   });
 
+  it("uses a new version for every transition cycle and rejects the prior cycle completion", () => {
+    const collapsing = requestShellToggle(createShellState(false), false);
+    expect(collapsing).toEqual({ phase: "collapsing", version: 1 });
+
+    const collapsed = completeShellTransition(collapsing, {
+      targetIsShell: true,
+      propertyName: "--sidebar-width",
+      version: 1,
+    });
+    expect(collapsed).toEqual({ phase: "collapsed", version: 1 });
+
+    const expanding = requestShellToggle(collapsed, false);
+    expect(expanding).toEqual({ phase: "expanding", version: 2 });
+    expect(
+      completeShellTransition(expanding, {
+        targetIsShell: true,
+        propertyName: "--sidebar-width",
+        version: 1,
+      }),
+    ).toBe(expanding);
+
+    expect(
+      completeShellTransition(expanding, {
+        targetIsShell: true,
+        propertyName: "--sidebar-width",
+        version: 2,
+      }),
+    ).toEqual({ phase: "expanded", version: 2 });
+  });
+
   it("ignores toggle requests while a collapse is already in progress", () => {
     const collapsing = requestShellToggle(createShellState(false), false);
     expect(requestShellToggle(collapsing, false)).toBe(collapsing);
