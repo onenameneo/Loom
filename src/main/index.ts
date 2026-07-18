@@ -33,6 +33,12 @@ function resolvedTheme(): "light" | "dark" {
   return t;
 }
 
+// 让 macOS 原生 vibrancy 材质跟随 app 主题：否则暗色 UI 会叠在亮色毛玻璃上，
+// 半透明侧栏透出中间调，文字对比度骤降（表现为「深色模式字体发灰读不清」）。
+function applyThemeSource() {
+  nativeTheme.themeSource = store.getSettings().appearance.theme;
+}
+
 function invalidateAgent() {
   canvas?.invalidate(); // 设置变了 → 丢弃所有节点 Agent，下次发送按新配置重建
 }
@@ -54,6 +60,7 @@ function registerIpc() {
   });
   ipcMain.handle("settings:set", (_e, patch) => {
     store.patchSettings(patch ?? {});
+    applyThemeSource();
     invalidateAgent();
     return { ok: true, appearance: store.getSettings().appearance };
   });
@@ -148,6 +155,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   store = new SqliteStore(dbPath(app.getPath("userData")));
+  applyThemeSource();
   canvas = registerCanvas({ getWin: () => win, store });
   monitor = registerMonitor({ getWin: () => win, store });
   acp = registerAcp({ getWin: () => win, store });
