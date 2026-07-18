@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CanvasNodeDto } from "../env";
-import { useTitlebar } from "../titlebar/Titlebar";
+import { useTitlebarContext } from "../titlebar/Titlebar";
 import Canvas from "./Canvas";
 import ChatView from "./ChatView";
 
@@ -46,33 +46,18 @@ export default function Workspace({
 
   const isCanvas = forceCanvas || nodeCount > 1;
 
-  const titlebar = useMemo(
+  const titlebarContext = useMemo(
     () => ({
       title: workspaceName,
       mode: isCanvas ? ("画布" as const) : ("对话" as const),
-      actions: (
-        <>
-          {!isCanvas && (
-            <button
-              className="head-btn"
-              type="button"
-              onClick={() => setForceCanvas(true)}
-              title="把这段对话摊到无限画布上"
-            >
-              展开画布
-            </button>
-          )}
-          {noKey && (
-            <button className="chip-warn" type="button" onClick={goSettings}>
-              未配置 API key · 去设置
-            </button>
-          )}
-        </>
-      ),
     }),
-    [goSettings, isCanvas, noKey, workspaceName],
+    [isCanvas, workspaceName],
   );
-  useTitlebar(titlebar);
+  useTitlebarContext(titlebarContext);
+
+  const expandCanvas = useCallback(() => {
+    setForceCanvas(true);
+  }, []);
 
   const branchFromChat = useCallback(
     async (seedText: string) => {
@@ -110,6 +95,9 @@ export default function Workspace({
           systemPrompt={root.systemPrompt}
           model={root.model || model}
           onBranch={branchFromChat}
+          onExpandCanvas={expandCanvas}
+          noKey={noKey}
+          goSettings={goSettings}
         />
       )}
     </div>

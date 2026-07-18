@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { StrictMode, useMemo } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AppTitlebar,
   TitlebarProvider,
@@ -10,6 +10,20 @@ import {
   useTitlebarActions,
   useTitlebarContext,
 } from "./Titlebar";
+import Workspace from "../canvas/Workspace";
+
+vi.mock("../canvas/Canvas", () => ({ default: () => <div>canvas</div> }));
+vi.mock("../canvas/ChatView", async () => {
+  const { useMemo } = await import("react");
+  const { useTitlebarActions } = await import("./Titlebar");
+  return {
+    default: function MockChatView() {
+      const actions = useMemo(() => <button>child titlebar action</button>, []);
+      useTitlebarActions(actions);
+      return <div>chat</div>;
+    },
+  };
+});
 
 const titlebarProps = {
   collapsed: false,
@@ -31,6 +45,46 @@ function ResolvedTitlebar() {
 }
 
 describe("global titlebar", () => {
+  it("keeps child actions active while Workspace updates its context", async () => {
+    const view = render(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <AppTitlebar {...titlebarProps} />
+        <Workspace
+          workspaceId="workspace-1"
+          workspaceName="first workspace"
+          noKey={false}
+          goSettings={() => {}}
+        />
+      </TitlebarProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText("child titlebar action")).toBeTruthy());
+    expect(screen.getByText("first workspace")).toBeTruthy();
+
+    view.rerender(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <AppTitlebar {...titlebarProps} />
+        <Workspace
+          workspaceId="workspace-1"
+          workspaceName="renamed workspace"
+          noKey={false}
+          goSettings={() => {}}
+        />
+      </TitlebarProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText("renamed workspace")).toBeTruthy());
+    expect(screen.getByText("child titlebar action")).toBeTruthy();
+
+    view.rerender(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <AppTitlebar {...titlebarProps} />
+      </TitlebarProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("fallback")).toBeTruthy());
+    expect(screen.queryByText("child titlebar action")).toBeNull();
+  });
+
   it("shows parent context with child actions from independent slots", () => {
     function Parent() {
       useTitlebarContext({ title: "研究 Transformer", mode: "画布" });

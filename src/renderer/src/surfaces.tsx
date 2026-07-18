@@ -23,7 +23,7 @@ import type {
 } from "./env";
 import { IconEye, IconPlus, IconSettings, IconWorkspace } from "./icons";
 import Workspace from "./canvas/Workspace";
-import { useTitlebar } from "./titlebar/Titlebar";
+import { useTitlebarActions, useTitlebarContext } from "./titlebar/Titlebar";
 
 export interface SurfaceCtx {
   workspaces: WorkspaceMeta[];
@@ -319,7 +319,7 @@ export function getSessionViews(
 }
 
 // ---- 工作站主面（内部 surface id 仍沿用 observatory）----
-function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
+export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [configOpen, setConfigOpen] = useState(false);
   const [busyTool, setBusyTool] = useState<ActivityTool | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -355,41 +355,45 @@ function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
     { active: 0, waiting: 0, idle: 0, ended: 0 } satisfies Record<LivenessState, number>,
   );
 
-  const titlebar = useMemo(
+  const titlebarContext = useMemo(
     () => ({
       title: activeSession ? sessionTitle(activeSession) : "工作站",
       subtitle: activeSession?.cwd || "等待本地 agent 事件",
-      actions: (
-        <>
-          {activeView && (
-            <span className={`liveness-pill ${activeView.liveness}`}>
-              <span className={`state-dot ${activeView.liveness}`} />
-              {LIVENESS_LABEL[activeView.liveness]}
-            </span>
-          )}
-          <button
-            className="icon-btn"
-            type="button"
-            onClick={() => copyPath(activeSession?.cwd)}
-            aria-label="复制 cwd"
-            disabled={!activeSession?.cwd}
-          >
-            <Copy size={15} />
-          </button>
-          <button
-            className="icon-btn monitor-config-btn"
-            type="button"
-            onClick={openConfig}
-            aria-label="活动流配置"
-          >
-            <Settings size={16} />
-          </button>
-        </>
-      ),
     }),
+    [activeSession],
+  );
+  const titlebarActions = useMemo(
+    () => (
+      <>
+        {activeView && (
+          <span className={`liveness-pill ${activeView.liveness}`}>
+            <span className={`state-dot ${activeView.liveness}`} />
+            {LIVENESS_LABEL[activeView.liveness]}
+          </span>
+        )}
+        <button
+          className="icon-btn"
+          type="button"
+          onClick={() => copyPath(activeSession?.cwd)}
+          aria-label="复制 cwd"
+          disabled={!activeSession?.cwd}
+        >
+          <Copy size={15} />
+        </button>
+        <button
+          className="icon-btn monitor-config-btn"
+          type="button"
+          onClick={openConfig}
+          aria-label="活动流配置"
+        >
+          <Settings size={16} />
+        </button>
+      </>
+    ),
     [activeSession, activeView, copyPath, openConfig],
   );
-  useTitlebar(titlebar);
+  useTitlebarContext(titlebarContext);
+  useTitlebarActions(titlebarActions);
 
   return (
     <div className="surface-fill monitor-surface">
@@ -510,7 +514,7 @@ const SRC_ZH: Record<string, string> = {
   none: "未设置",
 };
 
-function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
+export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const s = ctx.settings;
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
@@ -518,8 +522,8 @@ function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
   const [monitorNotify, setMonitorNotify] = useState(true);
   const [saved, setSaved] = useState(false);
-  const titlebar = useMemo(() => ({ title: "设置" }), []);
-  useTitlebar(titlebar);
+  const titlebarContext = useMemo(() => ({ title: "设置" }), []);
+  useTitlebarContext(titlebarContext);
 
   useEffect(() => {
     if (!s) return;
