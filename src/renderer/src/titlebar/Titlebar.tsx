@@ -1,62 +1,18 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
 import { PanelLeft } from "lucide-react";
+import { useResolvedTitlebar } from "./TitlebarContext";
 
-export type TitlebarDescriptor = {
-  title: string;
-  mode?: "对话" | "画布";
-  actions?: ReactNode;
-  subtitle?: string;
-};
-
-type TitlebarContextValue = {
-  descriptor: TitlebarDescriptor;
-  register: (descriptor: TitlebarDescriptor) => () => void;
-};
-
-const TitlebarContext = createContext<TitlebarContextValue | null>(null);
-
-export function TitlebarProvider({
-  defaultDescriptor,
-  children,
-}: {
-  defaultDescriptor: TitlebarDescriptor;
-  children: ReactNode;
-}) {
-  const defaultRef = useRef(defaultDescriptor);
-  defaultRef.current = defaultDescriptor;
-  const tokenRef = useRef(0);
-  const currentTokenRef = useRef(0);
-  const [descriptor, setDescriptor] = useState(defaultDescriptor);
-
-  const register = useCallback((next: TitlebarDescriptor) => {
-    const token = ++tokenRef.current;
-    currentTokenRef.current = token;
-    setDescriptor(next);
-    return () => {
-      if (currentTokenRef.current !== token) return;
-      currentTokenRef.current = 0;
-      setDescriptor(defaultRef.current);
-    };
-  }, []);
-
-  const value = useMemo(() => ({ descriptor, register }), [descriptor, register]);
-  return <TitlebarContext.Provider value={value}>{children}</TitlebarContext.Provider>;
-}
-
-export function useTitlebar(descriptor: TitlebarDescriptor): void {
-  const context = useContext(TitlebarContext);
-  if (!context) throw new Error("useTitlebar must be used within TitlebarProvider");
-  useLayoutEffect(() => context.register(descriptor), [context.register, descriptor]);
-}
+export {
+  TitlebarProvider,
+  useResolvedTitlebar,
+  useTitlebar,
+  useTitlebarActions,
+  useTitlebarContext,
+} from "./TitlebarContext";
+export type {
+  TitlebarActions,
+  TitlebarContextDescriptor,
+  TitlebarDescriptor,
+} from "./TitlebarContext";
 
 export function AppTitlebar({
   collapsed,
@@ -67,9 +23,7 @@ export function AppTitlebar({
   onToggleSidebar: () => void;
   platform: NodeJS.Platform | "browser";
 }) {
-  const context = useContext(TitlebarContext);
-  if (!context) throw new Error("AppTitlebar must be used within TitlebarProvider");
-  const { descriptor } = context;
+  const { context, actions } = useResolvedTitlebar();
   const isMacElectron = platform === "darwin";
 
   return (
@@ -90,12 +44,13 @@ export function AppTitlebar({
         </button>
       </div>
       <div className="titlebar-context">
-        <span className="titlebar-title">{descriptor.title}</span>
-        {descriptor.mode && <span className="titlebar-mode">{descriptor.mode}</span>}
-        {descriptor.subtitle && <span className="titlebar-subtitle">{descriptor.subtitle}</span>}
+        {context.icon && <span className="titlebar-icon">{context.icon}</span>}
+        <span className="titlebar-title">{context.title}</span>
+        {context.mode && <span className="titlebar-mode">{context.mode}</span>}
+        {context.subtitle && <span className="titlebar-subtitle">{context.subtitle}</span>}
       </div>
-      {descriptor.actions && (
-        <div className="titlebar-interactive titlebar-actions">{descriptor.actions}</div>
+      {actions && (
+        <div className="titlebar-interactive titlebar-actions">{actions}</div>
       )}
     </header>
   );
