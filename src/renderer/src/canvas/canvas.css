@@ -970,9 +970,13 @@
 }
 
 /* 单一右下角 resize control：22px 命中区，视觉角标内嵌并以圆角收边。 */
-.react-flow__node .react-flow__resize-control.node-resize-control {
+.react-flow__node .react-flow__resize-control.node-resize-control.bottom.right {
+  left: auto;
+  top: auto;
   right: 0;
   bottom: 0;
+  translate: none;
+  transform: none;
   width: 22px;
   height: 22px;
   background: transparent;

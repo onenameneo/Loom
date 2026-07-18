@@ -1,9 +1,35 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import * as layoutModule from "./layout";
 
 const fallback = { x: 10, y: 20, width: 360, height: 440 };
 
 describe("canvas layout helpers", () => {
+  it("remounts and resets the sole resize control after cancellation", () => {
+    const nodeSource = readFileSync(new URL("./ChatThreadNode.tsx", import.meta.url), "utf8");
+    const canvasSource = readFileSync(new URL("./Canvas.tsx", import.meta.url), "utf8");
+
+    expect(nodeSource).toContain("key={data.resizeControlEpoch}");
+    expect(nodeSource).toContain("resizeTokenRef.current = null;");
+    expect(canvasSource).toContain("resizeControlEpoch: cancelled.token");
+    expect(canvasSource).toContain("resizeSessionRef.current.recover(token, id)");
+  });
+
+  it("keeps the bottom-right resize control inside the card outline", () => {
+    const css = readFileSync(new URL("./canvas.css", import.meta.url), "utf8");
+    const controlRule = css.match(
+      /\.react-flow__node \.react-flow__resize-control\.node-resize-control\.bottom\.right \{([^}]*)\}/,
+    )?.[1];
+
+    expect(css).toContain(
+      ".react-flow__node .react-flow__resize-control.node-resize-control.bottom.right",
+    );
+    expect(controlRule).toContain("left: auto;");
+    expect(controlRule).toContain("top: auto;");
+    expect(controlRule).toContain("translate: none;");
+    expect(controlRule).toContain("transform: none;");
+  });
+
   it("resolves dirty layout before persisted and default layout", () => {
     const resolve = (layoutModule as any).resolveNodeLayout;
     const persisted = { x: 30, y: 40, width: 380, height: 460 };

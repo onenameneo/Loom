@@ -19,6 +19,7 @@ import { useCanvasLayoutStore } from "./CanvasLayoutContext";
 import { ChatThreadNode } from "./ChatThreadNode";
 import { BranchContext } from "./branch";
 import { applyTidyPositions, readNodeLayout, resolveNodeLayout } from "./layout";
+import { finishResizeInteraction } from "./resizeLifecycle";
 import { ResizeSession } from "./resizeSession";
 
 const nodeTypes = { chatThread: ChatThreadNode };
@@ -353,7 +354,25 @@ export default function Canvas({
   useEffect(() => {
     const cancelResize = () => {
       const cancelled = resizeSessionRef.current.cancel();
-      if (cancelled) layoutStore.enqueue(workspaceId, cancelled.nodeId, cancelled.layout);
+      if (cancelled) {
+        setNodes((nds) =>
+          nds.map((node) =>
+            node.id === cancelled.nodeId
+              ? {
+                  ...node,
+                  position: { x: cancelled.layout.x, y: cancelled.layout.y },
+                  style: {
+                    ...node.style,
+                    width: cancelled.layout.width,
+                    height: cancelled.layout.height,
+                  },
+                  data: { ...node.data, resizeControlEpoch: cancelled.token },
+                }
+              : node,
+          ),
+        );
+        layoutStore.enqueue(workspaceId, cancelled.nodeId, cancelled.layout);
+      }
       setInteraction({ kind: "idle" });
     };
     window.addEventListener("blur", cancelResize);
@@ -361,7 +380,7 @@ export default function Canvas({
       window.removeEventListener("blur", cancelResize);
       cancelResize();
     };
-  }, [layoutStore, workspaceId]);
+  }, [layoutStore, setNodes, workspaceId]);
 
   const actions = useCallback(
     () => ({
@@ -376,13 +395,27 @@ export default function Canvas({
       },
       onResize: (id: string, token: number, params: ResizeParams) => {
         const next = resizeSessionRef.current.update(token, id, params);
-        if (next) applyResizeLayout(id, next);
+        if (next) {
+          applyResizeLayout(id, next);
+          return;
+        }
+        const recovered = resizeSessionRef.current.recover(token, id);
+        if (recovered) applyResizeLayout(id, recovered);
       },
       onResizeEnd: (id: string, token: number, params: ResizeParams) => {
-        const next = resizeSessionRef.current.finish(token, id, params);
-        if (!next) return;
-        applyResizeLayout(id, next);
-        layoutStore.enqueue(workspaceId, id, next);
+        const next = finishResizeInteraction({
+          session: resizeSessionRef.current,
+          token,
+          nodeId: id,
+          layout: params,
+          apply: applyResizeLayout,
+          enqueue: (nodeId, layout) => layoutStore.enqueue(workspaceId, nodeId, layout),
+        });
+        if (!next) {
+          const recovered = resizeSessionRef.current.recover(token, id);
+          if (recovered) applyResizeLayout(id, recovered);
+          return;
+        }
         setInteraction({ kind: "idle" });
       },
       onRename: async (id: string, title: string) => {

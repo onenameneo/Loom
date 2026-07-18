@@ -44,6 +44,10 @@ export function ChatThreadNode(props: any) {
   const color = typeof data.color === "string" ? data.color : "";
 
   useEffect(() => {
+    resizeTokenRef.current = null;
+  }, [data.resizeControlEpoch]);
+
+  useEffect(() => {
     setMsgs(toMsgs(data.messages ?? []));
     setTitle(String(data.title ?? ""));
     setPersona(String(data.systemPrompt ?? ""));
@@ -268,6 +272,7 @@ export function ChatThreadNode(props: any) {
     <div className={`card ${data.fresh ? "card--fresh" : ""}`}>
       {Boolean(props.selected) && (
         <NodeResizeControl
+          key={data.resizeControlEpoch}
           position="bottom-right"
           minWidth={288}
           minHeight={220}

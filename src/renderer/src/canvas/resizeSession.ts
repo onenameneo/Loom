@@ -5,9 +5,11 @@ type ActiveResize = { token: number; nodeId: string; layout?: NodeLayout };
 export class ResizeSession {
   private nextToken = 0;
   private active?: ActiveResize;
+  private cancelled?: ActiveResize;
 
   start(nodeId: string): number {
     const token = ++this.nextToken;
+    this.cancelled = undefined;
     this.active = { token, nodeId };
     return token;
   }
@@ -24,11 +26,17 @@ export class ResizeSession {
     return layout;
   }
 
-  cancel(): { nodeId: string; layout: NodeLayout } | undefined {
+  cancel(): { token: number; nodeId: string; layout: NodeLayout } | undefined {
     const active = this.active;
     this.active = undefined;
     if (!active?.layout) return undefined;
-    return { nodeId: active.nodeId, layout: active.layout };
+    this.cancelled = active;
+    return { token: active.token, nodeId: active.nodeId, layout: active.layout };
+  }
+
+  recover(token: number, nodeId: string): NodeLayout | undefined {
+    if (this.cancelled?.token !== token || this.cancelled.nodeId !== nodeId) return undefined;
+    return this.cancelled.layout;
   }
 
   isActive(): boolean {
