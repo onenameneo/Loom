@@ -173,7 +173,7 @@ export default function Sidebar({
   };
 
   return (
-    <aside className="sidebar">
+    <div className="sidebar">
       <div className="sb-head">
         <span className="sb-mark" />
         <span className="sb-word">
@@ -315,6 +315,6 @@ export default function Sidebar({
           setDeleting(null);
         }}
       />
-    </aside>
+    </div>
   );
 }

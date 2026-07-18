@@ -1,13 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ActivitySession, ActivityStatus, ActivityTool, AgentProc, SettingsPayload, WorkspaceMeta } from "./env";
 import Sidebar from "./Sidebar";
 import { CanvasLayoutProvider } from "./canvas/CanvasLayoutContext";
-import { AppTitlebar, TitlebarProvider } from "./titlebar/Titlebar";
-import {
-  isBrowserSidebarShortcut,
-  readSidebarCollapsed,
-  SIDEBAR_STORAGE_KEY,
-} from "./titlebar/sidebarState";
+import { AppChrome, TitlebarProvider } from "./titlebar/Titlebar";
+import { isBrowserSidebarShortcut } from "./titlebar/sidebarState";
+import { useAppShellController } from "./titlebar/useAppShellController";
 import {
   applyActivityEvent,
   getSessionViews,
@@ -29,21 +26,12 @@ export default function App() {
   const [activityStatus, setActivityStatus] = useState<ActivityStatus | null>(null);
   const [activeSessionKey, setActiveSessionKey] = useState<string | null>(null);
   const [activityNow, setActivityNow] = useState(Date.now());
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
-    readSidebarCollapsed(window.localStorage),
-  );
-
-  const toggleSidebar = useCallback(() => {
-    setSidebarCollapsed((current) => {
-      const next = !current;
-      try {
-        window.localStorage.setItem(SIDEBAR_STORAGE_KEY, next ? "1" : "0");
-      } catch {
-        // localStorage unavailable: keep the in-memory shell state.
-      }
-      return next;
-    });
-  }, []);
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null);
+  const sidebarContentRef = useRef<HTMLDivElement>(null);
+  const shellController = useAppShellController({
+    toggleRef: sidebarToggleRef,
+    sidebarContentRef,
+  });
 
   const reloadSettings = useCallback(async () => {
     if (!window.api) {
@@ -156,20 +144,20 @@ export default function App() {
       else if (action === "settings") setActiveSurface("settings");
       else if (action === "surface:workspace") setActiveSurface("workspace");
       else if (action === "surface:observatory") setActiveSurface("observatory");
-      else if (action === "toggle-sidebar") toggleSidebar();
+      else if (action === "toggle-sidebar") shellController.requestToggle("menu");
     });
-  }, [createWorkspace, toggleSidebar]);
+  }, [createWorkspace, shellController.requestToggle]);
 
   useEffect(() => {
     if (window.api) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (!isBrowserSidebarShortcut(event)) return;
       event.preventDefault();
-      toggleSidebar();
+      shellController.requestToggle("browser");
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [toggleSidebar]);
+  }, [shellController.requestToggle]);
 
   const toggleTheme = useCallback(async () => {
     const next = theme === "light" ? "dark" : "light";
@@ -211,13 +199,14 @@ export default function App() {
       <CanvasLayoutProvider>
         <div className="app" data-theme={theme} data-platform={platform}>
           <div className="wallpaper" />
-          <AppTitlebar
-            collapsed={sidebarCollapsed}
-            onToggleSidebar={toggleSidebar}
+          <AppChrome
+            shell={shellController.shell}
             platform={platform}
-          />
-          <div className="app-body">
-            {!sidebarCollapsed && (
+            toggleRef={sidebarToggleRef}
+            sidebarContentRef={sidebarContentRef}
+            onToggleSidebar={() => shellController.requestToggle("button")}
+            onTransitionComplete={shellController.completeTransition}
+            sidebar={
               <Sidebar
                 activeSurface={activeSurface}
                 setSurface={setActiveSurface}
@@ -249,11 +238,11 @@ export default function App() {
                 toggleTheme={toggleTheme}
                 settings={settings}
               />
-            )}
-            <main className="main">
+            }
+            main={
               <Active.Panel ctx={ctx} />
-            </main>
-          </div>
+            }
+          />
         </div>
       </CanvasLayoutProvider>
     </TitlebarProvider>

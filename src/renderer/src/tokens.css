@@ -16,6 +16,10 @@
   --s4: 16px;
   --s5: 24px;
   --s6: 32px;
+  --sidebar-expanded-width: 244px;
+  --titlebar-height: 48px;
+  --panel-motion-duration: 220ms;
+  --panel-motion-curve: cubic-bezier(0.2, 0, 0, 1);
 
   /* ---- Tier 1 · Primitives（中性 + Codex 蓝）---- */
   --c-white: #ffffff;
