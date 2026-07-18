@@ -8,4 +8,6 @@ dist
 .gstack/
 .codex/
 .context/
+.superpowers/
+.worktrees/
 *.bak
