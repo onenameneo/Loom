@@ -14,6 +14,12 @@ const flow = vi.hoisted(() => ({
   zoomTo: vi.fn(),
 }));
 
+const reactFlowProps = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
+
+const layoutPersistence = vi.hoisted(() => ({
+  current: { status: "idle", error: null as "storage" | "invalid" | null, retry: vi.fn() },
+}));
+
 const layoutStore = vi.hoisted(() => ({
   enqueue: vi.fn(),
   enqueueMany: vi.fn(),
@@ -24,6 +30,7 @@ const layoutStore = vi.hoisted(() => ({
 vi.mock("./CanvasLayoutContext", () => ({
   CanvasLayoutProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   useCanvasLayoutStore: () => layoutStore,
+  useCanvasLayoutPersistence: () => layoutPersistence.current,
 }));
 
 vi.mock("@xyflow/react", async () => {
@@ -32,15 +39,13 @@ vi.mock("@xyflow/react", async () => {
     Background: () => <div data-testid="background" />,
     BackgroundVariant: { Dots: "dots" },
     MiniMap: () => <div data-testid="minimap" />,
-    ReactFlow: ({
-      children,
-      onInit,
-      onMove,
-    }: {
+    ReactFlow: (props: {
       children: ReactNode;
       onInit?: (instance: typeof flow) => void;
       onMove?: (event: unknown, viewport: { zoom: number }) => void;
     }) => {
+      const { children, onInit, onMove } = props;
+      reactFlowProps.current = props as unknown as Record<string, unknown>;
       React.useLayoutEffect(() => onInit?.(flow), [onInit]);
       return (
         <div data-testid="react-flow">
@@ -78,9 +83,49 @@ beforeEach(() => {
   document.body.innerHTML = "";
   Reflect.deleteProperty(window, "api");
   Object.values(flow).forEach((mock) => mock.mockReset());
+  reactFlowProps.current = null;
+  layoutPersistence.current = { status: "idle", error: null, retry: vi.fn() };
 });
 
 describe("Canvas titlebar integration", () => {
+  it("disables React Flow modifier and drag multi-selection paths", async () => {
+    render(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <Canvas workspaceId="workspace-1" />
+      </TitlebarProvider>,
+    );
+
+    await screen.findByTestId("react-flow");
+    expect(reactFlowProps.current?.multiSelectionKeyCode).toBeNull();
+    expect(reactFlowProps.current?.selectionKeyCode).toBeNull();
+    expect(reactFlowProps.current?.selectionOnDrag).toBe(false);
+  });
+
+  it("shows a retryable unsaved-layout notice only while persistence has failed", async () => {
+    layoutPersistence.current = { status: "error", error: "storage", retry: vi.fn() };
+    const view = render(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <Canvas workspaceId="workspace-1" />
+      </TitlebarProvider>,
+    );
+
+    expect(
+      (await screen.findByRole("status", { name: "布局保存状态" })).textContent,
+    ).toContain("布局尚未保存");
+    fireEvent.click(screen.getByRole("button", { name: "重试保存布局" }));
+    expect(layoutPersistence.current.retry).toHaveBeenCalledOnce();
+
+    layoutPersistence.current = { status: "idle", error: null, retry: vi.fn() };
+    view.rerender(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <Canvas workspaceId="workspace-1" />
+      </TitlebarProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("status", { name: "布局保存状态" })).toBeNull(),
+    );
+  });
+
   it("gives the App shell exactly one shared overlay root", () => {
     render(<App />);
 

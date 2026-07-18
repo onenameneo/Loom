@@ -16,7 +16,7 @@ import "@xyflow/react/dist/style.css";
 import type { CanvasNodeDto } from "../env";
 import { useTitlebarActions } from "../titlebar/Titlebar";
 import { CanvasTitlebarActions, CanvasZoomControls } from "./CanvasControls";
-import { useCanvasLayoutStore } from "./CanvasLayoutContext";
+import { useCanvasLayoutPersistence, useCanvasLayoutStore } from "./CanvasLayoutContext";
 import { ChatThreadNode } from "./ChatThreadNode";
 import { BranchContext } from "./branch";
 import { applyTidyPositions, readNodeLayout, resolveNodeLayout } from "./layout";
@@ -151,6 +151,7 @@ export default function Canvas({
   const treeChangeRef = useRef(onTreeChange);
   const modelRef = useRef(model);
   const layoutStore = useCanvasLayoutStore();
+  const layoutPersistence = useCanvasLayoutPersistence(workspaceId);
   const resizeSessionRef = useRef(new ResizeSession());
   treeChangeRef.current = onTreeChange;
   modelRef.current = model;
@@ -592,6 +593,23 @@ export default function Canvas({
 
   return (
     <BranchContext.Provider value={branchContext}>
+      {layoutPersistence.error && (
+        <div
+          className="canvas-layout-notice nodrag"
+          role="status"
+          aria-label="布局保存状态"
+        >
+          <span>布局尚未保存</span>
+          <button
+            type="button"
+            className="canvas-layout-retry"
+            onClick={() => void layoutPersistence.retry()}
+            aria-label="重试保存布局"
+          >
+            重试
+          </button>
+        </div>
+      )}
       <ReactFlow
         className={classNames(
           "loom-canvas",
@@ -605,6 +623,9 @@ export default function Canvas({
         onEdgesChange={onEdgesChange}
         nodesDraggable={interaction.kind !== "resizing"}
         panOnDrag={interaction.kind !== "resizing"}
+        multiSelectionKeyCode={null}
+        selectionKeyCode={null}
+        selectionOnDrag={false}
         onPaneClick={() => {
           setNodes((nds) => nds.map((node) => (node.selected ? { ...node, selected: false } : node)));
         }}

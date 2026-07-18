@@ -50,13 +50,46 @@ describe("CanvasLayoutStore", () => {
     const Store = (module as any).CanvasLayoutStore;
     expect(Store).toBeTypeOf("function");
     const store = new Store(api);
+    const states: unknown[] = [];
+    store.subscribe("ws", () => states.push(store.getPersistenceState("ws")));
 
     store.enqueue("ws", "n1", first);
     await tick();
     expect(store.getDirty("ws", "n1")).toEqual(first);
+    expect(store.getPersistenceState("ws")).toEqual({
+      status: "error",
+      error: "storage",
+    });
 
     await store.retry("ws");
     expect(store.getDirty("ws", "n1")).toBeUndefined();
+    expect(store.getPersistenceState("ws")).toEqual({
+      status: "idle",
+      error: null,
+    });
+    expect(states).toContainEqual({ status: "error", error: "storage" });
+    expect(states).toContainEqual({ status: "idle", error: null });
+  });
+
+  it("retries and clears a previous failure on the next normal layout operation", async () => {
+    const api = {
+      updateLayouts: vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false, updatedIds: [], reason: "storage" })
+        .mockResolvedValueOnce({ ok: true, updatedIds: ["n1"] }),
+    };
+    const store = new module.CanvasLayoutStore(api);
+
+    store.enqueue("ws", "n1", first);
+    await tick();
+    expect(store.getPersistenceState("ws").error).toBe("storage");
+
+    store.enqueue("ws", "n1", latest);
+    await tick();
+
+    expect(api.updateLayouts).toHaveBeenCalledTimes(2);
+    expect(store.getDirty("ws", "n1")).toBeUndefined();
+    expect(store.getPersistenceState("ws")).toEqual({ status: "idle", error: null });
   });
 
   it("removes deleted nodes from the dirty set", async () => {

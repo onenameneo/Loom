@@ -23,9 +23,12 @@ export function CanvasTitlebarActions({
   const reactId = useId();
   const helpButtonId = `canvas-help-button-${reactId}`;
   const helpPanelId = `canvas-help-panel-${reactId}`;
+  const helpDescriptionId = `canvas-help-description-${reactId}`;
 
   useEffect(() => {
     if (!helpOpen) return;
+
+    helpPanelRef.current?.focus();
 
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -104,11 +107,14 @@ export function CanvasTitlebarActions({
             id={helpPanelId}
             className="canvas-help chrome-no-drag"
             role="dialog"
-            aria-label="画布帮助"
             aria-labelledby={helpButtonId}
+            aria-describedby={helpDescriptionId}
+            tabIndex={-1}
             style={{ position: "fixed", top: helpPosition.top, right: helpPosition.right }}
           >
-            拖动节点标题栏移动，选中后从右下角调整大小；滚轮或触控板缩放画布。
+            <span id={helpDescriptionId}>
+              拖动节点标题栏移动，选中后从右下角调整大小；滚轮或触控板缩放画布。
+            </span>
           </div>
         </AppOverlayPortal>
       )}

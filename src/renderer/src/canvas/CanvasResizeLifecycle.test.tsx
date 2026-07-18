@@ -14,6 +14,7 @@ const layoutStore = vi.hoisted(() => ({
 
 vi.mock("./CanvasLayoutContext", () => ({
   useCanvasLayoutStore: () => layoutStore,
+  useCanvasLayoutPersistence: () => ({ status: "idle", error: null, retry: vi.fn() }),
 }));
 
 vi.mock("@xyflow/react", async (importOriginal) => {

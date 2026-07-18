@@ -87,7 +87,7 @@ function WorkspacePanel({ ctx }: { ctx: SurfaceCtx }) {
 }
 
 export function isDarwinRenderer(): boolean {
-  return window.api?.platform === "darwin" || (!window.api && /Mac/i.test(navigator.platform));
+  return window.api?.platform === "darwin";
 }
 
 export function formatDuration(startedAt: number, now: number): string {

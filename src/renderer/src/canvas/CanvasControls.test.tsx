@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasTitlebarActions, CanvasZoomControls } from "./CanvasControls";
 
@@ -65,6 +66,23 @@ describe("split canvas controls", () => {
 });
 
 describe("canvas titlebar help", () => {
+  it("moves keyboard focus into the announced dialog when opened from the help trigger", async () => {
+    const user = userEvent.setup();
+    renderTitlebarActions();
+    const helpButton = screen.getByRole("button", { name: "画布帮助" });
+    helpButton.focus();
+
+    await user.keyboard("{Enter}");
+
+    const panel = await screen.findByRole("dialog", { name: "画布帮助" });
+    expect(panel.tabIndex).toBe(-1);
+    expect(panel.getAttribute("aria-describedby")).toBeTruthy();
+    expect(document.activeElement).toBe(panel);
+    expect(screen.getByText(/拖动节点标题栏移动/).id).toBe(
+      panel.getAttribute("aria-describedby"),
+    );
+  });
+
   it("portals an accessible fixed panel to the App overlay root using the button rect", async () => {
     renderTitlebarActions();
     const helpButton = screen.getByRole("button", { name: "画布帮助" });
