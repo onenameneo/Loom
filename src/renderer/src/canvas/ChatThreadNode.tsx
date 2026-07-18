@@ -273,12 +273,27 @@ export function ChatThreadNode(props: any) {
       {Boolean(props.selected) && (
         <NodeResizeControl
           key={data.resizeControlEpoch}
+          nodeId={id}
           position="bottom-right"
           minWidth={288}
           minHeight={220}
+          style={{
+            left: "auto",
+            top: "auto",
+            right: 0,
+            bottom: 0,
+            width: 22,
+            height: 22,
+            transform: "none",
+            transformOrigin: "bottom right",
+          }}
           className="node-resize-control nodrag nopan"
-          onResizeStart={() => {
-            resizeTokenRef.current = data.onResizeStart?.(id) ?? null;
+          onResizeStart={(_, params: ResizeParams) => {
+            resizeTokenRef.current = data.onResizeStart?.(id, params) ?? null;
+          }}
+          shouldResize={(_, params: ResizeParams) => {
+            const token = resizeTokenRef.current;
+            return token != null && Boolean(data.shouldResize?.(id, token, params));
           }}
           onResize={(_, params: ResizeParams) => {
             if (resizeTokenRef.current != null) {

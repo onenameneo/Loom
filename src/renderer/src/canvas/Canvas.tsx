@@ -6,6 +6,7 @@ import {
   ReactFlow,
   type ReactFlowInstance,
   type ResizeParams,
+  type NodeChange,
   useEdgesState,
   useNodesState,
   type Edge,
@@ -19,7 +20,7 @@ import { useCanvasLayoutStore } from "./CanvasLayoutContext";
 import { ChatThreadNode } from "./ChatThreadNode";
 import { BranchContext } from "./branch";
 import { applyTidyPositions, readNodeLayout, resolveNodeLayout } from "./layout";
-import { finishResizeInteraction } from "./resizeLifecycle";
+import { finishResizeInteraction, guardResizeNodeChanges } from "./resizeLifecycle";
 import { ResizeSession } from "./resizeSession";
 
 const nodeTypes = { chatThread: ChatThreadNode };
@@ -137,7 +138,7 @@ export default function Canvas({
   onFocused?: () => void;
   onTreeChange?: () => void;
 }) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [nodes, setNodes, applyNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
@@ -153,6 +154,13 @@ export default function Canvas({
   const resizeSessionRef = useRef(new ResizeSession());
   treeChangeRef.current = onTreeChange;
   modelRef.current = model;
+
+  const onNodesChange = useCallback(
+    (changes: NodeChange<Node>[]) => {
+      applyNodesChange(guardResizeNodeChanges(changes, resizeSessionRef.current));
+    },
+    [applyNodesChange],
+  );
 
   const pathIds = useCallback((targetId: string) => {
     const byId = new Map(nodes.map((n) => [n.id, n]));
@@ -388,15 +396,15 @@ export default function Canvas({
       onSelect: (id: string) => {
         setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })));
       },
-      onResizeStart: (id: string) => {
-        const token = resizeSessionRef.current.start(id);
-        setInteraction({ kind: "resizing", nodeId: id });
-        return token;
-      },
+      onResizeStart: (id: string, params: ResizeParams) =>
+        resizeSessionRef.current.start(id, params),
+      shouldResize: (id: string, token: number) =>
+        resizeSessionRef.current.accepts(token, id),
       onResize: (id: string, token: number, params: ResizeParams) => {
         const next = resizeSessionRef.current.update(token, id, params);
         if (next) {
           applyResizeLayout(id, next);
+          setInteraction({ kind: "resizing", nodeId: id });
           return;
         }
         const recovered = resizeSessionRef.current.recover(token, id);
