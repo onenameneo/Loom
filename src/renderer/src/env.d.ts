@@ -23,6 +23,7 @@ export interface CanvasNodeDto {
   systemPrompt?: string;
   model?: string;
   color?: string;
+  layout?: { x: number; y: number; width: number; height: number };
   messages: NodeMsg[];
 }
 export interface NodeBudget {
@@ -179,6 +180,7 @@ export interface SettingsPayload {
 declare global {
   interface Window {
     api: {
+      platform: NodeJS.Platform;
       canvas: {
         list: (workspaceId: string) => Promise<CanvasNodeDto[]>;
         open: (workspaceId: string) => Promise<CanvasNodeDto[]>;
@@ -190,6 +192,13 @@ declare global {
         delete: (nodeId: string) => Promise<{ ok: boolean; deletedIds: string[] }>;
         setSystemPrompt: (nodeId: string, text: string) => Promise<{ ok: boolean }>;
         update: (nodeId: string, patch: { title?: string; color?: string }) => Promise<{ ok: boolean; node?: CanvasNodeDto }>;
+        updateLayout: (
+          nodeId: string,
+          layout: { x: number; y: number; width: number; height: number },
+        ) => Promise<{ ok: boolean; reason?: "not-found" | "invalid" | "storage" }>;
+        updateLayouts: (
+          items: Array<{ id: string; layout: { x: number; y: number; width: number; height: number } }>,
+        ) => Promise<{ ok: boolean; updatedIds: string[]; reason?: "invalid" | "storage" }>;
         setMount: (nodeId: string, on: boolean) => Promise<{ ok: boolean; budget: NodeBudget }>;
         setModel: (nodeId: string, model: string) => Promise<{ ok: boolean }>;
         models: () => Promise<{ id: string; name: string }[]>;

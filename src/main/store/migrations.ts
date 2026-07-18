@@ -3,7 +3,7 @@ import { dirname, join } from "path";
 import type Database from "better-sqlite3";
 import { DEFAULT_SETTINGS, type StoreData, type Workspace } from "./store";
 
-export const DB_SCHEMA_VERSION = 1;
+export const DB_SCHEMA_VERSION = 2;
 
 type SettingRow = { key: string; value: string };
 
@@ -39,7 +39,7 @@ export function migrate(db: Database.Database): void {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
 
-  const version = Number(db.pragma("user_version", { simple: true }) ?? 0);
+  let version = Number(db.pragma("user_version", { simple: true }) ?? 0);
   if (version < 1) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS settings(
@@ -83,6 +83,20 @@ export function migrate(db: Database.Database): void {
       CREATE INDEX IF NOT EXISTS idx_msg_node ON messages(node_id, seq);
       PRAGMA user_version = 1;
     `);
+    version = 1;
+  }
+
+  if (version < 2) {
+    const migrateLayout = db.transaction(() => {
+      db.exec(`
+        ALTER TABLE nodes ADD COLUMN layout_x REAL;
+        ALTER TABLE nodes ADD COLUMN layout_y REAL;
+        ALTER TABLE nodes ADD COLUMN layout_width REAL;
+        ALTER TABLE nodes ADD COLUMN layout_height REAL;
+        PRAGMA user_version = 2;
+      `);
+    });
+    migrateLayout();
   }
 
   db.pragma("foreign_keys = ON");

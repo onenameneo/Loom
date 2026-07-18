@@ -48,6 +48,7 @@ type AcpEvent = {
 };
 
 const api = {
+  platform: process.platform,
   canvas: {
     list: (workspaceId: string): Promise<any[]> => ipcRenderer.invoke("node:list", workspaceId),
     open: (workspaceId: string): Promise<any[]> => ipcRenderer.invoke("node:open", workspaceId),
@@ -65,6 +66,10 @@ const api = {
       ipcRenderer.invoke("node:setSystemPrompt", { nodeId, text }),
     update: (nodeId: string, patch: { title?: string; color?: string }): Promise<{ ok: boolean; node?: any }> =>
       ipcRenderer.invoke("node:update", { nodeId, ...patch }),
+    updateLayout: (nodeId: string, layout: { x: number; y: number; width: number; height: number }): Promise<any> =>
+      ipcRenderer.invoke("node:updateLayout", { nodeId, layout }),
+    updateLayouts: (items: Array<{ id: string; layout: { x: number; y: number; width: number; height: number } }>): Promise<any> =>
+      ipcRenderer.invoke("node:updateLayouts", items),
     setMount: (nodeId: string, on: boolean): Promise<{ ok: boolean; budget: any }> =>
       ipcRenderer.invoke("node:setMount", { nodeId, on }),
     setModel: (nodeId: string, model: string): Promise<{ ok: boolean }> =>

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CanvasNodeDto } from "../env";
+import { useTitlebarContext } from "../titlebar/Titlebar";
 import Canvas from "./Canvas";
 import ChatView from "./ChatView";
 
@@ -11,7 +12,6 @@ export default function Workspace({
   workspaceId,
   workspaceName,
   model,
-  isDark,
   noKey,
   goSettings,
   focusNodeId,
@@ -21,7 +21,6 @@ export default function Workspace({
   workspaceId: string;
   workspaceName: string;
   model?: string;
-  isDark: boolean;
   noKey: boolean;
   goSettings: () => void;
   focusNodeId?: string | null;
@@ -47,6 +46,19 @@ export default function Workspace({
 
   const isCanvas = forceCanvas || nodeCount > 1;
 
+  const titlebarContext = useMemo(
+    () => ({
+      title: workspaceName,
+      mode: isCanvas ? ("画布" as const) : ("对话" as const),
+    }),
+    [isCanvas, workspaceName],
+  );
+  useTitlebarContext(titlebarContext);
+
+  const expandCanvas = useCallback(() => {
+    setForceCanvas(true);
+  }, []);
+
   const branchFromChat = useCallback(
     async (seedText: string) => {
       if (!root) return;
@@ -65,26 +77,11 @@ export default function Workspace({
 
   return (
     <div className="surface-fill">
-      <div className="surface-head">
-        <span className="ws-title">{workspaceName}</span>
-        <span className="ws-mode mono">{isCanvas ? "画布" : "对话"}</span>
-        {!isCanvas && (
-          <button className="head-btn" onClick={() => setForceCanvas(true)} title="把这段对话摊到无限画布上">
-            展开画布
-          </button>
-        )}
-        {noKey && (
-          <button className="chip-warn" onClick={goSettings}>
-            未配置 API key · 去设置
-          </button>
-        )}
-      </div>
       {isCanvas || !root ? (
         <div className="canvas-wrap">
           <Canvas
             workspaceId={workspaceId}
             model={model}
-            isDark={isDark}
             focusNodeId={focusNodeId}
             onFocused={onFocusedNode}
             onTreeChange={onTreeChange}
@@ -98,6 +95,9 @@ export default function Workspace({
           systemPrompt={root.systemPrompt}
           model={root.model || model}
           onBranch={branchFromChat}
+          onExpandCanvas={expandCanvas}
+          noKey={noKey}
+          goSettings={goSettings}
         />
       )}
     </div>

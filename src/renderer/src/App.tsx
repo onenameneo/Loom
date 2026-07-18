@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ActivitySession, ActivityStatus, ActivityTool, AgentProc, SettingsPayload, WorkspaceMeta } from "./env";
 import Sidebar from "./Sidebar";
+import { CanvasLayoutProvider } from "./canvas/CanvasLayoutContext";
+import { AppChrome, TitlebarProvider } from "./titlebar/Titlebar";
+import { isBrowserSidebarShortcut } from "./titlebar/sidebarState";
+import { useAppShellController } from "./titlebar/useAppShellController";
 import {
   applyActivityEvent,
   getSessionViews,
@@ -22,6 +26,12 @@ export default function App() {
   const [activityStatus, setActivityStatus] = useState<ActivityStatus | null>(null);
   const [activeSessionKey, setActiveSessionKey] = useState<string | null>(null);
   const [activityNow, setActivityNow] = useState(Date.now());
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null);
+  const sidebarContentRef = useRef<HTMLDivElement>(null);
+  const shellController = useAppShellController({
+    toggleRef: sidebarToggleRef,
+    sidebarContentRef,
+  });
 
   const reloadSettings = useCallback(async () => {
     if (!window.api) {
@@ -134,8 +144,20 @@ export default function App() {
       else if (action === "settings") setActiveSurface("settings");
       else if (action === "surface:workspace") setActiveSurface("workspace");
       else if (action === "surface:observatory") setActiveSurface("observatory");
+      else if (action === "toggle-sidebar") shellController.requestToggle("menu");
     });
-  }, [createWorkspace]);
+  }, [createWorkspace, shellController.requestToggle]);
+
+  useEffect(() => {
+    if (window.api) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isBrowserSidebarShortcut(event)) return;
+      event.preventDefault();
+      shellController.requestToggle("browser");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [shellController.requestToggle]);
 
   const toggleTheme = useCallback(async () => {
     const next = theme === "light" ? "dark" : "light";
@@ -169,44 +191,61 @@ export default function App() {
   };
 
   const Active = SURFACES.find((s) => s.id === activeSurface) ?? SURFACES[0];
+  const defaultTitlebar = useMemo(() => ({ title: Active.label }), [Active.label]);
+  const platform = window.api?.platform ?? "browser";
 
   return (
-    <div className="app" data-theme={theme}>
-      <div className="wallpaper" />
-      <Sidebar
-        activeSurface={activeSurface}
-        setSurface={setActiveSurface}
-        ctx={ctx}
-        onSelectWorkspace={(id) => {
-          setActiveWorkspaceId(id);
-          setFocusNodeId(null);
-        }}
-        onFocusNode={(workspaceId, nodeId) => {
-          setActiveWorkspaceId(workspaceId);
-          setActiveSurface("workspace");
-          setFocusNodeId(nodeId);
-        }}
-        onCreateWorkspace={createWorkspace}
-        onRenameWorkspace={async (id, name) => {
-          await window.api.workspaces.rename(id, name);
-          reloadWorkspaces();
-        }}
-        onDeleteWorkspace={async (id) => {
-          await window.api.workspaces.delete(id);
-          setActiveWorkspaceId((cur) => (cur === id ? null : cur));
-          reloadWorkspaces();
-        }}
-        onPinWorkspace={async (id, pinned) => {
-          await window.api.workspaces.pin(id, pinned);
-          reloadWorkspaces();
-        }}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        settings={settings}
-      />
-      <main className="main">
-        <Active.Panel ctx={ctx} />
-      </main>
-    </div>
+    <TitlebarProvider defaultDescriptor={defaultTitlebar}>
+      <CanvasLayoutProvider>
+        <div className="app" data-theme={theme} data-platform={platform}>
+          <div id="app-overlay-root" className="app-overlay-root chrome-no-drag" />
+          <div className="wallpaper" />
+          <AppChrome
+            shell={shellController.shell}
+            platform={platform}
+            toggleRef={sidebarToggleRef}
+            sidebarContentRef={sidebarContentRef}
+            onToggleSidebar={() => shellController.requestToggle("button")}
+            onTransitionComplete={shellController.completeTransition}
+            sidebar={
+              <Sidebar
+                activeSurface={activeSurface}
+                setSurface={setActiveSurface}
+                ctx={ctx}
+                onSelectWorkspace={(id) => {
+                  setActiveWorkspaceId(id);
+                  setFocusNodeId(null);
+                }}
+                onFocusNode={(workspaceId, nodeId) => {
+                  setActiveWorkspaceId(workspaceId);
+                  setActiveSurface("workspace");
+                  setFocusNodeId(nodeId);
+                }}
+                onCreateWorkspace={createWorkspace}
+                onRenameWorkspace={async (id, name) => {
+                  await window.api.workspaces.rename(id, name);
+                  reloadWorkspaces();
+                }}
+                onDeleteWorkspace={async (id) => {
+                  await window.api.workspaces.delete(id);
+                  setActiveWorkspaceId((cur) => (cur === id ? null : cur));
+                  reloadWorkspaces();
+                }}
+                onPinWorkspace={async (id, pinned) => {
+                  await window.api.workspaces.pin(id, pinned);
+                  reloadWorkspaces();
+                }}
+                theme={theme}
+                toggleTheme={toggleTheme}
+                settings={settings}
+              />
+            }
+            main={
+              <Active.Panel ctx={ctx} />
+            }
+          />
+        </div>
+      </CanvasLayoutProvider>
+    </TitlebarProvider>
   );
 }

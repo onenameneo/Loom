@@ -4,6 +4,10 @@ import Database from "better-sqlite3";
 import { importLegacyJsonIfEmpty, migrate } from "./migrations";
 import {
   DEFAULT_SETTINGS,
+  MIN_NODE_HEIGHT,
+  MIN_NODE_WIDTH,
+  isValidNodeLayout,
+  type NodeLayout,
   type NodeRecord,
   type PersistedMessage,
   type Settings,
@@ -28,6 +32,10 @@ type NodeRow = {
   seed: string | null;
   mount_ancestors: number;
   meta: string | null;
+  layout_x: number | null;
+  layout_y: number | null;
+  layout_width: number | null;
+  layout_height: number | null;
 };
 
 type MessageRow = {
@@ -64,6 +72,16 @@ function toWorkspace(row: WorkspaceRow): Workspace {
     pinned: Boolean(row.pinned),
     order: row.order,
   };
+}
+
+function toLayout(row: NodeRow): NodeLayout | undefined {
+  const layout = {
+    x: row.layout_x!,
+    y: row.layout_y!,
+    width: row.layout_width!,
+    height: row.layout_height!,
+  };
+  return isValidNodeLayout(layout) ? layout : undefined;
 }
 
 export class SqliteStore implements Store {
@@ -180,7 +198,7 @@ export class SqliteStore implements Store {
   listNodes(workspaceId: string): NodeRecord[] {
     const rows = this.db
       .prepare(
-        "SELECT id, workspace_id, parent_id, title, seed, mount_ancestors, meta FROM nodes WHERE workspace_id = ? ORDER BY created_at, id",
+        "SELECT id, workspace_id, parent_id, title, seed, mount_ancestors, meta, layout_x, layout_y, layout_width, layout_height FROM nodes WHERE workspace_id = ? ORDER BY created_at, id",
       )
       .all(workspaceId) as NodeRow[];
     return rows.map((row) => this.toNode(row));
@@ -188,7 +206,7 @@ export class SqliteStore implements Store {
 
   getNode(id: string): NodeRecord | undefined {
     const row = this.db
-      .prepare("SELECT id, workspace_id, parent_id, title, seed, mount_ancestors, meta FROM nodes WHERE id = ?")
+      .prepare("SELECT id, workspace_id, parent_id, title, seed, mount_ancestors, meta, layout_x, layout_y, layout_width, layout_height FROM nodes WHERE id = ?")
       .get(id) as NodeRow | undefined;
     return row ? this.toNode(row) : undefined;
   }
@@ -267,6 +285,31 @@ export class SqliteStore implements Store {
       );
   }
 
+  updateNodeLayout(id: string, layout: NodeLayout): boolean {
+    const result = this.db
+      .prepare(
+        "UPDATE nodes SET layout_x = ?, layout_y = ?, layout_width = ?, layout_height = ?, updated_at = ? WHERE id = ?",
+      )
+      .run(layout.x, layout.y, layout.width, layout.height, Date.now(), id);
+    return result.changes > 0;
+  }
+
+  updateNodeLayouts(items: Array<{ id: string; layout: NodeLayout }>): string[] {
+    const update = this.db.prepare(
+      "UPDATE nodes SET layout_x = ?, layout_y = ?, layout_width = ?, layout_height = ?, updated_at = ? WHERE id = ?",
+    );
+    const tx = this.db.transaction(() => {
+      const updatedIds: string[] = [];
+      const now = Date.now();
+      for (const { id, layout } of items) {
+        const result = update.run(layout.x, layout.y, layout.width, layout.height, now, id);
+        if (result.changes > 0) updatedIds.push(id);
+      }
+      return updatedIds;
+    });
+    return tx();
+  }
+
   deleteNode(id: string): void {
     this.db.prepare("DELETE FROM nodes WHERE id = ?").run(id);
   }
@@ -333,6 +376,7 @@ export class SqliteStore implements Store {
       systemPrompt,
       model,
       color,
+      layout: toLayout(row),
       mountAncestors: Boolean(row.mount_ancestors),
       messages: this.listMessages(row.id),
     };

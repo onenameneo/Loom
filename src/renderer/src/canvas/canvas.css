@@ -13,6 +13,39 @@
   background: transparent;
 }
 
+.canvas-layout-notice {
+  position: absolute;
+  z-index: 30;
+  top: var(--s3);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-float);
+  font-size: 11.5px;
+}
+
+.canvas-layout-retry {
+  padding: 0;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.canvas-layout-retry:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* 头部：对话/画布 模式指示 + 展开画布按钮 */
 .ws-mode {
   font-family: var(--font-mono);
@@ -142,7 +175,7 @@
   border: none;
   border-radius: var(--r-md);
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   cursor: pointer;
   display: grid;
   place-items: center;
@@ -210,9 +243,11 @@
     transform: none;
   }
 }
-/* 选中 = 纯扩散 accent 外光晕（无环、无边框），像一层蓝色阴影 */
+/* 选中 = 制图软件式精确 accent 环 + 极轻柔和阴影。 */
 .react-flow__node.selected .card {
-  box-shadow: 0 0 22px 4px color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    0 0 16px 2px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 /* 节点被选中时会获得焦点：压掉全局 focus 描边（那条蓝色线框），只留上面的光晕 */
 .react-flow__node:focus,
@@ -227,6 +262,19 @@
 }
 .react-flow__node.is-flash .card {
   animation: node-flash 1.2s ease-out;
+}
+.react-flow__node.is-dragging,
+.react-flow__node.is-resizing {
+  z-index: 20 !important;
+}
+.react-flow__node.is-dragging .card,
+.react-flow__node.is-resizing .card {
+  box-shadow: var(--shadow-float);
+}
+.loom-canvas.is-resizing,
+.loom-canvas.is-resizing * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 @keyframes node-flash {
   0%,
@@ -254,6 +302,7 @@
   gap: 8px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 88%, var(--surface-2));
   cursor: grab;
 }
 /* 标题栏主体 = 两行：第一行标题，第二行小字（模型 · token） */
@@ -328,7 +377,7 @@
   cursor: pointer;
   display: grid;
   place-items: center;
-  color: #fff;
+  color: var(--on-accent);
   padding: 0;
 }
 .color-swatch.is-none {
@@ -383,7 +432,7 @@
   padding: 0 3px;
   border-radius: var(--r-pill);
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-family: var(--font-mono);
   font-size: 9px;
   line-height: 13px;
@@ -454,6 +503,15 @@
 .head-icon.danger:hover {
   color: var(--err);
 }
+.head-icon.danger {
+  opacity: 0;
+  transition: opacity 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+.card:hover .head-icon.danger,
+.card:focus-within .head-icon.danger,
+.react-flow__node.selected .head-icon.danger {
+  opacity: 1;
+}
 .persona {
   border-bottom: 1px solid var(--border);
   padding: 8px 10px;
@@ -483,7 +541,7 @@
   border: 1px solid var(--accent);
   border-radius: var(--r-sm);
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 11px;
   padding: 6px 8px;
   cursor: pointer;
@@ -684,14 +742,14 @@
   flex-direction: column;
   gap: 6px;
   background: var(--surface);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border);
   border-radius: var(--r-lg);
   padding: 8px 8px 8px 12px;
-  box-shadow: var(--shadow-soft);
+  box-shadow: var(--shadow-composer);
 }
 .composer-box:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-soft);
+  box-shadow: 0 0 0 1px var(--accent-soft), var(--shadow-composer);
 }
 .composer-bar {
   display: flex;
@@ -870,7 +928,7 @@
   border: none;
   border-radius: var(--r-md);
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   cursor: pointer;
   display: grid;
   place-items: center;
@@ -944,23 +1002,36 @@
   background: var(--accent);
 }
 
-/* NodeResizer：手柄与边线全透明但仍可拖——靠光标变化（贴边/贴角 resize 光标）
-   触发缩放，像 macOS 窗口，零可见圆点/边框。
-   注意：RF 的 .react-flow__resize-control.line 与我们的 .rz-line 同特异性，
-   且 RF 样式表后加载会赢 → 会画出蓝色边线（选中时的“蓝框”真凶）。
-   这里加 .react-flow__node 祖先把特异性抬到 (0,3,0) 稳压 RF 的 (0,2,0)。 */
-.react-flow__node .react-flow__resize-control.rz-line {
-  /* RF 在 .line.left/.right/.top/.bottom 各边单独设 border-width（同特异性、后加载会赢），
-     故这里必须 !important 才能彻底压掉那条“蓝框”边线。 */
-  border-width: 0 !important;
-  border-color: transparent !important;
-}
-.react-flow__node .react-flow__resize-control.rz-handle {
-  width: 14px;
-  height: 14px;
+/* 单一右下角 resize control：22px 命中区，视觉角标内嵌并以圆角收边。 */
+.react-flow__node .react-flow__resize-control.node-resize-control.bottom.right {
+  left: auto;
+  top: auto;
+  right: 0;
+  bottom: 0;
+  translate: none;
+  transform: none;
+  width: 22px;
+  height: 22px;
   background: transparent;
-  border: none;
-  border-radius: 0;
+  border: 0;
+  cursor: nwse-resize;
+  z-index: 24;
+}
+.node-resize-corner {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 10px;
+  height: 10px;
+  border-right: 1.5px solid var(--accent);
+  border-bottom: 1.5px solid var(--accent);
+  border-bottom-right-radius: 4px;
+  opacity: 0.7;
+  transition: opacity 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+.node-resize-control:hover .node-resize-corner,
+.react-flow__node.is-resizing .node-resize-corner {
+  opacity: 1;
 }
 
 /* handles / edges / minimap */
@@ -977,16 +1048,16 @@
 }
 .react-flow__edge-path {
   stroke: var(--edge);
-  stroke-width: 2;
+  stroke-width: 1.5;
 }
 .react-flow__edge.selected .react-flow__edge-path,
 .react-flow__edge:hover .react-flow__edge-path {
   stroke: var(--accent);
-  stroke-width: 2.5;
+  stroke-width: 2;
 }
 .react-flow__edge.is-onpath .react-flow__edge-path {
   stroke: var(--accent);
-  stroke-width: 2.5;
+  stroke-width: 2;
 }
 .react-flow__edge.is-dimmed {
   opacity: 0.32;
@@ -1003,35 +1074,69 @@
 .react-flow__minimap {
   bottom: 16px;
   right: 16px;
+  background: var(--minimap-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
 }
-.canvas-tools {
-  margin: 16px;
-  padding: 5px;
+.canvas-control-group {
+  position: absolute;
+  z-index: 8;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  box-shadow: var(--shadow-float);
+  box-shadow: var(--shadow-soft);
 }
-.canvas-tool-btn {
+.canvas-zoom {
+  bottom: 16px;
+  left: 16px;
+}
+.canvas-control-group button {
+  width: 30px;
   height: 30px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  border: 0;
   border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--text);
-  padding: 0 10px;
-  font-size: 12px;
+  background: transparent;
+  color: var(--muted);
   cursor: pointer;
 }
-.canvas-tool-btn svg {
-  color: var(--accent);
+.canvas-control-group button svg {
   stroke: currentColor;
 }
-.canvas-tool-btn:hover,
-.canvas-tool-btn:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+.canvas-control-group button:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.canvas-control-group button:focus-visible {
   outline: none;
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--accent);
+}
+.canvas-zoom-value {
+  min-width: 44px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-align: center;
+}
+.canvas-control-group .canvas-zoom-reset {
+  width: 38px;
+  border-left: 1px solid var(--border);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .loom-canvas *,
+  .loom-canvas *::before,
+  .loom-canvas *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }

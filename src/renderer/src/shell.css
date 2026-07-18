@@ -31,11 +31,259 @@ body {
   display: block;
 }
 
+@property --sidebar-width {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 244px;
+}
+
 .app {
-  display: flex;
   height: 100vh;
   width: 100vw;
   position: relative;
+}
+.app-shell {
+  --sidebar-width: var(--sidebar-expanded-width);
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  transition: --sidebar-width var(--panel-motion-duration) var(--panel-motion-curve);
+}
+.app-shell.shell-collapsed,
+.app-shell.shell-collapsing {
+  --sidebar-width: 0px;
+}
+.app-shell.shell-expanded,
+.app-shell.shell-expanding {
+  --sidebar-width: var(--sidebar-expanded-width);
+}
+
+/* ---------- adaptive app chrome ---------- */
+.window-controls-chrome {
+  position: fixed;
+  inset: 0 auto auto 0;
+  z-index: 110;
+  width: var(--window-controls-width);
+  height: var(--titlebar-height);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.window-controls-backdrop,
+.chrome-drag-region {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.window-controls-backdrop {
+  background: var(--sidebar-glass);
+  backdrop-filter: blur(40px) saturate(1.5);
+  -webkit-backdrop-filter: blur(40px) saturate(1.5);
+}
+.window-controls-chrome.uses-content-surface .window-controls-backdrop {
+  background: var(--bg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.mac-window-controls .chrome-drag-region,
+.platform-darwin .sidebar-chrome,
+.platform-darwin .titlebar-drag-space {
+  -webkit-app-region: drag;
+}
+.platform-darwin .chrome-no-drag,
+.platform-darwin .titlebar-interactive,
+.mac-window-controls .window-sidebar-toggle {
+  -webkit-app-region: no-drag;
+}
+.window-sidebar-toggle {
+  position: absolute;
+  z-index: 1;
+  top: 10px;
+  left: 8px;
+  pointer-events: auto;
+}
+.mac-window-controls .window-sidebar-toggle {
+  left: 68px;
+}
+
+.sidebar-column {
+  grid-column: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--sidebar-glass);
+  backdrop-filter: blur(40px) saturate(1.5);
+  -webkit-backdrop-filter: blur(40px) saturate(1.5);
+  border-right: 1px solid var(--border);
+}
+.sidebar-chrome {
+  height: var(--titlebar-height);
+  flex: none;
+}
+.sidebar-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.content-column {
+  grid-column: 2;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.app-titlebar {
+  position: relative;
+  z-index: 100;
+  height: var(--titlebar-height);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding-block: 0;
+  padding-inline: max(0px, calc(var(--window-controls-width) - var(--sidebar-width))) var(--s3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.titlebar-context,
+.titlebar-actions {
+  position: relative;
+  z-index: 1;
+}
+.titlebar-button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.titlebar-button:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.titlebar-button[aria-disabled="true"] {
+  cursor: default;
+}
+.titlebar-context {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  overflow: hidden;
+}
+.titlebar-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.titlebar-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.titlebar-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+.titlebar-mode {
+  flex: none;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.titlebar-subtitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.titlebar-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+.canvas-titlebar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+}
+.canvas-titlebar-action:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--accent);
+}
+.app-overlay-root {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  pointer-events: none;
+  -webkit-app-region: no-drag;
+}
+.app-overlay-root > * {
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+.canvas-help {
+  width: 240px;
+  padding: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-float);
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.titlebar-drag-space,
+.titlebar-flex-space {
+  align-self: stretch;
+  flex: 1 1 auto;
+  min-width: var(--s2);
+}
+@media (max-width: 800px) {
+  .titlebar-subtitle {
+    display: none;
+  }
+  .titlebar-title {
+    flex: 0 1 auto;
+  }
+  .titlebar-actions {
+    visibility: visible;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell {
+    transition-duration: 0ms;
+  }
 }
 .wallpaper {
   position: fixed;
@@ -46,15 +294,12 @@ body {
 
 /* ---------- sidebar ---------- */
 .sidebar {
-  width: 244px;
-  flex: none;
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--sidebar-glass);
-  backdrop-filter: blur(40px) saturate(1.5);
-  -webkit-backdrop-filter: blur(40px) saturate(1.5);
-  border-right: 1px solid var(--border);
-  padding: 30px 10px 10px;
+  overflow-y: auto;
+  padding: 6px 10px 10px;
   gap: 2px;
 }
 .sb-head {
@@ -405,22 +650,7 @@ body {
   height: 100%;
   min-height: 0;
 }
-.surface-head {
-  height: 46px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 20px 0 84px;
-  border-bottom: 1px solid var(--border);
-  -webkit-app-region: drag;
-}
-.ws-title {
-  font-size: 13px;
-  font-weight: 600;
-}
 .chip-warn {
-  -webkit-app-region: no-drag;
   margin-left: auto;
   font-size: 11px;
   color: var(--warn);
@@ -429,6 +659,9 @@ body {
   border-radius: var(--r-pill);
   padding: 3px 10px;
   cursor: pointer;
+}
+.platform-darwin .chip-warn {
+  -webkit-app-region: no-drag;
 }
 
 .surface-empty {
@@ -458,31 +691,6 @@ body {
 /* ---------- monitor ---------- */
 .monitor-surface {
   min-width: 0;
-}
-.monitor-surface-head {
-  justify-content: space-between;
-}
-.monitor-head-title {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: var(--s3);
-}
-.monitor-cwd {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--faint);
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-.monitor-head-actions {
-  -webkit-app-region: no-drag;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s2);
 }
 .monitor {
   flex: 1;
@@ -1051,8 +1259,6 @@ button.activity-session-card {
     align-items: stretch;
     flex-direction: column;
   }
-  .monitor-head-title,
-  .monitor-head-actions,
   .monitor-telemetry {
     flex-wrap: wrap;
   }

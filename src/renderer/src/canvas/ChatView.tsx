@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { NodeBudget, NodeMsg } from "../env";
 import { IconSplit } from "../icons";
 import { Message } from "../message/Message";
 import { Composer, type ComposerImage } from "../composer/Composer";
+import { useTitlebarActions } from "../titlebar/Titlebar";
 
 type Role = "user" | "assistant" | "error";
 type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown };
@@ -16,6 +17,9 @@ export default function ChatView({
   systemPrompt,
   model,
   onBranch,
+  onExpandCanvas,
+  noKey,
+  goSettings,
 }: {
   nodeId: string;
   initialMessages: NodeMsg[];
@@ -23,8 +27,14 @@ export default function ChatView({
   systemPrompt?: string;
   model?: string;
   onBranch: (seedText: string) => void;
+  onExpandCanvas: () => void;
+  noKey: boolean;
+  goSettings: () => void;
 }) {
   const idRef = useRef(1);
+  const initialMessagesRef = useRef({ nodeId, messages: initialMessages });
+  const goSettingsRef = useRef(goSettings);
+  goSettingsRef.current = goSettings;
   const seed = (initialMessages ?? []).map((m) => ({
     id: idRef.current++,
     role: m.role as Role,
@@ -48,6 +58,32 @@ export default function ChatView({
   const threadRef = useRef<HTMLDivElement>(null);
   const [tb, setTb] = useState<{ text: string; x: number; y: number } | null>(null);
 
+  const openSettings = useCallback(() => {
+    goSettingsRef.current();
+  }, []);
+
+  const titlebarActions = useMemo(
+    () => (
+      <>
+        <button
+          className="head-btn"
+          type="button"
+          onClick={onExpandCanvas}
+          title="把这段对话摊到无限画布上"
+        >
+          展开画布
+        </button>
+        {noKey && (
+          <button className="chip-warn" type="button" onClick={openSettings}>
+            未配置 API key · 去设置
+          </button>
+        )}
+      </>
+    ),
+    [noKey, onExpandCanvas, openSettings],
+  );
+  useTitlebarActions(titlebarActions);
+
   const reloadFromInitial = useCallback((items: NodeMsg[]) => {
     setMsgs(items.map((m) => ({ id: idRef.current++, role: m.role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta })));
   }, []);
@@ -57,8 +93,11 @@ export default function ChatView({
   }, [nodeId]);
 
   useEffect(() => {
+    const previous = initialMessagesRef.current;
+    if (previous.nodeId === nodeId && previous.messages === initialMessages) return;
+    initialMessagesRef.current = { nodeId, messages: initialMessages };
     reloadFromInitial(initialMessages ?? []);
-  }, [initialMessages, reloadFromInitial]);
+  }, [initialMessages, nodeId, reloadFromInitial]);
 
   useEffect(() => {
     setInput(localStorage.getItem(`loom:draft:${nodeId}`) ?? "");

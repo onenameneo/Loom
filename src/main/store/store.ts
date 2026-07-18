@@ -61,6 +61,33 @@ export interface PersistedMessage {
   meta?: unknown;
 }
 
+export const MIN_NODE_WIDTH = 288;
+export const MIN_NODE_HEIGHT = 220;
+
+export interface NodeLayout {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export function isValidNodeLayout(value: unknown): value is NodeLayout {
+  if (!value || typeof value !== "object") return false;
+  const layout = value as Record<string, unknown>;
+  return (
+    typeof layout.x === "number" &&
+    Number.isFinite(layout.x) &&
+    typeof layout.y === "number" &&
+    Number.isFinite(layout.y) &&
+    typeof layout.width === "number" &&
+    Number.isFinite(layout.width) &&
+    layout.width >= MIN_NODE_WIDTH &&
+    typeof layout.height === "number" &&
+    Number.isFinite(layout.height) &&
+    layout.height >= MIN_NODE_HEIGHT
+  );
+}
+
 export interface NodeRecord {
   id: string;
   workspaceId: string;
@@ -70,6 +97,7 @@ export interface NodeRecord {
   systemPrompt?: string;
   model?: string;
   color?: string;
+  layout?: NodeLayout;
   mountAncestors: boolean;
   messages: PersistedMessage[];
 }
@@ -99,6 +127,8 @@ export interface Store {
     id: string,
     patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: string; color: string }>,
   ): void;
+  updateNodeLayout(id: string, layout: NodeLayout): boolean;
+  updateNodeLayouts(items: Array<{ id: string; layout: NodeLayout }>): string[];
   deleteNode(id: string): void;
   appendMessages(nodeId: string, msgs: PersistedMessage[]): void;
   deleteMessagesFrom(nodeId: string, seq: number): void;
@@ -112,4 +142,4 @@ export const DEFAULT_SETTINGS: Settings = {
   activity: {},
 };
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;

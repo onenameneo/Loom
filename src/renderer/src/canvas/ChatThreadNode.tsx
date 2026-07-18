@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
-import { Handle, NodeResizer, Position } from "@xyflow/react";
+import { Handle, NodeResizeControl, Position, type ResizeParams } from "@xyflow/react";
 import { Check, Trash2 } from "lucide-react";
 import type { NodeBudget, NodeMsg } from "../env";
 import { Composer, type ComposerImage } from "../composer/Composer";
@@ -40,7 +40,12 @@ export function ChatThreadNode(props: any) {
   const [nodeModel, setNodeModel] = useState<string | undefined>(data.model);
   const [colorOpen, setColorOpen] = useState(false);
   const colorRef = useRef<HTMLDivElement>(null);
+  const resizeTokenRef = useRef<number | null>(null);
   const color = typeof data.color === "string" ? data.color : "";
+
+  useEffect(() => {
+    resizeTokenRef.current = null;
+  }, [data.resizeControlEpoch]);
 
   useEffect(() => {
     setMsgs(toMsgs(data.messages ?? []));
@@ -265,13 +270,46 @@ export function ChatThreadNode(props: any) {
 
   return (
     <div className={`card ${data.fresh ? "card--fresh" : ""}`}>
-      <NodeResizer
-        minWidth={288}
-        minHeight={220}
-        isVisible={Boolean(props.selected)}
-        lineClassName="rz-line"
-        handleClassName="rz-handle"
-      />
+      {Boolean(props.selected) && (
+        <NodeResizeControl
+          key={data.resizeControlEpoch}
+          nodeId={id}
+          position="bottom-right"
+          minWidth={288}
+          minHeight={220}
+          style={{
+            left: "auto",
+            top: "auto",
+            right: 0,
+            bottom: 0,
+            width: 22,
+            height: 22,
+            transform: "none",
+            transformOrigin: "bottom right",
+          }}
+          className="node-resize-control nodrag nopan"
+          onResizeStart={(_, params: ResizeParams) => {
+            resizeTokenRef.current = data.onResizeStart?.(id, params) ?? null;
+          }}
+          shouldResize={(_, params: ResizeParams) => {
+            const token = resizeTokenRef.current;
+            return token != null && Boolean(data.shouldResize?.(id, token, params));
+          }}
+          onResize={(_, params: ResizeParams) => {
+            if (resizeTokenRef.current != null) {
+              data.onResize?.(id, resizeTokenRef.current, params);
+            }
+          }}
+          onResizeEnd={(_, params: ResizeParams) => {
+            if (resizeTokenRef.current != null) {
+              data.onResizeEnd?.(id, resizeTokenRef.current, params);
+            }
+            resizeTokenRef.current = null;
+          }}
+        >
+          <span className="node-resize-corner" aria-hidden="true" />
+        </NodeResizeControl>
+      )}
       <div className="card__head">
         <div className="node-color nodrag" ref={colorRef}>
           <button

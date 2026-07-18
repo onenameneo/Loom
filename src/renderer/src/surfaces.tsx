@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BellRing,
   CheckCircle2,
@@ -23,6 +23,7 @@ import type {
 } from "./env";
 import { IconEye, IconPlus, IconSettings, IconWorkspace } from "./icons";
 import Workspace from "./canvas/Workspace";
+import { useTitlebarActions, useTitlebarContext } from "./titlebar/Titlebar";
 
 export interface SurfaceCtx {
   workspaces: WorkspaceMeta[];
@@ -76,7 +77,6 @@ function WorkspacePanel({ ctx }: { ctx: SurfaceCtx }) {
       workspaceId={ws.id}
       workspaceName={ws.name}
       model={ctx.settings?.resolvedModel}
-      isDark={ctx.theme === "dark"}
       noKey={Boolean(noKey)}
       goSettings={ctx.goSettings}
       focusNodeId={ctx.focusNodeId}
@@ -87,7 +87,7 @@ function WorkspacePanel({ ctx }: { ctx: SurfaceCtx }) {
 }
 
 export function isDarwinRenderer(): boolean {
-  return /Mac/i.test(navigator.platform);
+  return window.api?.platform === "darwin";
 }
 
 export function formatDuration(startedAt: number, now: number): string {
@@ -319,16 +319,16 @@ export function getSessionViews(
 }
 
 // ---- 工作站主面（内部 surface id 仍沿用 observatory）----
-function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
+export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [configOpen, setConfigOpen] = useState(false);
   const [busyTool, setBusyTool] = useState<ActivityTool | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const supported = isDarwinRenderer();
 
-  function openConfig() {
+  const openConfig = useCallback(() => {
     setConfigOpen(true);
     void ctx.refreshActivityStatus();
-  }
+  }, [ctx.refreshActivityStatus]);
 
   async function runConfig(action: "enable" | "disable", tool: ActivityTool) {
     setBusyTool(tool);
@@ -339,14 +339,17 @@ function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
     }
   }
 
-  async function copyPath(path?: string) {
+  const copyPath = useCallback(async (path?: string) => {
     if (!path) return;
     await navigator.clipboard.writeText(path);
-  }
+  }, []);
 
   const sessionViews = getSessionViews(ctx.activitySessions, ctx.agents, "all", ctx.activityNow);
   const activeView = sessionViews.find((view) => view.session.key === ctx.activeSessionKey) ?? sessionViews[0] ?? null;
   const activeSession = activeView?.session ?? null;
+  const activeTitle = activeSession ? sessionTitle(activeSession) : "工作站";
+  const activeCwd = activeSession?.cwd;
+  const activeLiveness = activeView?.liveness;
   const telemetry = sessionViews.reduce(
     (acc, view) => {
       acc[view.liveness] += 1;
@@ -355,29 +358,48 @@ function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
     { active: 0, waiting: 0, idle: 0, ended: 0 } satisfies Record<LivenessState, number>,
   );
 
+  const titlebarContext = useMemo(
+    () => ({
+      title: activeTitle,
+      subtitle: activeCwd || "等待本地 agent 事件",
+    }),
+    [activeCwd, activeTitle],
+  );
+  const titlebarActions = useMemo(
+    () => (
+      <>
+        {activeLiveness && (
+          <span className={`liveness-pill ${activeLiveness}`}>
+            <span className={`state-dot ${activeLiveness}`} />
+            {LIVENESS_LABEL[activeLiveness]}
+          </span>
+        )}
+        <button
+          className="icon-btn"
+          type="button"
+          onClick={() => copyPath(activeCwd)}
+          aria-label="复制 cwd"
+          disabled={!activeCwd}
+        >
+          <Copy size={15} />
+        </button>
+        <button
+          className="icon-btn monitor-config-btn"
+          type="button"
+          onClick={openConfig}
+          aria-label="活动流配置"
+        >
+          <Settings size={16} />
+        </button>
+      </>
+    ),
+    [activeCwd, activeLiveness, copyPath, openConfig],
+  );
+  useTitlebarContext(titlebarContext);
+  useTitlebarActions(titlebarActions);
+
   return (
     <div className="surface-fill monitor-surface">
-      <div className="surface-head monitor-surface-head">
-        <div className="monitor-head-title">
-          <span className="ws-title">{activeSession ? sessionTitle(activeSession) : "工作站"}</span>
-          <span className="monitor-cwd">{activeSession?.cwd || "等待本地 agent 事件"}</span>
-        </div>
-        <div className="monitor-head-actions">
-          {activeView && (
-            <span className={`liveness-pill ${activeView.liveness}`}>
-              <span className={`state-dot ${activeView.liveness}`} />
-              {LIVENESS_LABEL[activeView.liveness]}
-            </span>
-          )}
-          <button className="icon-btn" onClick={() => copyPath(activeSession?.cwd)} aria-label="复制 cwd" disabled={!activeSession?.cwd}>
-            <Copy size={15} />
-          </button>
-          <button className="icon-btn monitor-config-btn" onClick={openConfig} aria-label="活动流配置">
-            <Settings size={16} />
-          </button>
-        </div>
-      </div>
-
       <div className="monitor">
         <div className="monitor-telemetry" aria-label="活动遥测">
           {(["active", "waiting", "idle", "ended"] as LivenessState[]).map((state) => (
@@ -495,7 +517,7 @@ const SRC_ZH: Record<string, string> = {
   none: "未设置",
 };
 
-function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
+export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const s = ctx.settings;
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
@@ -503,6 +525,8 @@ function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
   const [monitorNotify, setMonitorNotify] = useState(true);
   const [saved, setSaved] = useState(false);
+  const titlebarContext = useMemo(() => ({ title: "设置" }), []);
+  useTitlebarContext(titlebarContext);
 
   useEffect(() => {
     if (!s) return;
@@ -532,9 +556,6 @@ function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
 
   return (
     <div className="surface-fill">
-      <div className="surface-head">
-        <span className="ws-title">设置</span>
-      </div>
       <div className="settings">
       <section>
         <h3>接入</h3>
