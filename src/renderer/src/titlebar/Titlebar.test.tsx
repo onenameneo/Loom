@@ -143,6 +143,47 @@ describe("global titlebar", () => {
     expect(screen.getByTestId("resolved-actions").textContent).toBe("");
   });
 
+  it("reveals still-mounted context and actions when the top entries clean up", () => {
+    function Context({ title }: { title: string }) {
+      useTitlebarContext({ title });
+      return null;
+    }
+
+    function Actions({ label }: { label: string }) {
+      useTitlebarActions(<button>{label}</button>);
+      return null;
+    }
+
+    function Slots({ showTop }: { showTop: boolean }) {
+      return (
+        <>
+          <Context key="previous-context" title="previous context" />
+          <Actions key="previous-actions" label="previous action" />
+          {showTop && <Context key="top-context" title="top context" />}
+          {showTop && <Actions key="top-actions" label="top action" />}
+        </>
+      );
+    }
+
+    const view = render(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <ResolvedTitlebar />
+        <Slots showTop />
+      </TitlebarProvider>,
+    );
+    expect(screen.getByTestId("resolved-title").textContent).toBe("top context");
+    expect(screen.getByTestId("resolved-actions").textContent).toBe("top action");
+
+    view.rerender(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <ResolvedTitlebar />
+        <Slots showTop={false} />
+      </TitlebarProvider>,
+    );
+    expect(screen.getByTestId("resolved-title").textContent).toBe("previous context");
+    expect(screen.getByTestId("resolved-actions").textContent).toBe("previous action");
+  });
+
   it("immediately renders a new provider fallback while the context stack is empty", () => {
     const view = render(
       <TitlebarProvider defaultDescriptor={{ title: "first fallback" }}>
@@ -241,5 +282,63 @@ describe("global titlebar", () => {
     );
     expect(screen.getByTestId("resolved-title").textContent).toBe("newer child context");
     expect(screen.getByTestId("resolved-actions").textContent).toBe("legacy action");
+  });
+
+  it("keeps useTitlebar compatibility registrations in both slots through child cleanup", () => {
+    function Legacy() {
+      useTitlebar({ title: "legacy context", actions: <button>legacy action</button> });
+      return null;
+    }
+
+    function Child() {
+      useTitlebarContext({ title: "child context" });
+      useTitlebarActions(<button>child action</button>);
+      return null;
+    }
+
+    function Slots({ showChild, showLegacy }: { showChild: boolean; showLegacy: boolean }) {
+      return (
+        <>
+          {showLegacy && <Legacy key="legacy" />}
+          {showChild && <Child key="child" />}
+        </>
+      );
+    }
+
+    const view = render(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <ResolvedTitlebar />
+        <Slots showChild={false} showLegacy />
+      </TitlebarProvider>,
+    );
+    expect(screen.getByTestId("resolved-title").textContent).toBe("legacy context");
+    expect(screen.getByTestId("resolved-actions").textContent).toBe("legacy action");
+
+    view.rerender(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <ResolvedTitlebar />
+        <Slots showChild showLegacy />
+      </TitlebarProvider>,
+    );
+    expect(screen.getByTestId("resolved-title").textContent).toBe("child context");
+    expect(screen.getByTestId("resolved-actions").textContent).toBe("child action");
+
+    view.rerender(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <ResolvedTitlebar />
+        <Slots showChild={false} showLegacy />
+      </TitlebarProvider>,
+    );
+    expect(screen.getByTestId("resolved-title").textContent).toBe("legacy context");
+    expect(screen.getByTestId("resolved-actions").textContent).toBe("legacy action");
+
+    view.rerender(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <ResolvedTitlebar />
+        <Slots showChild={false} showLegacy={false} />
+      </TitlebarProvider>,
+    );
+    expect(screen.getByTestId("resolved-title").textContent).toBe("fallback");
+    expect(screen.getByTestId("resolved-actions").textContent).toBe("");
   });
 });
