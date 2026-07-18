@@ -49,6 +49,8 @@ vi.mock("@xyflow/react", async (importOriginal) => {
               data-testid="displayed-node"
               data-width={String(width)}
               data-height={String(height)}
+              data-x={String(node.position.x)}
+              data-y={String(node.position.y)}
             />
           )}
           {props.children}
@@ -83,12 +85,13 @@ async function renderCanvas() {
       },
     },
   });
-  render(
+  const view = render(
     <TitlebarProvider defaultDescriptor={{ title: "Canvas" }}>
       <Canvas workspaceId="workspace-1" />
     </TitlebarProvider>,
   );
   await waitFor(() => expect(screen.getByTestId("displayed-node")).toBeTruthy());
+  return view;
 }
 
 afterEach(cleanup);
@@ -156,8 +159,9 @@ describe("Canvas resize lifecycle", () => {
     expect(layoutStore.enqueue).toHaveBeenCalledWith("workspace-1", "n1", moved);
   });
 
-  it("keeps a zero-movement press idle and can persist its initial layout on blur", async () => {
-    await renderCanvas();
+  it("does not let a start-only baseline revert or enqueue after a later node drag", async () => {
+    const view = await renderCanvas();
+    const dragged = { x: 320, y: 96, width: initial.width, height: initial.height };
 
     act(() => {
       nodeActions().onResizeStart("n1", initial);
@@ -167,11 +171,35 @@ describe("Canvas resize lifecycle", () => {
     expect(screen.getByTestId("flow").dataset.panOnDrag).toBe("true");
     expect(screen.getByTestId("flow").classList.contains("is-resizing")).toBe(false);
 
+    act(() => {
+      harness.props.onNodesChange([
+        {
+          id: "n1",
+          type: "position",
+          position: { x: dragged.x, y: dragged.y },
+          dragging: true,
+        },
+      ]);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("displayed-node").dataset.x).toBe("320");
+      expect(screen.getByTestId("displayed-node").dataset.y).toBe("96");
+    });
+
+    act(() => harness.props.onNodeDragStart(null, harness.props.nodes[0]));
+    act(() => harness.props.onNodeDragStop(null, harness.props.nodes[0]));
+
+    expect(layoutStore.enqueue).toHaveBeenCalledOnce();
+    expect(layoutStore.enqueue).toHaveBeenCalledWith("workspace-1", "n1", dragged);
+
     act(() => window.dispatchEvent(new Event("blur")));
 
-    await waitFor(() => expect(layoutStore.enqueue).toHaveBeenCalledOnce());
-    expect(layoutStore.enqueue).toHaveBeenCalledWith("workspace-1", "n1", initial);
-    expect(screen.getByTestId("displayed-node").dataset.width).toBe("360");
-    expect(screen.getByTestId("displayed-node").dataset.height).toBe("440");
+    await waitFor(() => {
+      expect(screen.getByTestId("displayed-node").dataset.x).toBe("320");
+      expect(screen.getByTestId("displayed-node").dataset.y).toBe("96");
+    });
+    view.unmount();
+    expect(layoutStore.enqueue).toHaveBeenCalledOnce();
+    expect(layoutStore.enqueue).not.toHaveBeenCalledWith("workspace-1", "n1", initial);
   });
 });

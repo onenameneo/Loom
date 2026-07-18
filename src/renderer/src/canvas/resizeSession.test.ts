@@ -27,4 +27,12 @@ describe("ResizeSession", () => {
     expect(session.update(token, "n1", { ...layout, width: 500 })).toBeUndefined();
     expect(session.finish(token, "n1", { ...layout, width: 500 })).toBeUndefined();
   });
+
+  it("clears a start-only baseline without treating it as a valid resize", () => {
+    const session = new ResizeSession();
+    session.start("n1", layout);
+
+    expect(session.cancel()).toBeUndefined();
+    expect(session.isActive()).toBe(false);
+  });
 });

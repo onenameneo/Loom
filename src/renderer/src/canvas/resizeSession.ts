@@ -1,6 +1,11 @@
 import type { NodeLayout } from "./layout";
 
-type ActiveResize = { token: number; nodeId: string; layout?: NodeLayout };
+type ActiveResize = {
+  token: number;
+  nodeId: string;
+  layout?: NodeLayout;
+  hasUpdate: boolean;
+};
 
 export class ResizeSession {
   private nextToken = 0;
@@ -11,21 +16,23 @@ export class ResizeSession {
   start(nodeId: string, layout?: NodeLayout): number {
     const token = ++this.nextToken;
     this.cancelled = undefined;
-    this.active = { token, nodeId, layout };
-    if (layout) this.canonical.set(nodeId, layout);
+    this.active = { token, nodeId, layout, hasUpdate: false };
     return token;
   }
 
   update(token: number, nodeId: string, layout: NodeLayout): NodeLayout | undefined {
     if (!this.matches(token, nodeId)) return undefined;
     this.active!.layout = layout;
+    this.active!.hasUpdate = true;
     this.canonical.set(nodeId, layout);
     return layout;
   }
 
   finish(token: number, nodeId: string, layout: NodeLayout): NodeLayout | undefined {
     if (!this.matches(token, nodeId)) return undefined;
+    const active = this.active!;
     this.active = undefined;
+    if (!active.hasUpdate) return undefined;
     this.canonical.set(nodeId, layout);
     return layout;
   }
@@ -33,7 +40,7 @@ export class ResizeSession {
   cancel(): { token: number; nodeId: string; layout: NodeLayout } | undefined {
     const active = this.active;
     this.active = undefined;
-    if (!active?.layout) return undefined;
+    if (!active?.hasUpdate || !active.layout) return undefined;
     this.cancelled = active;
     return { token: active.token, nodeId: active.nodeId, layout: active.layout };
   }
