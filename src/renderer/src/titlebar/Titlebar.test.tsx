@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { StrictMode } from "react";
+import { StrictMode, useMemo } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -61,7 +61,8 @@ describe("global titlebar", () => {
     }
 
     function Actions({ label }: { label: string }) {
-      useTitlebarActions(<button>{label}</button>);
+      const actions = useMemo(() => <button>{label}</button>, [label]);
+      useTitlebarActions(actions);
       return null;
     }
 
@@ -150,17 +151,24 @@ describe("global titlebar", () => {
     }
 
     function Actions({ label }: { label: string }) {
-      useTitlebarActions(<button>{label}</button>);
+      const actions = useMemo(() => <button>{label}</button>, [label]);
+      useTitlebarActions(actions);
       return null;
     }
 
-    function Slots({ showTop }: { showTop: boolean }) {
+    function Slots({
+      showTopActions,
+      showTopContext,
+    }: {
+      showTopActions: boolean;
+      showTopContext: boolean;
+    }) {
       return (
         <>
           <Context key="previous-context" title="previous context" />
           <Actions key="previous-actions" label="previous action" />
-          {showTop && <Context key="top-context" title="top context" />}
-          {showTop && <Actions key="top-actions" label="top action" />}
+          {showTopContext && <Context key="top-context" title="top context" />}
+          {showTopActions && <Actions key="top-actions" label="top action" />}
         </>
       );
     }
@@ -168,7 +176,7 @@ describe("global titlebar", () => {
     const view = render(
       <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
         <ResolvedTitlebar />
-        <Slots showTop />
+        <Slots showTopActions showTopContext />
       </TitlebarProvider>,
     );
     expect(screen.getByTestId("resolved-title").textContent).toBe("top context");
@@ -177,7 +185,16 @@ describe("global titlebar", () => {
     view.rerender(
       <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
         <ResolvedTitlebar />
-        <Slots showTop={false} />
+        <Slots showTopActions={false} showTopContext />
+      </TitlebarProvider>,
+    );
+    expect(screen.getByTestId("resolved-title").textContent).toBe("top context");
+    expect(screen.getByTestId("resolved-actions").textContent).toBe("previous action");
+
+    view.rerender(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <ResolvedTitlebar />
+        <Slots showTopActions={false} showTopContext={false} />
       </TitlebarProvider>,
     );
     expect(screen.getByTestId("resolved-title").textContent).toBe("previous context");
@@ -286,13 +303,15 @@ describe("global titlebar", () => {
 
   it("keeps useTitlebar compatibility registrations in both slots through child cleanup", () => {
     function Legacy() {
-      useTitlebar({ title: "legacy context", actions: <button>legacy action</button> });
+      const actions = useMemo(() => <button>legacy action</button>, []);
+      useTitlebar({ title: "legacy context", actions });
       return null;
     }
 
     function Child() {
+      const actions = useMemo(() => <button>child action</button>, []);
       useTitlebarContext({ title: "child context" });
-      useTitlebarActions(<button>child action</button>);
+      useTitlebarActions(actions);
       return null;
     }
 
