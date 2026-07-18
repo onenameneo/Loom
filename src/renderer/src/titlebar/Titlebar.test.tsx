@@ -54,73 +54,9 @@ describe("global titlebar", () => {
     expect(screen.getByText("整理").closest(".titlebar-interactive")).toBeTruthy();
   });
 
-  it("keeps the active top context when a non-top token cleans up", () => {
+  it("cleans context and action stacks without leaving stale entries", () => {
     function Context({ title }: { title: string }) {
       useTitlebarContext({ title });
-      return null;
-    }
-
-    function Stack({ showFirst }: { showFirst: boolean }) {
-      return (
-        <>
-          {showFirst && <Context title="first" />}
-          <Context title="second" />
-        </>
-      );
-    }
-
-    const view = render(
-      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
-        <ResolvedTitlebar />
-        <Stack showFirst />
-      </TitlebarProvider>,
-    );
-    expect(screen.getByTestId("resolved-title").textContent).toBe("second");
-
-    view.rerender(
-      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
-        <ResolvedTitlebar />
-        <Stack showFirst={false} />
-      </TitlebarProvider>,
-    );
-    expect(screen.getByTestId("resolved-title").textContent).toBe("second");
-  });
-
-  it("reveals the previous context when the top token cleans up", () => {
-    function Context({ title }: { title: string }) {
-      useTitlebarContext({ title });
-      return null;
-    }
-
-    function Stack({ showTop }: { showTop: boolean }) {
-      return (
-        <>
-          <Context title="parent" />
-          {showTop && <Context title="child" />}
-        </>
-      );
-    }
-
-    const view = render(
-      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
-        <ResolvedTitlebar />
-        <Stack showTop />
-      </TitlebarProvider>,
-    );
-    expect(screen.getByTestId("resolved-title").textContent).toBe("child");
-
-    view.rerender(
-      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
-        <ResolvedTitlebar />
-        <Stack showTop={false} />
-      </TitlebarProvider>,
-    );
-    expect(screen.getByTestId("resolved-title").textContent).toBe("parent");
-  });
-
-  it("does not let stale action cleanup change the active context", () => {
-    function Context() {
-      useTitlebarContext({ title: "current context" });
       return null;
     }
 
@@ -129,32 +65,82 @@ describe("global titlebar", () => {
       return null;
     }
 
-    function Slots({ showStale }: { showStale: boolean }) {
+    function Slots({
+      showFirstContext,
+      showFirstActions,
+      showTopContext,
+      showTopActions,
+    }: {
+      showFirstContext: boolean;
+      showFirstActions: boolean;
+      showTopContext: boolean;
+      showTopActions: boolean;
+    }) {
       return (
         <>
-          <Context />
-          {showStale && <Actions label="stale action" />}
-          <Actions label="active action" />
+          {showFirstContext && <Context key="first-context" title="first context" />}
+          {showFirstActions && <Actions key="first-actions" label="first action" />}
+          {showTopContext && <Context key="top-context" title="top context" />}
+          {showTopActions && <Actions key="top-actions" label="top action" />}
         </>
       );
     }
 
     const view = render(
       <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
-        <AppTitlebar {...titlebarProps} />
-        <Slots showStale />
+        <ResolvedTitlebar />
+        <Slots
+          showFirstActions
+          showFirstContext
+          showTopActions
+          showTopContext
+        />
       </TitlebarProvider>,
     );
-    expect(screen.getByText("active action")).toBeTruthy();
+    expect(screen.getByTestId("resolved-title").textContent).toBe("top context");
+    expect(screen.getByTestId("resolved-actions").textContent).toBe("top action");
 
     view.rerender(
       <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
-        <AppTitlebar {...titlebarProps} />
-        <Slots showStale={false} />
+        <ResolvedTitlebar />
+        <Slots
+          showFirstActions={false}
+          showFirstContext={false}
+          showTopActions
+          showTopContext
+        />
       </TitlebarProvider>,
     );
-    expect(screen.getByText("current context")).toBeTruthy();
-    expect(screen.getByText("active action")).toBeTruthy();
+    expect(screen.getByTestId("resolved-title").textContent).toBe("top context");
+    expect(screen.getByTestId("resolved-actions").textContent).toBe("top action");
+
+    view.rerender(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <ResolvedTitlebar />
+        <Slots
+          showFirstActions={false}
+          showFirstContext={false}
+          showTopActions={false}
+          showTopContext
+        />
+      </TitlebarProvider>,
+    );
+    expect(screen.getByTestId("resolved-title").textContent).toBe("top context");
+    expect(screen.getByTestId("resolved-actions").textContent).toBe("");
+
+    view.rerender(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <ResolvedTitlebar />
+        <Slots
+          showFirstActions={false}
+          showFirstContext={false}
+          showTopActions={false}
+          showTopContext={false}
+        />
+      </TitlebarProvider>,
+    );
+    expect(screen.getByTestId("resolved-title").textContent).toBe("fallback");
+    expect(screen.getByTestId("resolved-actions").textContent).toBe("");
   });
 
   it("immediately renders a new provider fallback while the context stack is empty", () => {
@@ -222,19 +208,38 @@ describe("global titlebar", () => {
     expect(screen.getByText("resolved action")).toBeTruthy();
   });
 
-  it("keeps useTitlebar as a compatibility wrapper for both slots", () => {
-    function LegacyPage() {
-      useTitlebar({ title: "legacy context", actions: <button>legacy action</button> });
+  it("keeps useTitlebar registrations stable when only its caller rerenders", () => {
+    const legacyActions = <button>legacy action</button>;
+    const childContext = { title: "newer child context" };
+
+    function Child() {
+      useTitlebarContext(childContext);
       return null;
     }
 
-    render(
+    function LegacyPage({ revision }: { revision: number }) {
+      useTitlebar({ title: "legacy context", actions: legacyActions });
+      return <span>{revision}</span>;
+    }
+
+    const view = render(
       <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
-        <AppTitlebar {...titlebarProps} />
-        <LegacyPage />
+        <ResolvedTitlebar />
+        <LegacyPage revision={1} />
+        <Child />
       </TitlebarProvider>,
     );
-    expect(screen.getByText("legacy context")).toBeTruthy();
-    expect(screen.getByText("legacy action")).toBeTruthy();
+    expect(screen.getByTestId("resolved-title").textContent).toBe("newer child context");
+    expect(screen.getByTestId("resolved-actions").textContent).toBe("legacy action");
+
+    view.rerender(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <ResolvedTitlebar />
+        <LegacyPage revision={2} />
+        <Child />
+      </TitlebarProvider>,
+    );
+    expect(screen.getByTestId("resolved-title").textContent).toBe("newer child context");
+    expect(screen.getByTestId("resolved-actions").textContent).toBe("legacy action");
   });
 });

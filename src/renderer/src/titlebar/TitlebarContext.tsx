@@ -111,11 +111,16 @@ export function useResolvedTitlebar(): ResolvedTitlebar {
 }
 
 export function useTitlebar(descriptor: TitlebarDescriptor): void {
-  useTitlebarContext({
-    icon: descriptor.icon,
-    title: descriptor.title,
-    mode: descriptor.mode,
-    subtitle: descriptor.subtitle,
-  });
+  const contextDescriptor = useMemo(
+    () => ({
+      icon: descriptor.icon,
+      title: descriptor.title,
+      mode: descriptor.mode,
+      subtitle: descriptor.subtitle,
+    }),
+    [descriptor.icon, descriptor.mode, descriptor.subtitle, descriptor.title],
+  );
+
+  useTitlebarContext(contextDescriptor);
   useTitlebarActions(descriptor.actions);
 }
