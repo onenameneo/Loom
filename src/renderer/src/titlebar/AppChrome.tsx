@@ -19,6 +19,26 @@ function targetsExpanded(shell: ShellState): boolean {
   return shell.phase === "expanded" || shell.phase === "expanding";
 }
 
+const ENDPOINT_EPSILON_PX = 0.5;
+
+function readPixelValue(value: string): number | null {
+  const pixels = Number.parseFloat(value);
+  return Number.isFinite(pixels) ? pixels : null;
+}
+
+function isAtShellTransitionEndpoint(shellElement: HTMLElement, expandedTarget: boolean): boolean {
+  const computed = window.getComputedStyle(shellElement);
+  const currentWidth = readPixelValue(computed.getPropertyValue("--sidebar-width"));
+  const targetWidth = expandedTarget
+    ? readPixelValue(computed.getPropertyValue("--sidebar-expanded-width"))
+    : 0;
+  return (
+    currentWidth !== null &&
+    targetWidth !== null &&
+    Math.abs(currentWidth - targetWidth) <= ENDPOINT_EPSILON_PX
+  );
+}
+
 export function WindowControlsChrome({
   shell,
   platform,
@@ -119,7 +139,7 @@ export function AppChrome({
   const shellRef = useRef<HTMLDivElement>(null);
   const shellStyle = {
     "--window-controls-width": platform === "darwin" ? "104px" : "44px",
-    "--sidebar-width": targetsExpanded(shell) ? "244px" : "0px",
+    "--sidebar-width": targetsExpanded(shell) ? "var(--sidebar-expanded-width)" : "0px",
   } as CSSProperties;
   const inertProps = transitioning ? ({ inert: "" } as Record<string, string>) : {};
 
@@ -127,7 +147,9 @@ export function AppChrome({
     const shellElement = shellRef.current;
     if (!shellElement || !transitioning) return;
     const transitionVersion = shell.version;
+    const expandedTarget = targetsExpanded(shell);
     const completeBoundTransition = (event: Event) => {
+      if (!isAtShellTransitionEndpoint(shellElement, expandedTarget)) return;
       const transitionEvent = event as TransitionEvent;
       onTransitionComplete(
         {
