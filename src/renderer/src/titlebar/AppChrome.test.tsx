@@ -18,7 +18,11 @@ afterEach(() => {
 const expanded: ShellState = { phase: "expanded", version: 0 };
 const collapsed: ShellState = { phase: "collapsed", version: 1 };
 
-function renderChrome(shell: ShellState, platform: NodeJS.Platform | "browser" = "browser") {
+function renderChrome(
+  shell: ShellState,
+  platform: NodeJS.Platform | "browser" = "browser",
+  fullscreen = false,
+) {
   const toggleRef = createRef<HTMLButtonElement>();
   const sidebarContentRef = createRef<HTMLDivElement>();
   const onToggleSidebar = vi.fn();
@@ -28,6 +32,7 @@ function renderChrome(shell: ShellState, platform: NodeJS.Platform | "browser" =
       <AppChrome
         shell={shell}
         platform={platform}
+        fullscreen={fullscreen}
         toggleRef={toggleRef}
         sidebarContentRef={sidebarContentRef}
         onToggleSidebar={onToggleSidebar}
@@ -103,8 +108,37 @@ describe("adaptive AppChrome", () => {
     expect(css).toMatch(/\.window-controls-chrome\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0 auto auto 0;/s);
     expect(css).toContain("max(0px, calc(var(--window-controls-width) - var(--sidebar-width)))");
     expect(css).toContain("transition: --sidebar-width var(--panel-motion-duration) var(--panel-motion-curve)");
+    expect(css).toMatch(/\.mac-window-controls \.chrome-drag-region\s*\{[^}]*right:\s*auto;[^}]*width:\s*76px;/s);
+    // 关键回归防线：侧栏顶部拖拽区必须让出窗控宽度，否则它盖住开关、macOS 会把
+    // 开关的真实鼠标事件当成窗口拖拽吃掉（hover/click 全无）。
+    expect(css).toMatch(/\.platform-darwin \.sidebar-chrome\s*\{[^}]*margin-left:\s*var\(--window-controls-width\);/s);
+    // 折叠态 backdrop 要补下边框，否则它盖住标题栏底线、左侧缺一段。
+    expect(css).toMatch(/\.window-controls-chrome\.uses-content-surface \.window-controls-backdrop\s*\{[^}]*border-bottom:\s*1px solid var\(--border\);/s);
+    expect(css).toMatch(/\.mac-window-controls\.fullscreen \.window-sidebar-toggle\s*\{[^}]*left:\s*8px;/s);
     expect(css).toMatch(/@media \(max-width: 800px\)[\s\S]*?\.titlebar-subtitle\s*\{[^}]*display:\s*none;/);
     expect(css).toMatch(/\.titlebar-actions\s*\{[^}]*flex:\s*none;/);
+  });
+
+  it("moves the toggle to the left edge and shrinks the reserve when macOS is fullscreen", () => {
+    const windowed = renderChrome(expanded, "darwin", false);
+    const windowedChrome = windowed.container.querySelector(".window-controls-chrome")!;
+    expect(windowedChrome.classList.contains("mac-window-controls")).toBe(true);
+    expect(windowedChrome.classList.contains("fullscreen")).toBe(false);
+    expect((windowed.container.querySelector(".app-shell") as HTMLElement).style.getPropertyValue("--window-controls-width")).toBe("116px");
+    cleanup();
+
+    const full = renderChrome(expanded, "darwin", true);
+    const fullChrome = full.container.querySelector(".window-controls-chrome")!;
+    expect(fullChrome.classList.contains("fullscreen")).toBe(true);
+    expect((full.container.querySelector(".app-shell") as HTMLElement).style.getPropertyValue("--window-controls-width")).toBe("44px");
+  });
+
+  it("never marks the fullscreen chrome on non-darwin platforms", () => {
+    const { container } = renderChrome(expanded, "win32", true);
+    const chrome = container.querySelector(".window-controls-chrome")!;
+    expect(chrome.classList.contains("mac-window-controls")).toBe(false);
+    expect(chrome.classList.contains("fullscreen")).toBe(false);
+    expect((container.querySelector(".app-shell") as HTMLElement).style.getPropertyValue("--window-controls-width")).toBe("44px");
   });
 
   it("renders one sidebar column and a content titlebar while expanded", () => {
@@ -180,7 +214,7 @@ describe("adaptive AppChrome", () => {
   });
 
   it.each([
-    { platform: "darwin" as const, width: "104px", mac: true },
+    { platform: "darwin" as const, width: "116px", mac: true },
     { platform: "win32" as const, width: "44px", mac: false },
     { platform: "linux" as const, width: "44px", mac: false },
     { platform: "browser" as const, width: "44px", mac: false },
@@ -266,6 +300,25 @@ describe("adaptive AppChrome", () => {
     computedWidth = "244px";
     dispatchTransition(shell, "transitionend", "--sidebar-width");
     expect(shell.getAttribute("data-shell-phase")).toBe("expanded");
+  });
+
+  it("ignores a bubbled child opacity transitionend at the width endpoint, then settles on the real event", () => {
+    // .sidebar-content 的淡入淡出 opacity 过渡会把 transitionend 冒泡到 .app-shell，
+    // 且与宽度过渡同时在端点结束——它绝不能提前落定，否则真正的 --sidebar-width
+    // 事件被吞、侧栏卡在 collapsing。
+    let computedWidth = "244px";
+    mockShellComputedWidth(() => computedWidth);
+    const { container } = render(<IntegratedChrome />);
+    fireEvent.click(screen.getByRole("button", { name: "折叠侧栏" }));
+    const shell = container.querySelector(".app-shell") as HTMLElement;
+    const sidebar = container.querySelector(".sidebar-content") as HTMLElement;
+
+    computedWidth = "0px";
+    dispatchTransition(sidebar, "transitionend", "opacity");
+    expect(shell.getAttribute("data-shell-phase")).toBe("collapsing");
+
+    dispatchTransition(shell, "transitionend", "--sidebar-width");
+    expect(shell.getAttribute("data-shell-phase")).toBe("collapsed");
   });
 
   it("ignores transitioncancel before the active endpoint and settles at the endpoint", () => {

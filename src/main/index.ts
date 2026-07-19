@@ -134,6 +134,11 @@ function createWindow() {
   if (store && !acp) acp = registerAcp({ getWin: () => win, store });
   if (store && !collector) collector = registerCollector({ getWin: () => win, store });
   win.on("ready-to-show", () => win?.show());
+  // 全屏时 macOS 隐藏红绿灯，渲染层据此把侧栏开关移到左缘、收掉预留内边距。
+  const emitFullScreen = () => win?.webContents.send("window:fullscreen", win?.isFullScreen() ?? false);
+  win.on("enter-full-screen", emitFullScreen);
+  win.on("leave-full-screen", emitFullScreen);
+  win.webContents.on("did-finish-load", emitFullScreen);
   win.on("closed", () => {
     collector?.stop();
     collector = null;

@@ -26,6 +26,7 @@ export default function App() {
   const [activityStatus, setActivityStatus] = useState<ActivityStatus | null>(null);
   const [activeSessionKey, setActiveSessionKey] = useState<string | null>(null);
   const [activityNow, setActivityNow] = useState(Date.now());
+  const [fullscreen, setFullscreen] = useState(false);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const sidebarContentRef = useRef<HTMLDivElement>(null);
   const shellController = useAppShellController({
@@ -109,6 +110,12 @@ export default function App() {
   useEffect(() => {
     const timer = setInterval(() => setActivityNow(Date.now()), 1_000);
     return () => clearInterval(timer);
+  }, []);
+
+  // 全屏进出：macOS 全屏后无红绿灯，通知 chrome 调整开关位置。
+  useEffect(() => {
+    if (!window.api?.onFullScreen) return;
+    return window.api.onFullScreen(setFullscreen);
   }, []);
 
   useEffect(() => {
@@ -203,6 +210,7 @@ export default function App() {
           <AppChrome
             shell={shellController.shell}
             platform={platform}
+            fullscreen={fullscreen}
             toggleRef={sidebarToggleRef}
             sidebarContentRef={sidebarContentRef}
             onToggleSidebar={() => shellController.requestToggle("button")}

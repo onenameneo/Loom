@@ -241,6 +241,7 @@ declare global {
         pin: (id: string, pinned: boolean) => Promise<{ ok: boolean }>;
       };
       onMenu: (cb: (action: string) => void) => () => void;
+      onFullScreen: (cb: (fullscreen: boolean) => void) => () => void;
     };
   }
 }

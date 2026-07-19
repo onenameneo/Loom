@@ -142,6 +142,11 @@ const api = {
     ipcRenderer.on("menu:action", l);
     return () => ipcRenderer.removeListener("menu:action", l);
   },
+  onFullScreen: (cb: (fullscreen: boolean) => void) => {
+    const l = (_: unknown, fullscreen: boolean) => cb(fullscreen);
+    ipcRenderer.on("window:fullscreen", l);
+    return () => ipcRenderer.removeListener("window:fullscreen", l);
+  },
 };
 
 contextBridge.exposeInMainWorld("api", api);

@@ -20,6 +20,7 @@ function targetsExpanded(shell: ShellState): boolean {
 }
 
 const ENDPOINT_EPSILON_PX = 0.5;
+const SHELL_TRANSITION_FALLBACK_MS = 360;
 
 function readPixelValue(value: string): number | null {
   const pixels = Number.parseFloat(value);
@@ -42,11 +43,13 @@ function isAtShellTransitionEndpoint(shellElement: HTMLElement, expandedTarget: 
 export function WindowControlsChrome({
   shell,
   platform,
+  fullscreen = false,
   toggleRef,
   onToggleSidebar,
 }: {
   shell: ShellState;
   platform: RendererPlatform;
+  fullscreen?: boolean;
   toggleRef: RefObject<HTMLButtonElement>;
   onToggleSidebar: () => void;
 }) {
@@ -59,7 +62,7 @@ export function WindowControlsChrome({
 
   return (
     <div
-      className={`window-controls-chrome ${isMacElectron ? "mac-window-controls" : ""} ${shell.phase === "collapsed" ? "uses-content-surface" : ""}`}
+      className={`window-controls-chrome ${isMacElectron ? "mac-window-controls" : ""} ${isMacElectron && fullscreen ? "fullscreen" : ""} ${shell.phase === "collapsed" ? "uses-content-surface" : ""}`}
     >
       {isMacElectron && (
         <>
@@ -118,6 +121,7 @@ export function AppTitlebar({
 export function AppChrome({
   shell,
   platform,
+  fullscreen = false,
   toggleRef,
   sidebarContentRef,
   onToggleSidebar,
@@ -127,6 +131,7 @@ export function AppChrome({
 }: {
   shell: ShellState;
   platform: RendererPlatform;
+  fullscreen?: boolean;
   toggleRef: RefObject<HTMLButtonElement>;
   sidebarContentRef: RefObject<HTMLDivElement>;
   onToggleSidebar: () => void;
@@ -137,8 +142,9 @@ export function AppChrome({
   const transitioning = isTransitioning(shell);
   const sidebarMounted = shell.phase !== "collapsed";
   const shellRef = useRef<HTMLDivElement>(null);
+  // macOS 窗口态：116px 预留红绿灯 + 开关（开关 left:80 + 28 + 8）；全屏后红绿灯消失，塌回到只容纳左移开关的 44px（与非 mac 同宽）。
   const shellStyle = {
-    "--window-controls-width": platform === "darwin" ? "104px" : "44px",
+    "--window-controls-width": platform === "darwin" && !fullscreen ? "116px" : "44px",
     "--sidebar-width": targetsExpanded(shell) ? "var(--sidebar-expanded-width)" : "0px",
   } as CSSProperties;
   const inertProps = transitioning ? ({ inert: "" } as Record<string, string>) : {};
@@ -148,23 +154,38 @@ export function AppChrome({
     if (!shellElement || !transitioning) return;
     const transitionVersion = shell.version;
     const expandedTarget = targetsExpanded(shell);
-    const completeBoundTransition = (event: Event) => {
-      if (!isAtShellTransitionEndpoint(shellElement, expandedTarget)) return;
-      const transitionEvent = event as TransitionEvent;
-      onTransitionComplete(
-        {
-          currentTarget: shellElement,
-          target: event.target ?? shellElement,
-          propertyName: transitionEvent.propertyName,
-        },
-        transitionVersion,
-      );
+    let settled = false;
+    let frameId: number | null = null;
+    let timeoutId: number | null = null;
+    // onTransitionComplete 只需要结构化的 { currentTarget, target, propertyName }，
+    // 所以三条收尾路径（真实事件 / rAF 即时端点 / 超时兜底）直接传原始值即可，
+    // 不必伪造 DOM Event。settled 自身守卫幂等，超时无需再判 !settled。
+    const settle = (target: EventTarget, propertyName: string, requireEndpoint: boolean) => {
+      if (settled) return;
+      if (requireEndpoint && !isAtShellTransitionEndpoint(shellElement, expandedTarget)) return;
+      settled = true;
+      onTransitionComplete({ currentTarget: shellElement, target, propertyName }, transitionVersion);
     };
-    shellElement.addEventListener("transitionend", completeBoundTransition);
-    shellElement.addEventListener("transitioncancel", completeBoundTransition);
+    const onShellTransition = (event: Event) => {
+      // 只认领 shell 自身的 --sidebar-width 过渡；忽略从 .sidebar-content 冒泡上来的
+      // opacity 过渡结束——否则它会提前把 settled 置真，真正的宽度过渡结束反被吞掉、
+      // 侧栏卡在 collapsing/expanding 不再落定。
+      if (event.target !== shellElement) return;
+      if ((event as TransitionEvent).propertyName !== "--sidebar-width") return;
+      settle(shellElement, "--sidebar-width", true);
+    };
+    shellElement.addEventListener("transitionend", onShellTransition);
+    shellElement.addEventListener("transitioncancel", onShellTransition);
+    frameId = window.requestAnimationFrame(() => settle(shellElement, "--sidebar-width", true));
+    timeoutId = window.setTimeout(
+      () => settle(shellElement, "--sidebar-width", false),
+      SHELL_TRANSITION_FALLBACK_MS,
+    );
     return () => {
-      shellElement.removeEventListener("transitionend", completeBoundTransition);
-      shellElement.removeEventListener("transitioncancel", completeBoundTransition);
+      shellElement.removeEventListener("transitionend", onShellTransition);
+      shellElement.removeEventListener("transitioncancel", onShellTransition);
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
   }, [onTransitionComplete, shell.phase, shell.version, transitioning]);
 
@@ -179,6 +200,7 @@ export function AppChrome({
       <WindowControlsChrome
         shell={shell}
         platform={platform}
+        fullscreen={fullscreen}
         toggleRef={toggleRef}
         onToggleSidebar={onToggleSidebar}
       />

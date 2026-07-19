@@ -80,19 +80,32 @@ body {
   pointer-events: none;
 }
 .window-controls-backdrop {
-  background: var(--sidebar-glass);
-  backdrop-filter: blur(40px) saturate(1.5);
-  -webkit-backdrop-filter: blur(40px) saturate(1.5);
+  background: transparent;
 }
+/* 折叠态下 backdrop 用内容面实色盖住左上角；它 48px 高、z 在标题栏之上，会正好
+   压住标题栏的 border-bottom，导致底部横线左侧缺一段——补一条同样的下边框把线接上。 */
 .window-controls-chrome.uses-content-surface .window-controls-backdrop {
   background: var(--bg);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+  border-bottom: 1px solid var(--border);
 }
+/* macOS 拖拽区：红绿灯右侧空档（chrome-drag-region）+ 侧栏顶部条 + 主区标题栏。
+   关键——拖拽区必须「几何上」避开侧栏开关：no-drag 在 position:fixed/absolute 的
+   子树里对跨子树的 drag 抠洞并不可靠（试过给容器加 pointer-events:auto + 容器本身
+   设 drag 都没用，红绿灯下方 .sidebar-chrome 的 drag 仍吃掉开关的 hover/click）。
+   所以让 .sidebar-chrome 用 margin-left 让出整块窗控宽度，开关就落在没有任何拖拽区
+   覆盖的空档里，真实鼠标事件才能到达它。 */
 .mac-window-controls .chrome-drag-region,
 .platform-darwin .sidebar-chrome,
 .platform-darwin .titlebar-drag-space {
   -webkit-app-region: drag;
+}
+.platform-darwin .sidebar-chrome {
+  margin-left: var(--window-controls-width);
+}
+/* 红绿灯簇（trafficLightPosition x:14 起 + ~52px，右缘约 66px），拖拽区停在 80px 开关之前。 */
+.mac-window-controls .chrome-drag-region {
+  right: auto;
+  width: 76px;
 }
 .platform-darwin .chrome-no-drag,
 .platform-darwin .titlebar-interactive,
@@ -107,7 +120,16 @@ body {
   pointer-events: auto;
 }
 .mac-window-controls .window-sidebar-toggle {
-  left: 68px;
+  left: 80px;
+}
+/* 全屏：红绿灯隐藏，开关回到左缘，拖拽区退回到开关右侧不再挡住它。 */
+.mac-window-controls.fullscreen .window-sidebar-toggle {
+  left: 8px;
+}
+.mac-window-controls.fullscreen .chrome-drag-region {
+  left: var(--window-controls-width);
+  width: auto;
+  right: 0;
 }
 
 .sidebar-column {
@@ -126,11 +148,26 @@ body {
   height: var(--titlebar-height);
   flex: none;
 }
+/* 固定为展开宽度：折叠时列变窄由 .sidebar-column 的 overflow:hidden 裁切，
+   而不是回流挤压文字换行。折叠淡出 / 展开淡入随宽度动画同步进行。 */
 .sidebar-content {
   flex: 1;
-  min-width: 0;
+  width: var(--sidebar-expanded-width);
   min-height: 0;
   overflow: hidden;
+  opacity: 1;
+  transition: opacity var(--panel-motion-duration) var(--panel-motion-curve);
+}
+.app-shell.shell-collapsing .sidebar-content {
+  opacity: 0;
+}
+.app-shell.shell-expanding .sidebar-content {
+  animation: sidebar-content-in var(--panel-motion-duration) var(--panel-motion-curve);
+}
+@keyframes sidebar-content-in {
+  from {
+    opacity: 0;
+  }
 }
 .content-column {
   grid-column: 2;
@@ -149,7 +186,7 @@ body {
   align-items: center;
   gap: var(--s2);
   padding-block: 0;
-  padding-inline: max(0px, calc(var(--window-controls-width) - var(--sidebar-width))) var(--s3);
+  padding-inline: calc(var(--s4) + max(0px, calc(var(--window-controls-width) - var(--sidebar-width)))) var(--s3);
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   user-select: none;
@@ -283,6 +320,10 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .app-shell {
     transition-duration: 0ms;
+  }
+  .sidebar-content {
+    transition-duration: 0ms;
+    animation: none;
   }
 }
 .wallpaper {
