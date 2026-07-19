@@ -1,0 +1,448 @@
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
+import type { NodeLayout, NodeRecord, PersistedMessage } from "../../store/store";
+import { saveNodeLayout, saveNodeLayouts } from "../../store/layoutPersistence";
+import { ancestorChain, descendants, type Seed } from "../core/graph";
+import { buildContextPlan, isLlmMessage, roleOf, textOf } from "../core/context";
+import { budget as computeBudget, type Budget } from "../core/budget";
+import { createHookRegistry } from "./hooks";
+import type {
+  AgentHook,
+  ClockPort,
+  EngineHandle,
+  EventSinkPort,
+  HookDispatcher,
+  IdPort,
+  LlmEnginePort,
+  NodeInit,
+  StorePort,
+} from "../ports";
+
+// ---------------------------------------------------------------------------
+// ② 应用编排 · 单画布的多节点会话：运行时图缓存 + 消息持久化编排 + 引擎驱动。
+// 只依赖 ① 核心与 ③ 端口（store/engine/events/ids/clock）；不认 pi/electron/sqlite。
+// 树运算走 core/graph，上下文装配走 core/context，预算走 core/budget。
+// ---------------------------------------------------------------------------
+
+/** 运行时视角的节点（图缓存读快照，含 layout/messageMeta 等运行期字段）。 */
+export interface CanvasNode {
+  id: string;
+  workspaceId: string;
+  parentId?: string;
+  title: string;
+  seed?: Seed;
+  systemPrompt?: string;
+  model?: string;
+  color?: string;
+  layout?: NodeLayout;
+  mountAncestors: boolean;
+  messages: AgentMessage[];
+  messageMeta: unknown[];
+}
+
+export interface SessionDeps {
+  store: StorePort;
+  events: EventSinkPort;
+  ids: IdPort;
+  clock: ClockPort;
+  /** 现取 API key（未配置返回空），用于发送前拦截。 */
+  getApiKey: () => string | undefined;
+  /** 注入引擎工厂：由组装根提供 pi 适配器；session 只认端口。 */
+  createEngine: (hooks: {
+    buildContext: (nodeId: string, own: AgentMessage[]) => any;
+    getNodeInit: (nodeId: string) => NodeInit | undefined;
+    dispatcher: HookDispatcher;
+  }) => LlmEnginePort;
+}
+
+const NO_KEY_ERROR = "未配置 API key（去设置填写，或设置 ANTHROPIC_API_KEY）。";
+
+export function createAgentSession(deps: SessionDeps) {
+  const { store, events, ids, clock, getApiKey } = deps;
+  const nodes = new Map<string, CanvasNode>();
+
+  // ---- 图缓存 & 映射 --------------------------------------------------------
+
+  function persisted(msg: AgentMessage): PersistedMessage {
+    return { id: ids.message(), seq: 0, role: roleOf(msg), content: msg };
+  }
+
+  function toCanvasNode(record: NodeRecord): CanvasNode {
+    return {
+      id: record.id,
+      workspaceId: record.workspaceId,
+      parentId: record.parentId,
+      title: record.title,
+      seed: record.seed as Seed | undefined,
+      systemPrompt: record.systemPrompt,
+      model: record.model,
+      color: record.color,
+      layout: record.layout,
+      mountAncestors: record.mountAncestors,
+      messages: record.messages.map((m) => m.content),
+      messageMeta: record.messages.map((m) => m.meta),
+    };
+  }
+
+  function hydrateWorkspace(workspaceId: string): CanvasNode[] {
+    const records = store.listNodes(workspaceId);
+    for (const [id, node] of nodes) {
+      if (node.workspaceId === workspaceId) nodes.delete(id);
+    }
+    const list = records.map(toCanvasNode);
+    for (const node of list) nodes.set(node.id, node);
+    return list;
+  }
+
+  function loadNode(nodeId: string): CanvasNode | undefined {
+    const cached = nodes.get(nodeId);
+    if (cached) return cached;
+    const record = store.getNode(nodeId);
+    if (!record) return undefined;
+    const node = toCanvasNode(record);
+    nodes.set(node.id, node);
+    return node;
+  }
+
+  // ---- 上下文装配 & 预算：委托 ① 领域核心 -----------------------------------
+
+  function ancestorsOf(nodeId: string): CanvasNode[] {
+    return ancestorChain(nodeId, loadNode);
+  }
+
+  function budgetOf(nodeId: string): Budget {
+    const node = loadNode(nodeId);
+    if (!node) return { withoutAncestors: 0, withAncestors: 0, estimated: true };
+    return computeBudget(node, ancestorsOf(nodeId));
+  }
+
+  // convertToLlm 委托：本节点发送前，交 ① 核心装配 [祖先? → seed? → 本节点历史]。
+  function buildContext(nodeId: string, own: AgentMessage[]) {
+    const node = nodes.get(nodeId);
+    if (!node) return own.filter(isLlmMessage) as any;
+    const ancestors = node.mountAncestors ? ancestorsOf(nodeId) : [];
+    return buildContextPlan(node, own, ancestors, clock.now()) as any;
+  }
+
+  function getNodeInit(nodeId: string): NodeInit | undefined {
+    const n = loadNode(nodeId);
+    return n ? { systemPrompt: n.systemPrompt, model: n.model, messages: n.messages } : undefined;
+  }
+
+  // Hook 扩展面：H1+ 能力经 registerHook 落卡片；本阶段无人注册 → 行为中性。
+  const hookRegistry = createHookRegistry();
+  const engine = deps.createEngine({ buildContext, getNodeInit, dispatcher: hookRegistry });
+
+  // ---- DTO ------------------------------------------------------------------
+
+  function imagesOf(msg: AgentMessage): { data: string; mimeType: string }[] | undefined {
+    const content = (msg as any)?.content;
+    if (!Array.isArray(content)) return undefined;
+    const images = content
+      .filter(
+        (c: any): c is ImageContent =>
+          c?.type === "image" && typeof c.data === "string" && typeof c.mimeType === "string",
+      )
+      .map((c) => ({ data: c.data, mimeType: c.mimeType }));
+    return images.length ? images : undefined;
+  }
+
+  const dto = (n: CanvasNode) => ({
+    id: n.id,
+    workspaceId: n.workspaceId,
+    parentId: n.parentId,
+    title: n.title,
+    seed: n.seed,
+    mountAncestors: n.mountAncestors,
+    systemPrompt: n.systemPrompt,
+    model: n.model,
+    color: n.color,
+    layout: n.layout,
+    messages: n.messages.flatMap((m, seq) => {
+      const role = roleOf(m);
+      if (role !== "user" && role !== "assistant") return [];
+      const usage = (m as any)?.usage;
+      return [{ role, text: textOf(m), images: imagesOf(m), seq, usage, meta: n.messageMeta[seq] }];
+    }),
+  });
+
+  function descendantsOf(nodeId: string): string[] {
+    return descendants(nodeId, nodes.values());
+  }
+
+  // ---- 转写编排（截断 / 追加增量 / 续写 / 提问）------------------------------
+
+  function syncTranscript(handle: EngineHandle, node: CanvasNode) {
+    handle.syncMessages(node.messages);
+  }
+
+  function truncateTranscript(node: CanvasNode, seqFrom: number, handle?: EngineHandle) {
+    store.deleteMessagesFrom(node.id, seqFrom);
+    node.messages = node.messages.slice(0, seqFrom);
+    node.messageMeta = node.messageMeta.slice(0, seqFrom);
+    if (handle) syncTranscript(handle, node);
+  }
+
+  function appendDelta(node: CanvasNode, handle: EngineHandle, from: number) {
+    const nextMessages: AgentMessage[] = handle?.messages ?? [];
+    const delta = nextMessages.slice(from);
+    if (delta.length > 0) {
+      store.appendMessages(node.id, delta.map(persisted));
+      node.messages.push(...delta);
+      node.messageMeta.push(...delta.map(() => undefined));
+    }
+  }
+
+  async function continueFrom(node: CanvasNode, handle: EngineHandle) {
+    const from = node.messages.length;
+    await handle.continue();
+    appendDelta(node, handle, from);
+  }
+
+  async function promptFrom(node: CanvasNode, handle: EngineHandle, msg: AgentMessage) {
+    const from = node.messages.length;
+    await handle.prompt(msg);
+    appendDelta(node, handle, from);
+  }
+
+  // ---- 对外方法（一一对应 IPC）---------------------------------------------
+
+  function list(workspaceId: string) {
+    return hydrateWorkspace(workspaceId).map(dto);
+  }
+
+  // 打开会话：原子地「返回已有节点，或没有则建一条主线」。
+  function open(workspaceId: string) {
+    let items = hydrateWorkspace(workspaceId);
+    if (items.length === 0) {
+      const root = toCanvasNode(store.createNode({ workspaceId, title: "主线", mountAncestors: false }));
+      nodes.set(root.id, root);
+      items = [root];
+    }
+    return items.map(dto);
+  }
+
+  function create(arg: { workspaceId: string; parentId?: string; seed?: Seed; title?: string }) {
+    const node = toCanvasNode(
+      store.createNode({
+        workspaceId: arg.workspaceId,
+        parentId: arg.parentId,
+        title: arg.title ?? (arg.seed ? "新分支" : "主线"),
+        seed: arg.seed,
+        mountAncestors: false,
+      }),
+    );
+    nodes.set(node.id, node);
+    return dto(node);
+  }
+
+  async function send(arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[] }) {
+    const node = loadNode(arg.nodeId);
+    if (!node) {
+      events.emit(arg.nodeId, "error", "节点不存在。");
+      return { ok: false };
+    }
+    if (!getApiKey()) {
+      events.emit(arg.nodeId, "error", NO_KEY_ERROR);
+      return { ok: false };
+    }
+    try {
+      const handle = await engine.ensure(arg.nodeId);
+      const text = arg.text.trim();
+      const images = (arg.images ?? []).filter((img) => img.data && img.mimeType);
+      const content =
+        images.length > 0
+          ? [
+              ...(text ? [{ type: "text", text } satisfies TextContent] : []),
+              ...images.map((img) => ({ type: "image", data: img.data, mimeType: img.mimeType }) satisfies ImageContent),
+            ]
+          : text;
+      const userMessage: AgentMessage = { role: "user", content, timestamp: clock.now() };
+      store.appendMessages(arg.nodeId, [persisted(userMessage)]);
+      node.messages.push(userMessage);
+      node.messageMeta.push(undefined);
+
+      await promptFrom(node, handle, userMessage);
+      return { ok: true };
+    } catch (err: any) {
+      events.emit(arg.nodeId, "error", String(err?.message ?? err));
+      return { ok: false };
+    }
+  }
+
+  function abort(nodeId: string) {
+    engine.peek(nodeId)?.abort();
+    return { ok: true };
+  }
+
+  async function regenerate(nodeId: string) {
+    const node = loadNode(nodeId);
+    if (!node) {
+      events.emit(nodeId, "error", "节点不存在。");
+      return { ok: false };
+    }
+    if (!getApiKey()) {
+      events.emit(nodeId, "error", NO_KEY_ERROR);
+      return { ok: false };
+    }
+    const lastUser = [...node.messages].map(roleOf).lastIndexOf("user");
+    if (lastUser < 0) return { ok: false };
+    try {
+      const handle = await engine.ensure(nodeId);
+      truncateTranscript(node, lastUser + 1, handle);
+      await continueFrom(node, handle);
+      return { ok: true };
+    } catch (err: any) {
+      events.emit(nodeId, "error", String(err?.message ?? err));
+      return { ok: false };
+    }
+  }
+
+  async function editResend(arg: { nodeId: string; seq: number; text: string }) {
+    const node = loadNode(arg.nodeId);
+    const text = arg.text.trim();
+    if (!node || !text) {
+      if (!node) events.emit(arg.nodeId, "error", "节点不存在。");
+      return { ok: false };
+    }
+    if (roleOf(node.messages[arg.seq]) !== "user") return { ok: false };
+    if (!getApiKey()) {
+      events.emit(arg.nodeId, "error", NO_KEY_ERROR);
+      return { ok: false };
+    }
+    try {
+      const handle = await engine.ensure(arg.nodeId);
+      truncateTranscript(node, arg.seq, handle);
+      const userMessage: AgentMessage = { role: "user", content: text, timestamp: clock.now() };
+      await promptFrom(node, handle, userMessage);
+      return { ok: true };
+    } catch (err: any) {
+      events.emit(arg.nodeId, "error", String(err?.message ?? err));
+      return { ok: false };
+    }
+  }
+
+  function setSystemPrompt(arg: { nodeId: string; text: string }) {
+    const node = loadNode(arg.nodeId);
+    const text = arg.text.trim();
+    store.updateNode(arg.nodeId, { systemPrompt: text });
+    if (node) node.systemPrompt = text || undefined;
+    engine.drop(arg.nodeId);
+    return { ok: true };
+  }
+
+  function update(arg: { nodeId: string; title?: string; color?: string }) {
+    const node = loadNode(arg.nodeId);
+    if (!node) return { ok: false };
+    const title = arg.title?.trim();
+    if (title) {
+      node.title = title;
+      store.updateNode(arg.nodeId, { title });
+    }
+    if (Object.prototype.hasOwnProperty.call(arg, "color")) {
+      const color = arg.color?.trim() ?? "";
+      node.color = color || undefined;
+      store.updateNode(arg.nodeId, { color });
+    }
+    return { ok: true, node: dto(node) };
+  }
+
+  function updateLayout(arg: { nodeId: string; layout: NodeLayout }) {
+    const result = saveNodeLayout(store, arg?.nodeId, arg?.layout);
+    if (result.ok) {
+      const node = nodes.get(arg.nodeId);
+      if (node) node.layout = arg.layout;
+    }
+    return result;
+  }
+
+  function updateLayouts(items: Array<{ id: string; layout: NodeLayout }>) {
+    const result = saveNodeLayouts(store, items);
+    if (result.ok) {
+      const updated = new Set(result.updatedIds);
+      for (const item of items) {
+        const node = nodes.get(item.id);
+        if (node && updated.has(item.id)) node.layout = item.layout;
+      }
+    }
+    return result;
+  }
+
+  function deleteNode(nodeId: string) {
+    const target = loadNode(nodeId);
+    if (!target || !target.parentId) return { ok: false, deletedIds: [] };
+    hydrateWorkspace(target.workspaceId);
+    const deletedIds = [nodeId, ...descendantsOf(nodeId)];
+    store.deleteNode(nodeId);
+    for (const id of deletedIds) {
+      nodes.delete(id);
+      engine.drop(id);
+    }
+    return { ok: true, deletedIds };
+  }
+
+  function setMount(arg: { nodeId: string; on: boolean }) {
+    const node = loadNode(arg.nodeId);
+    if (node) {
+      node.mountAncestors = Boolean(arg.on);
+      store.updateNode(arg.nodeId, { mountAncestors: node.mountAncestors });
+    }
+    return { ok: true, budget: budgetOf(arg.nodeId) };
+  }
+
+  function budget(nodeId: string) {
+    return budgetOf(nodeId);
+  }
+
+  function models() {
+    return engine.listModels();
+  }
+
+  function setModel(arg: { nodeId: string; model: string }) {
+    const node = loadNode(arg.nodeId);
+    const model = arg.model.trim();
+    store.updateNode(arg.nodeId, { model });
+    if (node) node.model = model || undefined;
+    engine.drop(arg.nodeId);
+    return { ok: true };
+  }
+
+  function reset(nodeId: string) {
+    const node = loadNode(nodeId);
+    store.deleteMessagesFrom(nodeId, 0);
+    if (node) {
+      node.messages = [];
+      node.messageMeta = [];
+    }
+    engine.peek(nodeId)?.reset();
+    return { ok: true };
+  }
+
+  /** 设置变更（模型/baseUrl/key）→ 丢弃所有引擎，下次发送按新配置重建。 */
+  function invalidate() {
+    engine.invalidateAll();
+  }
+
+  return {
+    list,
+    open,
+    create,
+    send,
+    abort,
+    regenerate,
+    editResend,
+    setSystemPrompt,
+    update,
+    updateLayout,
+    updateLayouts,
+    deleteNode,
+    setMount,
+    budget,
+    models,
+    setModel,
+    reset,
+    invalidate,
+    /** 注册一个 hook（H1+ 能力的落点）。 */
+    registerHook: (hook: AgentHook) => hookRegistry.use(hook),
+  };
+}
