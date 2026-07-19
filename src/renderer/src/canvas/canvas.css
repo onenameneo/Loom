@@ -80,12 +80,15 @@
   height: 100%;
   min-height: 0;
   flex: 1;
+  position: relative;
 }
 .chatview .scroll {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
   position: relative;
+  /* 给悬浮输入框让出底部空间，最后一条消息能完整滚到它上方（含悬停工具条落点） */
+  padding-bottom: calc(var(--composer-h, 84px) + 28px);
 }
 .chatview .thread {
   position: relative;
@@ -94,7 +97,12 @@
   padding: 24px 24px 12px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  /* 略宽的行距：给消息呼吸感，也给底部悬停工具条留出落点 */
+  gap: 30px;
+}
+/* 用户提问与其下方的助手回复之间再拉开一些，视觉上区分一问一答 */
+.chatview .thread .m--user + .m--assistant {
+  margin-top: 12px;
 }
 .cv-empty {
   margin: 14vh auto 0;
@@ -118,10 +126,26 @@
 .chatview .thinking .dot {
   color: var(--accent);
 }
+/* 悬浮输入框共用底座：绝对定位盖在滚动正文之上，透明渐隐区不吃点击，
+   只有输入框本体接管交互。ChatView 与画布节点卡片（.card__foot）共用。 */
+.chatview .composer,
+.card__foot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+.chatview .composer .composer-wrap,
+.card__foot > * {
+  pointer-events: auto;
+}
 .chatview .composer {
-  flex: none;
-  padding: 12px 24px 20px;
-  background: linear-gradient(to top, var(--bg) 60%, transparent);
+  padding: 20px 24px 20px;
+  /* 更实的渐隐：底部大半保持不透明，避免消息文字透到输入框上 */
+  background: linear-gradient(to top, var(--bg) 78%, transparent);
+  /* 始终盖在消息之上：悬停的消息会被抬到 z-index:3，输入框必须更高，否则会被消息文字遮住 */
+  z-index: 12;
 }
 .chatview .composer-wrap {
   max-width: 720px;
@@ -215,6 +239,7 @@
 
 /* ---- 节点卡片（填满 React Flow 节点，宽高由节点 style / NodeResizer 控制）---- */
 .card {
+  position: relative;
   width: 100%;
   height: 100%;
   display: flex;
@@ -552,6 +577,8 @@
   flex: 1;
   min-height: 0;
   padding: 12px;
+  /* 给悬浮输入框让出底部空间 */
+  padding-bottom: calc(var(--composer-h, 64px) + 8px);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -574,14 +601,31 @@
   z-index: 10;
 }
 .chatview .to-latest {
-  position: fixed;
-  right: 28px;
-  left: auto;
-  bottom: 84px;
-  transform: none;
+  /* 脱离滚动流、相对 .chatview 定位，稳定地悬在输入框正上方并水平居中 */
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--composer-h, 84px) + 14px);
+  transform: translateX(-50%);
+  /* 圆形图标按钮：只留一个向下箭头 */
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--muted);
+  z-index: 25;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.chatview .to-latest:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.chatview .to-latest svg {
+  stroke: currentColor;
 }
 .to-latest--card {
-  bottom: 0;
+  bottom: calc(var(--composer-h, 64px) + 8px);
 }
 
 /* seed chip = 可点击来源标本签 */
@@ -731,10 +775,12 @@
   border-bottom: 1px solid var(--border);
 }
 
-/* 底部 = 悬浮大输入框，功能按钮内嵌（无分割线） */
+/* 底部 = 真·悬浮大输入框：定位与 pointer-events 走共用底座（见 .chatview .composer），
+   这里只补卡片语境下的内边距、渐隐色与层级 */
 .card__foot {
-  flex: none;
   padding: 10px 12px 12px;
+  background: linear-gradient(to top, var(--surface) 60%, transparent);
+  z-index: 5;
 }
 .composer-box {
   position: relative;

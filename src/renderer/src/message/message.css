@@ -60,23 +60,36 @@
 }
 .m__bar {
   position: absolute;
+  /* 贴在本条消息底边正下方（悬停时才现，不占布局）。
+     用 padding-top 而非 margin-top 桥接间隙：让工具条盒子紧贴消息底边，
+     鼠标从消息移向按钮时不会掉进「无 hover」的死区，按钮不再闪没。 */
+  top: 100%;
+  left: 0;
   right: 0;
-  top: -20px;
+  padding-top: 5px;
   display: none;
   align-items: center;
-  gap: 3px;
-  padding: 2px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  box-shadow: var(--shadow-float);
+  gap: 2px;
+  /* 无边框无卡片：图标直接落在留白里。
+     工具条横跨整条消息宽度 → 悬停命中区域与消息布局一致，
+     鼠标从消息任意位置往下移都能落到工具条上，不会掉出 hover。 */
   user-select: none;
   -webkit-user-select: none;
   z-index: 5;
 }
+/* 按钮跟随消息的内容侧对齐：命中区仍是整行宽。
+   助手/错误/工具默认即 flex-start，只需把用户消息翻到靠右。 */
+.m--user .m__bar {
+  justify-content: flex-end;
+}
 .m:hover .m__bar,
 .m:focus-within .m__bar {
   display: flex;
+}
+/* 悬停的消息抬到最上层，工具条盖住相邻消息时不被压住 */
+.m:hover,
+.m:focus-within {
+  z-index: 3;
 }
 .m__bar button {
   width: 22px;

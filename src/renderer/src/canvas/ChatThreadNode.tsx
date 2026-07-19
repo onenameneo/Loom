@@ -6,6 +6,7 @@ import { Composer, type ComposerImage } from "../composer/Composer";
 import { IconArrowUpRight, IconChevronRight, IconSplit } from "../icons";
 import { Message } from "../message/Message";
 import { BranchContext } from "./branch";
+import { useComposerHeightVar } from "./useComposerHeightVar";
 
 type Role = "user" | "assistant" | "error";
 type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown };
@@ -18,7 +19,9 @@ const NODE_COLORS = ["gray", "red", "orange", "yellow", "green", "blue", "purple
 export function ChatThreadNode(props: any) {
   const { id, data } = props;
   const branch = useContext(BranchContext);
+  const cardRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const footRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(1);
 
   const toMsgs = useCallback((items: NodeMsg[] = []) => (
@@ -92,6 +95,10 @@ export function ChatThreadNode(props: any) {
     const el = bodyRef.current;
     if (el && autoScroll) el.scrollTop = el.scrollHeight;
   }, [msgs, thinking, autoScroll]);
+
+  // 悬浮输入框：把 foot 的实时高度回填给卡片，正文据此留出底部空间，
+  // 让消息可以滚到输入框下方并在渐隐里淡出（而非被一块实心 foot 顶开）。
+  useComposerHeightVar(footRef, cardRef);
 
   // 订阅本节点的流式事件
   useEffect(() => {
@@ -269,7 +276,7 @@ export function ChatThreadNode(props: any) {
   const collapsedCount = Number(data.collapsedCount ?? 0);
 
   return (
-    <div className={`card ${data.fresh ? "card--fresh" : ""}`}>
+    <div className={`card ${data.fresh ? "card--fresh" : ""}`} ref={cardRef}>
       {Boolean(props.selected) && (
         <NodeResizeControl
           key={data.resizeControlEpoch}
@@ -473,7 +480,7 @@ export function ChatThreadNode(props: any) {
           )}
       </div>
 
-      <div className="card__foot nodrag">
+      <div className="card__foot nodrag" ref={footRef}>
         <Composer
           nodeId={id}
           value={input}

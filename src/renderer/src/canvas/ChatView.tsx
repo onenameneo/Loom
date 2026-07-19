@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import type { NodeBudget, NodeMsg } from "../env";
 import { IconSplit } from "../icons";
 import { Message } from "../message/Message";
 import { Composer, type ComposerImage } from "../composer/Composer";
 import { useTitlebarActions } from "../titlebar/Titlebar";
+import { useComposerHeightVar } from "./useComposerHeightVar";
 
 type Role = "user" | "assistant" | "error";
 type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown };
@@ -54,8 +56,10 @@ export default function ChatView({
   const [nodeModel, setNodeModel] = useState<string | undefined>(model);
   const [budget, setBudget] = useState<NodeBudget | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const [tb, setTb] = useState<{ text: string; x: number; y: number } | null>(null);
 
   const openSettings = useCallback(() => {
@@ -150,6 +154,9 @@ export default function ChatView({
     const el = scrollRef.current;
     if (el && autoScroll) el.scrollTop = el.scrollHeight;
   }, [msgs, thinking, autoScroll]);
+
+  // 悬浮输入框：把 composer 的实时高度回填给视图，滚动区据此留出底部空间。
+  useComposerHeightVar(composerRef, rootRef);
 
   const onMouseUp = useCallback(() => {
     const sel = window.getSelection();
@@ -260,7 +267,7 @@ export default function ChatView({
   }
 
   return (
-    <div className="chatview">
+    <div className="chatview" ref={rootRef}>
       <div className="scroll" ref={scrollRef} onScroll={onScroll}>
         <div className="thread" ref={threadRef} onMouseUp={onMouseUp}>
           {(personaOpen || nodeModel) && (
@@ -315,19 +322,19 @@ export default function ChatView({
             </div>
           )}
         </div>
-        {!autoScroll && (
-          <button className="to-latest" onClick={() => {
-            setAutoScroll(true);
-            requestAnimationFrame(() => {
-              const el = scrollRef.current;
-              if (el) el.scrollTop = el.scrollHeight;
-            });
-          }}>
-            ↓ 回到最新
-          </button>
-        )}
       </div>
-      <div className="composer">
+      {!autoScroll && (
+        <button className="to-latest" type="button" aria-label="回到最新" title="回到最新" onClick={() => {
+          setAutoScroll(true);
+          requestAnimationFrame(() => {
+            const el = scrollRef.current;
+            if (el) el.scrollTop = el.scrollHeight;
+          });
+        }}>
+          <ChevronDown size={18} />
+        </button>
+      )}
+      <div className="composer" ref={composerRef}>
         <Composer
           nodeId={nodeId}
           value={input}

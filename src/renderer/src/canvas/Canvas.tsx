@@ -305,7 +305,7 @@ export default function Canvas({
   );
 
   const focusNode = useCallback(
-    (id: string, opts?: { flash?: boolean }) => {
+    (id: string, opts?: { flash?: boolean; duration?: number }) => {
       const collapsedAncestors = ancestorIds(id).filter((ancestorId) => collapsed.has(ancestorId));
       if (collapsedAncestors.length) {
         setCollapsed((prev) => {
@@ -319,7 +319,7 @@ export default function Canvas({
         if (target && flowRef.current) {
           flowRef.current.setCenter(target.position.x + CARD_W / 2, target.position.y + 120, {
             zoom: 1,
-            duration: 260,
+            duration: opts?.duration ?? 260,
           });
         }
         return nds.map((n) => ({ ...n, selected: n.id === id }));
@@ -490,11 +490,39 @@ export default function Canvas({
     };
   }, [workspaceId, setNodes, setEdges, actions, layoutStore]);
 
+  // 进入画布时的取景：把主节点（root）或指定聚焦节点以 1:1(100%) 居中，
+  // 而不是缩放到能装下整棵树——多节点时那样每张卡片都太小。首帧瞬时定位（不动画），
+  // 之后来自侧栏等的显式聚焦请求再带平移动画。
+  const didInitialFrameRef = useRef(false);
+  const lastFramedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!focusNodeId) return;
-    focusNode(focusNodeId);
-    onFocused?.();
-  }, [focusNode, focusNodeId, onFocused]);
+    if (!flowRef.current || nodes.length === 0) return;
+
+    if (!didInitialFrameRef.current) {
+      if (focusNodeId) {
+        if (!nodes.some((n) => n.id === focusNodeId)) return; // 等指定节点载入再取景
+        didInitialFrameRef.current = true;
+        lastFramedRef.current = focusNodeId;
+        focusNode(focusNodeId, { duration: 0 });
+        onFocused?.();
+      } else {
+        const root = nodes.find((n) => (n.data as { isRoot?: boolean })?.isRoot) ?? nodes[0];
+        didInitialFrameRef.current = true;
+        flowRef.current.setCenter(root.position.x + CARD_W / 2, root.position.y + 120, {
+          zoom: 1,
+          duration: 0,
+        });
+      }
+      return;
+    }
+
+    // 首帧之后的显式聚焦：只在 focusNodeId 真正变化时平移过去，避免流式更新触发抖动。
+    if (focusNodeId && focusNodeId !== lastFramedRef.current && nodes.some((n) => n.id === focusNodeId)) {
+      lastFramedRef.current = focusNodeId;
+      focusNode(focusNodeId);
+      onFocused?.();
+    }
+  }, [nodes, focusNodeId, focusNode, onFocused]);
 
   const onBranch = useCallback(
     async (sourceId: string, seedText: string) => {
@@ -643,8 +671,6 @@ export default function Canvas({
         }}
         onMove={(_, viewport) => setZoom(viewport.zoom)}
         defaultEdgeOptions={defaultEdgeOptions}
-        fitView
-        fitViewOptions={{ padding: 0.28, maxZoom: 1 }}
         minZoom={0.3}
         maxZoom={1.6}
         proOptions={{ hideAttribution: true }}
