@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 // ---------------------------------------------------------------------------
 // ① 领域核心 · 分支图模型与树运算（纯 TS，零基础设施依赖）。

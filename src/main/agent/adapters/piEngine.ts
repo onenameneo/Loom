@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { EngineHandle, EventSinkPort, HookDispatcher, LlmEnginePort, NodeInit } from "../ports";
 
 // ---------------------------------------------------------------------------
@@ -31,16 +31,22 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
   const { events, resolveModel, buildContext, getNodeInit, dispatcher } = deps;
   const cache = new Map<string, { agent: any; handle: EngineHandle }>();
 
+  async function buildModels() {
+    const [{ createModels }, { anthropicProvider }] = await Promise.all([
+      import("@earendil-works/pi-ai"),
+      import("@earendil-works/pi-ai/providers/anthropic"),
+    ]);
+    const models = createModels();
+    models.setProvider(anthropicProvider());
+    return models;
+  }
+
   // known 模型当接线模板；未知（自定义 endpoint）以其为壳改 id/baseUrl。
-  async function buildModel(modelId?: string) {
-    const { getModel, getModels } = await import("@mariozechner/pi-ai");
+  async function buildModel(models: Awaited<ReturnType<typeof buildModels>>, modelId?: string) {
     const cfg = resolveModel();
     const selected = modelId || cfg.model;
-    const known = getModels("anthropic").some((m: any) => m.id === selected);
-    // getModel 返回的是 pi-ai 注册表里的共享引用——必须浅拷贝后再改，
-    // 否则会污染注册表（把 claude 模板的 id 改成 mimo），下个节点 build 时
-    // known 误判为 true、getModel 又查不到 → “Cannot set ... 'baseUrl'”。
-    const base = getModel("anthropic", (known ? selected : "claude-sonnet-4-5") as any);
+    const known = models.getModels("anthropic").some((m: any) => m.id === selected);
+    const base = models.getModel("anthropic", known ? selected : "claude-sonnet-4-5");
     if (!base) throw new Error(`未找到可用的模型模板（model=${selected}）。`);
     const model = { ...base };
     if (!known) {
@@ -71,14 +77,15 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
     if (existing) return existing.handle;
 
     const init = getNodeInit(nodeId);
-    const { Agent } = await import("@mariozechner/pi-agent-core");
-    const model = await buildModel(init?.model);
+    const [{ Agent }, models] = await Promise.all([import("@earendil-works/pi-agent-core"), buildModels()]);
+    const model = await buildModel(models, init?.model);
     const agent = new Agent({
       initialState: {
         systemPrompt: init?.systemPrompt || SYSTEM_PROMPT,
         model,
         messages: [...(init?.messages ?? [])],
       },
+      streamFn: models.streamSimple.bind(models),
       getApiKey: async () => resolveModel().apiKey,
       // ★ 分支上下文引擎：本节点发消息前，委托 ① 核心装配上下文。
       convertToLlm: (own: any[]) => buildContext(nodeId, own),
@@ -136,8 +143,8 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
       cache.clear();
     },
     async listModels() {
-      const { getModels } = await import("@mariozechner/pi-ai");
-      return getModels("anthropic").map((m: any) => ({ id: String(m.id), name: String(m.name || m.id) }));
+      const models = await buildModels();
+      return models.getModels("anthropic").map((m: any) => ({ id: String(m.id), name: String(m.name || m.id) }));
     },
   };
 }

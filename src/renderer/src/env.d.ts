@@ -172,7 +172,7 @@ export interface SettingsPayload {
   monitor: { notify: boolean };
   sources: { baseUrl: string; model: string; key: string };
   hasKey: boolean;
-  encryptionAvailable: boolean;
+  keyStorage: "local";
   resolvedModel: string;
   resolvedTheme: "light" | "dark";
 }

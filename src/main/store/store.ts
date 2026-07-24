@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 // 持久化仓储契约。组件/服务只依赖这个接口；实现可从 JSON-file 换到 SQLite，
 // 无需改上层。见 openspec/changes/app-shell/design.md D2/D6。
@@ -35,7 +35,7 @@ export interface Settings {
   appearance: AppearanceSettings;
   monitor: MonitorSettings;
   activity: ActivitySettings;
-  apiKeyEnc?: string; // safeStorage 加密后的 base64；明文永不落盘
+  apiKeyEnc?: string; // 本地保存的 API key 载荷；字段名沿用旧 schema，避免迁移。
 }
 
 export interface Workspace {

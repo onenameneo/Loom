@@ -1,4 +1,3 @@
-import { safeStorage } from "electron";
 import type { Store } from "./store/store";
 
 export type SourceKind = "settings" | "env" | "default";
@@ -17,13 +16,11 @@ export interface AccessSource {
 }
 
 const DEFAULT_MODEL = "claude-sonnet-4-5";
+const LOCAL_KEY_PREFIX = "local:";
+const LEGACY_PLAIN_PREFIX = "plain:";
 
-export function encryptionAvailable(): boolean {
-  try {
-    return safeStorage.isEncryptionAvailable();
-  } catch {
-    return false;
-  }
+export function keyStorageKind(): "local" {
+  return "local";
 }
 
 export function saveApiKey(store: Store, plain: string): { encrypted: boolean } {
@@ -31,28 +28,22 @@ export function saveApiKey(store: Store, plain: string): { encrypted: boolean } 
     store.setApiKeyEnc(undefined);
     return { encrypted: false };
   }
-  if (encryptionAvailable()) {
-    const enc = safeStorage.encryptString(plain).toString("base64");
-    store.setApiKeyEnc(enc);
-    return { encrypted: true };
-  }
-  // 加密不可用（少数 Linux 无 keychain）：不静默明文，交由 UI 告知；
-  // 这里以带前缀的明文兜底存储，读时能识别。
-  store.setApiKeyEnc(`plain:${Buffer.from(plain).toString("base64")}`);
+  store.setApiKeyEnc(`${LOCAL_KEY_PREFIX}${Buffer.from(plain, "utf-8").toString("base64")}`);
   return { encrypted: false };
 }
 
 export function readApiKey(store: Store): string {
   const enc = store.getApiKeyEnc();
   if (!enc) return "";
-  if (enc.startsWith("plain:")) {
-    return Buffer.from(enc.slice(6), "base64").toString("utf-8");
+  if (enc.startsWith(LOCAL_KEY_PREFIX)) {
+    return Buffer.from(enc.slice(LOCAL_KEY_PREFIX.length), "base64").toString("utf-8");
   }
-  try {
-    return safeStorage.decryptString(Buffer.from(enc, "base64"));
-  } catch {
-    return "";
+  if (enc.startsWith(LEGACY_PLAIN_PREFIX)) {
+    return Buffer.from(enc.slice(LEGACY_PLAIN_PREFIX.length), "base64").toString("utf-8");
   }
+  // Legacy safeStorage values intentionally do not decrypt here. Decrypting on macOS
+  // can trigger a Keychain prompt during app launch; re-save the key to migrate.
+  return "";
 }
 
 // 设置优先、env 回退。沿用 P0 的 baseUrl/model 语义。

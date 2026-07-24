@@ -9,14 +9,14 @@ import { registerAcp } from "./acp";
 import { registerCollector } from "./collector";
 import {
   accessSources,
-  encryptionAvailable,
+  keyStorageKind,
   resolveModelConfig,
   saveApiKey,
 } from "./settings";
 import { platformWindowOptions } from "./windowOptions";
 
 // ---------------------------------------------------------------------------
-// 主进程：持久化(store) + 设置(safeStorage) + 会话 + 画布引擎(pi 多节点)。
+// 主进程：持久化(store) + 设置 + 会话 + 画布引擎(pi 多节点)。
 // 模型配置走「设置优先、env 回退」(resolveModelConfig)。对话/分支画布逻辑在
 // canvas.ts（每节点一个 pi Agent + 自定义 convertToLlm 分支上下文装配）。
 // ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ function registerIpc() {
       monitor: s.monitor,
       sources: accessSources(store),
       hasKey: Boolean(store.getApiKeyEnc()) || Boolean(process.env.ANTHROPIC_API_KEY),
-      encryptionAvailable: encryptionAvailable(),
+      keyStorage: keyStorageKind(),
       resolvedModel: resolveModelConfig(store).model,
       resolvedTheme: resolvedTheme(),
     };

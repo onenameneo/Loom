@@ -45,7 +45,7 @@ export default function App() {
         monitor: { notify: true },
         sources: { baseUrl: "default", model: "default", key: "none" },
         hasKey: false,
-        encryptionAvailable: true,
+        keyStorage: "local",
         resolvedModel: "claude-sonnet-4-5",
         resolvedTheme: "light",
       });

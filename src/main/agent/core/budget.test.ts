@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { budget, estTokens, ownChars } from "./budget";
 import type { CanvasNodeModel } from "./graph";
 

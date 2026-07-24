@@ -591,12 +591,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
             onChange={(e) => setKeyInput(e.target.value)}
           />
         </label>
-        {!s.encryptionAvailable && (
-          <div className="warn-note">系统加密不可用，key 将以明文存储（本机 keychain 缺失）。</div>
-        )}
-        {s.encryptionAvailable && (
-          <div className="ok-note">key 经系统加密后存储，磁盘上无明文。</div>
-        )}
+        <div className="warn-note">key 保存在本机应用数据中，不使用系统钥匙串。</div>
       </section>
 
       <section>

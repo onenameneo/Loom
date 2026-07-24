@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AgentEvent, AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { createHookRegistry } from "./hooks";
 import type { AgentHook, HookToolCallContext, HookToolResultContext } from "../ports";
 
