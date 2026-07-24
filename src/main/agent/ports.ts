@@ -1,5 +1,5 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
-import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import type { ImageContent, TextContent, Usage } from "@earendil-works/pi-ai";
 import type { Store } from "../store/store";
 
 // ---------------------------------------------------------------------------
@@ -89,6 +89,7 @@ export interface HookToolResultContext extends HookToolCallContext {
   content: (TextContent | ImageContent)[];
   details: unknown;
   isError: boolean;
+  usage?: Usage;
 }
 
 /** 对工具结果的部分覆写（→ pi AfterToolCallResult，逐字段替换，无深合并）。 */
@@ -96,6 +97,7 @@ export interface ResultOverride {
   content?: (TextContent | ImageContent)[];
   details?: unknown;
   isError?: boolean;
+  usage?: Usage;
   terminate?: boolean;
 }
 

@@ -1,5 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Message } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Message, Usage, UserMessage } from "@earendil-works/pi-ai";
 import type { CanvasNodeModel, Seed } from "./graph";
 
 // ---------------------------------------------------------------------------
@@ -11,8 +11,15 @@ import type { CanvasNodeModel, Seed } from "./graph";
 // 纯函数：祖先链由 ② 预先解析后传入，不在此摸运行时缓存。
 // ---------------------------------------------------------------------------
 
-/** 发给 provider 的最小消息（只认 role + content）。 */
-export type LlmMessage = { role: string; content: unknown; timestamp: number };
+/** 合成祖先 assistant 消息所需的零用量；provider 元数据保持完整 Message 契约。 */
+const CONTEXT_USAGE: Usage = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
 
 export function roleOf(msg: AgentMessage): string {
   return typeof (msg as any)?.role === "string" ? (msg as any).role : "custom";
@@ -38,16 +45,25 @@ export function textOf(msg: AgentMessage): string {
     .join("");
 }
 
-function userMsg(text: string, now: number): LlmMessage {
+function userMsg(text: string, now: number): UserMessage {
   return { role: "user", content: text, timestamp: now };
 }
-function asstMsg(text: string, now: number): LlmMessage {
-  return { role: "assistant", content: [{ type: "text", text }], timestamp: now };
+function asstMsg(text: string, now: number): AssistantMessage {
+  return {
+    role: "assistant",
+    content: [{ type: "text", text }],
+    api: "pi-messages",
+    provider: "loom-context",
+    model: "loom-context",
+    usage: CONTEXT_USAGE,
+    stopReason: "stop",
+    timestamp: now,
+  };
 }
 
 /** 祖先链的对话消息（按 root→父 顺序，user/assistant 交替，空文本跳过）。 */
-export function ancestorMessages(ancestors: CanvasNodeModel[], now = 0): LlmMessage[] {
-  const out: LlmMessage[] = [];
+export function ancestorMessages(ancestors: CanvasNodeModel[], now = 0): Message[] {
+  const out: Message[] = [];
   for (const n of ancestors) {
     for (const m of n.messages) {
       const text = textOf(m);
@@ -60,7 +76,7 @@ export function ancestorMessages(ancestors: CanvasNodeModel[], now = 0): LlmMess
 }
 
 /** seed 片段包成一条用户侧上下文消息，注入子节点上下文顶部。 */
-export function seedMessage(seed: Seed, now = 0): LlmMessage {
+export function seedMessage(seed: Seed, now = 0): UserMessage {
   return userMsg(`（上下文）我以下面这段为出发点继续追问：\n「${seed.text}」`, now);
 }
 
@@ -75,10 +91,10 @@ export function buildContextPlan(
   ownMessages: AgentMessage[],
   ancestors: CanvasNodeModel[],
   now = 0,
-): LlmMessage[] {
-  const out: LlmMessage[] = [];
+): Message[] {
+  const out: Message[] = [];
   if (node.mountAncestors) out.push(...ancestorMessages(ancestors, now));
   if (node.seed) out.push(seedMessage(node.seed, now));
-  out.push(...(ownMessages.filter(isLlmMessage) as unknown as LlmMessage[]));
+  out.push(...ownMessages.filter(isLlmMessage));
   return out;
 }

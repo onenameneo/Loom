@@ -1,5 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { NodeLayout, NodeRecord, PersistedMessage } from "../../store/store";
 import { saveNodeLayout, saveNodeLayouts } from "../../store/layoutPersistence";
 import { ancestorChain, descendants, type Seed } from "../core/graph";
@@ -49,7 +49,7 @@ export interface SessionDeps {
   getApiKey: () => string | undefined;
   /** 注入引擎工厂：由组装根提供 pi 适配器；session 只认端口。 */
   createEngine: (hooks: {
-    buildContext: (nodeId: string, own: AgentMessage[]) => any;
+    buildContext: (nodeId: string, own: AgentMessage[]) => Message[] | Promise<Message[]>;
     getNodeInit: (nodeId: string) => NodeInit | undefined;
     dispatcher: HookDispatcher;
   }) => LlmEnginePort;
@@ -117,11 +117,11 @@ export function createAgentSession(deps: SessionDeps) {
   }
 
   // convertToLlm 委托：本节点发送前，交 ① 核心装配 [祖先? → seed? → 本节点历史]。
-  function buildContext(nodeId: string, own: AgentMessage[]) {
+  function buildContext(nodeId: string, own: AgentMessage[]): Message[] {
     const node = nodes.get(nodeId);
-    if (!node) return own.filter(isLlmMessage) as any;
+    if (!node) return own.filter(isLlmMessage);
     const ancestors = node.mountAncestors ? ancestorsOf(nodeId) : [];
-    return buildContextPlan(node, own, ancestors, clock.now()) as any;
+    return buildContextPlan(node, own, ancestors, clock.now());
   }
 
   function getNodeInit(nodeId: string): NodeInit | undefined {

@@ -1,4 +1,11 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type {
+  AfterToolCallContext,
+  Agent,
+  AgentEvent,
+  AgentMessage,
+  BeforeToolCallContext,
+} from "@earendil-works/pi-agent-core";
+import type { Message } from "@earendil-works/pi-ai";
 import type { EngineHandle, EventSinkPort, HookDispatcher, LlmEnginePort, NodeInit } from "../ports";
 
 // ---------------------------------------------------------------------------
@@ -20,7 +27,7 @@ export interface PiEngineDeps {
   /** 现取模型配置（设置优先、env 回退）。 */
   resolveModel: () => ResolvedModelConfig;
   /** convertToLlm 委托：某节点发送前，交 ① 核心装配上下文。返回 pi Message[]。 */
-  buildContext: (nodeId: string, own: AgentMessage[]) => any;
+  buildContext: (nodeId: string, own: AgentMessage[]) => Message[] | Promise<Message[]>;
   /** 创建引擎时读取节点初值（系统提示 / 模型 / 初始转写）。 */
   getNodeInit: (nodeId: string) => NodeInit | undefined;
   /** hook 分发器：pi 的 before/afterToolCall/transformContext/事件转发至此。 */
@@ -29,7 +36,7 @@ export interface PiEngineDeps {
 
 export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
   const { events, resolveModel, buildContext, getNodeInit, dispatcher } = deps;
-  const cache = new Map<string, { agent: any; handle: EngineHandle }>();
+  const cache = new Map<string, { agent: Agent; handle: EngineHandle }>();
 
   async function buildModels() {
     const [{ createModels }, { anthropicProvider }] = await Promise.all([
@@ -45,7 +52,7 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
   async function buildModel(models: Awaited<ReturnType<typeof buildModels>>, modelId?: string) {
     const cfg = resolveModel();
     const selected = modelId || cfg.model;
-    const known = models.getModels("anthropic").some((m: any) => m.id === selected);
+    const known = models.getModels("anthropic").some((m) => m.id === selected);
     const base = models.getModel("anthropic", known ? selected : "claude-sonnet-4-5");
     if (!base) throw new Error(`未找到可用的模型模板（model=${selected}）。`);
     const model = { ...base };
@@ -57,7 +64,7 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
     return model;
   }
 
-  function wrap(agent: any): EngineHandle {
+  function wrap(agent: Agent): EngineHandle {
     return {
       prompt: (msg) => agent.prompt(msg),
       continue: () => agent.continue(),
@@ -88,15 +95,15 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
       streamFn: models.streamSimple.bind(models),
       getApiKey: async () => resolveModel().apiKey,
       // ★ 分支上下文引擎：本节点发消息前，委托 ① 核心装配上下文。
-      convertToLlm: (own: any[]) => buildContext(nodeId, own),
+      convertToLlm: (own: AgentMessage[]) => buildContext(nodeId, own),
       // ★ Hook 扩展面（装一次即冻结）：pi 的钩子映射成中性上下文，转交分发器。
       //   空注册表下：transformContext 恒等、before/after 返回 undefined → 行为中性。
       transformContext: (messages: AgentMessage[]) => dispatcher.contextTransform(messages),
-      beforeToolCall: async ({ toolCall, args }: any) => {
+      beforeToolCall: async ({ toolCall, args }: BeforeToolCallContext) => {
         const d = await dispatcher.toolCall({ nodeId, toolName: toolCall.name, toolCallId: toolCall.id, args });
         return d ? { block: true, reason: d.reason } : undefined;
       },
-      afterToolCall: ({ toolCall, args, result, isError }: any) =>
+      afterToolCall: ({ toolCall, args, result, isError }: AfterToolCallContext) =>
         dispatcher.toolResult({
           nodeId,
           toolName: toolCall.name,
@@ -105,10 +112,11 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
           content: result.content,
           details: result.details,
           isError,
+          usage: result.usage,
         }),
     });
 
-    agent.subscribe((event: any) => {
+    agent.subscribe((event: AgentEvent) => {
       switch (event.type) {
         case "agent_start":
           events.emit(nodeId, "thinking");
@@ -144,7 +152,7 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
     },
     async listModels() {
       const models = await buildModels();
-      return models.getModels("anthropic").map((m: any) => ({ id: String(m.id), name: String(m.name || m.id) }));
+      return models.getModels("anthropic").map((m) => ({ id: String(m.id), name: String(m.name || m.id) }));
     },
   };
 }

@@ -9,6 +9,14 @@ const resultCtx: HookToolResultContext = {
   content: [{ type: "text", text: "raw" }],
   details: undefined,
   isError: false,
+  usage: {
+    input: 1,
+    output: 2,
+    cacheRead: 3,
+    cacheWrite: 4,
+    totalTokens: 3,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  },
 };
 const msg = (text: string): AgentMessage => ({ role: "user", content: text, timestamp: 0 }) as AgentMessage;
 const evt: AgentEvent = { type: "agent_start" };
@@ -47,12 +55,33 @@ describe("createHookRegistry · toolResult（链式合并）", () => {
       name: "flag",
       onToolResult: (ctx) => {
         seen.push((ctx.content[0] as any).text); // 应看到上一步的 REDACTED
-        return { isError: true };
+        return {
+          isError: true,
+          usage: {
+            input: 5,
+            output: 6,
+            cacheRead: 7,
+            cacheWrite: 8,
+            totalTokens: 11,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+        };
       },
     });
     const o = await r.toolResult(resultCtx);
     expect(seen).toEqual(["raw", "REDACTED"]);
-    expect(o).toEqual({ content: [{ type: "text", text: "REDACTED" }], isError: true });
+    expect(o).toEqual({
+      content: [{ type: "text", text: "REDACTED" }],
+      isError: true,
+      usage: {
+        input: 5,
+        output: 6,
+        cacheRead: 7,
+        cacheWrite: 8,
+        totalTokens: 11,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+    });
   });
 
   it("无覆盖 → undefined", async () => {

@@ -28,6 +28,7 @@ function mergeOverride(prev: ResultOverride | undefined, next: ResultOverride): 
   if (next.content !== undefined) out.content = next.content;
   if ("details" in next) out.details = next.details;
   if (next.isError !== undefined) out.isError = next.isError;
+  if (next.usage !== undefined) out.usage = next.usage;
   if (next.terminate !== undefined) out.terminate = next.terminate;
   return out;
 }
@@ -40,6 +41,7 @@ function applyOverride(ctx: HookToolResultContext, o: ResultOverride | undefined
     content: o.content !== undefined ? o.content : ctx.content,
     details: "details" in o ? o.details : ctx.details,
     isError: o.isError !== undefined ? o.isError : ctx.isError,
+    usage: o.usage !== undefined ? o.usage : ctx.usage,
   };
 }
 

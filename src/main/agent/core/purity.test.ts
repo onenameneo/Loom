@@ -18,7 +18,7 @@ function forbiddenAlways(mod: string): boolean {
 }
 /** 允许 `import type`，但禁止值导入。 */
 function forbiddenAsValue(mod: string): boolean {
-  return mod.startsWith("@mariozechner/");
+  return mod.startsWith("@earendil-works/pi-") || mod.startsWith("@mariozechner/");
 }
 
 function coreSourceFiles(): string[] {

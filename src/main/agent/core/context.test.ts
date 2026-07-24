@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { LoomUiMessage } from "./messages";
 import { buildContextPlan, isLlmMessage, roleOf, textOf } from "./context";
 import type { CanvasNodeModel } from "./graph";
 
 const user = (text: string): AgentMessage => ({ role: "user", content: text, timestamp: 0 }) as AgentMessage;
 const asst = (text: string): AgentMessage =>
   ({ role: "assistant", content: [{ type: "text", text }], timestamp: 0 }) as AgentMessage;
-const uiOnly = (): AgentMessage => ({ role: "custom", content: "chip", timestamp: 0 }) as unknown as AgentMessage;
+const uiOnly = (): LoomUiMessage => ({ role: "loomUi", kind: "chip", content: "chip", timestamp: 0 });
 
 function ancestor(id: string, ...messages: AgentMessage[]): CanvasNodeModel {
   return { id, mountAncestors: false, messages };

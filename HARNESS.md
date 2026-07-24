@@ -95,6 +95,25 @@ src/main/
 | pi-ai `isContextOverflow()` | ② 触发压缩 | H3 |
 | `CustomAgentMessages`（声明合并） | ① 自定义消息类型（seed chip / compactionSummary / branchSummary） | H1/H3 |
 
+## 4.1 类型分层规范：原子 → 分子 → 材料
+
+Loom 遵循 pi-coding-agent 的类型构造方式，但不把 pi 类型误当成业务模型。每层只解决本层的问题，向外组合，不能反向泄漏：
+
+| 层级 | 所属 | 代表类型 | 规则 |
+|---|---|---|---|
+| **原子** | `pi-ai` | `Message`、`UserMessage`、`AssistantMessage`、`ToolResultMessage`、内容块、`Usage`、`Model` | provider 可理解的最小协议。任何送进 `convertToLlm` 的值必须是完整 `Message`，不得自造只含 `role/content` 的近似结构。 |
+| **分子** | `pi-agent-core` | `AgentMessage`、`AgentTool`、`AgentEvent`、`BeforeToolCallContext`、`AfterToolCallResult` | agent 运行时组合出的协议。工具/事件/转写在此层表达；`AgentMessage` 是原子消息和业务消息的联合。 |
+| **材料** | Loom `agent/core` | `CanvasNodeModel`、`Seed`、`LoomUiMessage`、上下文/预算/权限规则 | Loom 的业务语义。自定义转写通过 `CustomAgentMessages` 声明合并注册，并在 `convertToLlm` 明确转换或过滤。 |
+
+落地约束：
+
+- ① `core` 只可 `import type` 引用 pi 类型；不得调用 pi 值、Electron、sqlite 或适配器。
+- ② `app` 可使用分子类型编排生命周期，但通过 ③ 端口驱动运行时，不能构造 `Agent` 或 provider。
+- ③ `ports` 可以引用稳定的 pi 类型作为跨层数据契约；接口字段表达 Loom 需要的最小能力，不透传 pi 实例。
+- ④ `adapters/piEngine.ts` 是 pi 运行时值唯一入口；在此完成 pi 分子和 Loom 中性 Hook 上下文的双向映射。
+- `convertToLlm` 是材料降级为原子的唯一出口：保留 `Message`，转换需要送达模型的 Loom 消息，过滤纯 UI 消息；返回安全回退而非抛错。
+- Hook 覆写必须覆盖 pi 的完整字段语义。当前 `ResultOverride` 与 `AfterToolCallResult` 对齐：`content`、`details`、`isError`、`usage`、`terminate`，均按字段替换、无深合并。
+
 ## 5. 现状 → 目标：canvas.ts 拆解
 
 现在 [canvas.ts](src/main/canvas.ts)（约 557 行）一肩挑 5 件事，H0 按圈拆开：
