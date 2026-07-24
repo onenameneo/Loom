@@ -3,7 +3,7 @@ import { useLayoutEffect } from "react";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { ReactFlowProvider, useStoreApi } from "@xyflow/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatThreadNode } from "./ChatThreadNode";
+import { ChatThreadNode, selectionToolbarFromRects } from "./ChatThreadNode";
 import "./canvas.css";
 
 vi.mock("@xyflow/react", async (importOriginal) => {
@@ -73,4 +73,25 @@ describe("ChatThreadNode resize control geometry", () => {
       expect(control.style.bottom).toBe("0px");
     },
   );
+});
+
+describe("ChatThreadNode selection toolbar geometry", () => {
+  it("converts viewport selection coordinates back into unscaled node coordinates", () => {
+    const toolbar = selectionToolbarFromRects({
+      text: "Claude",
+      selection: { left: 240, top: 300, bottom: 318, width: 54, height: 18 },
+      container: { left: 120, top: 180, bottom: 510, width: 270, height: 330 },
+      scrollLeft: 0,
+      scrollTop: 0,
+      clientWidth: 360,
+      zoom: 0.75,
+    });
+
+    expect(toolbar).toMatchObject({
+      text: "Claude",
+      x: 196,
+      y: 144,
+      place: "top",
+    });
+  });
 });

@@ -109,7 +109,6 @@ export function AppTitlebar({
           </span>
         )}
         <span className="titlebar-title">{context.title}</span>
-        {context.mode && <span className="titlebar-mode">{context.mode}</span>}
         {context.subtitle && <span className="titlebar-subtitle">{context.subtitle}</span>}
       </div>
       <span className={isMacElectron ? "titlebar-drag-space" : "titlebar-flex-space"} aria-hidden="true" />

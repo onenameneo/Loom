@@ -104,7 +104,7 @@ describe("global titlebar", () => {
     );
 
     expect(screen.getByText("研究 Transformer")).toBeTruthy();
-    expect(screen.getByText("画布")).toBeTruthy();
+    expect(screen.queryByText("画布")).toBeNull();
     expect(screen.getByText("整理").closest(".titlebar-interactive")).toBeTruthy();
   });
 

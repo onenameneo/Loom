@@ -15,7 +15,10 @@ export default function Workspace({
   noKey,
   goSettings,
   focusNodeId,
+  chatNodeId,
   onFocusedNode,
+  onChatNodeChange,
+  onModeChange,
   onTreeChange,
 }: {
   workspaceId: string;
@@ -24,27 +27,36 @@ export default function Workspace({
   noKey: boolean;
   goSettings: () => void;
   focusNodeId?: string | null;
+  chatNodeId?: string | null;
   onFocusedNode?: () => void;
+  onChatNodeChange?: (nodeId: string | null) => void;
+  onModeChange?: (mode: "chat" | "canvas") => void;
   onTreeChange?: () => void;
 }) {
-  const [root, setRoot] = useState<CanvasNodeDto | null>(null);
+  const [nodeList, setNodeList] = useState<CanvasNodeDto[]>([]);
   const [nodeCount, setNodeCount] = useState(1);
-  const [forceCanvas, setForceCanvas] = useState(false);
+  const [viewMode, setViewMode] = useState<"auto" | "chat" | "canvas">("auto");
 
   const reload = useCallback(async () => {
     let dtos: CanvasNodeDto[];
     if (window.api) dtos = await window.api.canvas.open(workspaceId);
     else dtos = [{ id: "root", workspaceId, title: "主线", mountAncestors: false, messages: [] }];
-    setRoot(dtos.find((d) => !d.parentId) ?? dtos[0] ?? null);
+    setNodeList(dtos);
     setNodeCount(dtos.length);
   }, [workspaceId]);
 
   useEffect(() => {
-    setForceCanvas(false);
+    setViewMode("auto");
     reload();
   }, [workspaceId, reload]);
 
-  const isCanvas = forceCanvas || nodeCount > 1;
+  const isCanvas = viewMode === "canvas" || (viewMode === "auto" && nodeCount > 1);
+  const root = nodeList.find((d) => !d.parentId) ?? nodeList[0] ?? null;
+  const chatNode = nodeList.find((d) => d.id === chatNodeId) ?? root;
+
+  useEffect(() => {
+    onModeChange?.(isCanvas ? "canvas" : "chat");
+  }, [isCanvas, onModeChange]);
 
   const titlebarContext = useMemo(
     () => ({
@@ -56,44 +68,51 @@ export default function Workspace({
   useTitlebarContext(titlebarContext);
 
   const expandCanvas = useCallback(() => {
-    setForceCanvas(true);
+    setViewMode("canvas");
   }, []);
+
+  const returnChat = useCallback(async (nodeId?: string) => {
+    onChatNodeChange?.(nodeId ?? null);
+    await reload();
+    setViewMode("chat");
+  }, [onChatNodeChange, reload]);
 
   const branchFromChat = useCallback(
     async (seedText: string) => {
-      if (!root) return;
+      if (!chatNode) return;
       if (window.api) {
         await window.api.canvas.create({
           workspaceId,
-          parentId: root.id,
-          seed: { text: seedText, from: root.title || "主线", parent: root.id },
+          parentId: chatNode.id,
+          seed: { text: seedText, from: chatNode.title || "主线", parent: chatNode.id },
         });
       }
-      setForceCanvas(true); // 切到画布；Canvas 会自行 open 载入 root+新分支
+      setViewMode("canvas"); // 切到画布；Canvas 会自行 open 载入 root+新分支
       onTreeChange?.();
     },
-    [root, workspaceId, workspaceName, onTreeChange],
+    [chatNode, workspaceId, onTreeChange],
   );
 
   return (
     <div className="surface-fill">
-      {isCanvas || !root ? (
+      {isCanvas || !chatNode ? (
         <div className="canvas-wrap">
           <Canvas
             workspaceId={workspaceId}
             model={model}
             focusNodeId={focusNodeId}
             onFocused={onFocusedNode}
+            onReturnChat={returnChat}
             onTreeChange={onTreeChange}
           />
         </div>
       ) : (
         <ChatView
-          nodeId={root.id}
-          initialMessages={root.messages}
-          initialMount={root.mountAncestors}
-          systemPrompt={root.systemPrompt}
-          model={root.model || model}
+          nodeId={chatNode.id}
+          initialMessages={chatNode.messages}
+          initialMount={chatNode.mountAncestors}
+          systemPrompt={chatNode.systemPrompt}
+          model={chatNode.model || model}
           onBranch={branchFromChat}
           onExpandCanvas={expandCanvas}
           noKey={noKey}

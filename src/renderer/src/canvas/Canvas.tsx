@@ -19,7 +19,7 @@ import { CanvasTitlebarActions, CanvasZoomControls } from "./CanvasControls";
 import { useCanvasLayoutPersistence, useCanvasLayoutStore } from "./CanvasLayoutContext";
 import { ChatThreadNode } from "./ChatThreadNode";
 import { BranchContext } from "./branch";
-import { applyTidyPositions, readNodeLayout, resolveNodeLayout } from "./layout";
+import { applyTidyPositions, findBranchPlacement, readNodeLayout, resolveNodeLayout } from "./layout";
 import { finishResizeInteraction, guardResizeNodeChanges } from "./resizeLifecycle";
 import { ResizeSession } from "./resizeSession";
 
@@ -31,7 +31,8 @@ const ROOT_Y = 48;
 const CARD_W = 360;
 const NODE_H = 440; // 卡片默认高度（更高；可经 NodeResizer 拖拽改）
 const GAP_X = 150; // 父子之间的水平间距（子节点在父的右侧，拉开距离）
-const ROW_H = 300; // 兄弟/叶子之间的纵向间距（配合更高的卡片）
+const ROW_H = 520; // 兄弟/叶子之间的纵向间距（默认卡片高 440，留出阅读和工具条空间）
+const READABLE_FIT_ZOOM = 0.82;
 
 function viewportDuration() {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : 220;
@@ -130,12 +131,14 @@ export default function Canvas({
   model,
   focusNodeId,
   onFocused,
+  onReturnChat,
   onTreeChange,
 }: {
   workspaceId: string;
   model?: string;
   focusNodeId?: string | null;
   onFocused?: () => void;
+  onReturnChat?: (nodeId: string) => void;
   onTreeChange?: () => void;
 }) {
   const [nodes, setNodes, applyNodesChange] = useNodesState<Node>([]);
@@ -451,8 +454,9 @@ export default function Canvas({
         }
         treeChangeRef.current?.();
       },
+      onReturnChat: (id: string) => onReturnChat?.(id),
     }),
-    [applyResizeLayout, layoutStore, removeIds, setNodes, workspaceId],
+    [applyResizeLayout, layoutStore, onReturnChat, removeIds, setNodes, workspaceId],
   );
 
   // 载入（或初始化）本会话的节点树
@@ -541,19 +545,25 @@ export default function Canvas({
       const baseX = src ? src.position.x : ROOT_X;
       const baseY = src ? src.position.y : ROOT_Y;
       const siblings = nodes.filter((n) => (n.data as any)?.seed?.parent === sourceId).length;
-      const initialLayout = {
+      const preferredLayout = {
         x: baseX + CARD_W + GAP_X,
         y: baseY + siblings * ROW_H,
         width: CARD_W,
         height: NODE_H,
       };
+      const initialLayout = findBranchPlacement({
+        existing: nodes.map(readNodeLayout),
+        preferred: preferredLayout,
+        gapX: GAP_X,
+        rowH: ROW_H,
+      });
       setNodes((nds) => {
         const newNode: Node = {
           id,
           type: "chatThread",
           dragHandle: ".card__head",
           style: { width: initialLayout.width, height: initialLayout.height },
-          // 出现在来源节点的右侧、拉开距离；多个兄弟纵向错开
+          // 出现在来源节点的右侧，必要时做轻量避让，避免压到已有分支。
           position: { x: initialLayout.x, y: initialLayout.y },
           data: {
             workspaceId,
@@ -603,7 +613,12 @@ export default function Canvas({
 
   const titlebarCallbacksRef = useRef({ onFit: () => {}, onTidy: () => {} });
   titlebarCallbacksRef.current.onFit = () => {
-    void flowRef.current?.fitView({ padding: 0.28, maxZoom: 1, duration: viewportDuration() });
+    void flowRef.current?.fitView({
+      padding: 0.28,
+      minZoom: READABLE_FIT_ZOOM,
+      maxZoom: 1,
+      duration: viewportDuration(),
+    });
   };
   titlebarCallbacksRef.current.onTidy = tidyLayout;
   const titlebarActions = useMemo(
@@ -671,7 +686,7 @@ export default function Canvas({
         }}
         onMove={(_, viewport) => setZoom(viewport.zoom)}
         defaultEdgeOptions={defaultEdgeOptions}
-        minZoom={0.3}
+        minZoom={0.55}
         maxZoom={1.6}
         proOptions={{ hideAttribution: true }}
       >

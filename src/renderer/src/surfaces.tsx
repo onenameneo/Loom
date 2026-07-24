@@ -35,6 +35,10 @@ export interface SurfaceCtx {
   theme: "light" | "dark";
   focusNodeId?: string | null;
   clearFocusNode?: () => void;
+  chatNodeId?: string | null;
+  setChatNodeId: (nodeId: string | null) => void;
+  workspaceMode: "chat" | "canvas";
+  setWorkspaceMode: (mode: "chat" | "canvas") => void;
   treeVersion: number;
   bumpTreeVersion: () => void;
   agentCount: number;
@@ -80,7 +84,10 @@ function WorkspacePanel({ ctx }: { ctx: SurfaceCtx }) {
       noKey={Boolean(noKey)}
       goSettings={ctx.goSettings}
       focusNodeId={ctx.focusNodeId}
+      chatNodeId={ctx.chatNodeId}
       onFocusedNode={ctx.clearFocusNode}
+      onChatNodeChange={ctx.setChatNodeId}
+      onModeChange={ctx.setWorkspaceMode}
       onTreeChange={ctx.bumpTreeVersion}
     />
   );

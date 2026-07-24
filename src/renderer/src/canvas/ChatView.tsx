@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import type { NodeBudget, NodeMsg } from "../env";
-import { IconSplit } from "../icons";
+import { IconSplit, IconWorkspace } from "../icons";
 import { Message } from "../message/Message";
 import { Composer, type ComposerImage } from "../composer/Composer";
 import { useTitlebarActions } from "../titlebar/Titlebar";
@@ -70,12 +70,13 @@ export default function ChatView({
     () => (
       <>
         <button
-          className="head-btn"
+          className="titlebar-button canvas-titlebar-action"
           type="button"
           onClick={onExpandCanvas}
-          title="把这段对话摊到无限画布上"
+          aria-label="展开画布"
+          title="展开画布"
         >
-          展开画布
+          <IconWorkspace size={15} />
         </button>
         {noKey && (
           <button className="chip-warn" type="button" onClick={openSettings}>

@@ -242,15 +242,6 @@ body {
   font-size: 13px;
   font-weight: 600;
 }
-.titlebar-mode {
-  flex: none;
-  padding: 2px 7px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  color: var(--faint);
-  font-family: var(--font-mono);
-  font-size: 10px;
-}
 .titlebar-subtitle {
   min-width: 0;
   overflow: hidden;
@@ -1538,6 +1529,14 @@ button.activity-session-card {
 .sb-branch:hover {
   color: var(--text);
   background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+.sb-branch.active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-weight: 500;
+}
+.sb-branch.active .branch-dot {
+  background: var(--accent);
 }
 .sb-branch span:last-child {
   overflow: hidden;

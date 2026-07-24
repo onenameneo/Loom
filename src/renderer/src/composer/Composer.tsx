@@ -46,6 +46,7 @@ export function Composer({
   const [slashOpen, setSlashOpen] = useState(false);
   const [images, setImages] = useState<ComposerImage[]>([]);
   const [modelOptions, setModelOptions] = useState<{ id: string; name: string }[]>([]);
+  const composingRef = useRef(false);
 
   const insertText = useCallback(
     (text: string) => {
@@ -163,7 +164,16 @@ export function Composer({
           }}
           onFocus={() => setSlashOpen(value.startsWith("/"))}
           onBlur={() => window.setTimeout(() => setSlashOpen(false), 120)}
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            composingRef.current = false;
+          }}
           onKeyDown={(event) => {
+            const nativeEvent = event.nativeEvent as KeyboardEvent & { keyCode?: number };
+            const isComposing = composingRef.current || event.nativeEvent.isComposing || nativeEvent.keyCode === 229;
+            if (isComposing) return;
             if (slashOpen && ["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) {
               slashRef.current?.handleKeyDown(event);
               return;

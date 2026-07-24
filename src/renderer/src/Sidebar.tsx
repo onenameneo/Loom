@@ -49,7 +49,7 @@ export default function Sidebar({
   activeSurface: string;
   setSurface: (id: string) => void;
   ctx: SurfaceCtx;
-  onSelectWorkspace: (id: string) => void;
+  onSelectWorkspace: (id: string) => void | Promise<void>;
   onFocusNode: (workspaceId: string, nodeId: string) => void;
   onCreateWorkspace: () => void;
   onRenameWorkspace: (id: string, name: string) => void;
@@ -215,6 +215,7 @@ export default function Sidebar({
           {ctx.workspaces.map((w: WorkspaceMeta) => {
             const isExp = expanded.has(w.id);
             const rows = isExp ? outlineRows(outlines[w.id] ?? []) : [];
+            const activeNodeId = ctx.workspaceMode === "canvas" ? ctx.focusNodeId : ctx.chatNodeId;
             return (
               <Fragment key={w.id}>
                 <div
@@ -272,7 +273,7 @@ export default function Sidebar({
                     {rows.map(({ node, depth }) => (
                       <button
                         key={node.id}
-                        className="sb-branch"
+                        className={`sb-branch ${ctx.activeWorkspaceId === w.id && (activeNodeId === node.id || (!activeNodeId && depth === 0)) ? "active" : ""}`}
                         style={{ paddingLeft: 30 + depth * 14 }}
                         onClick={() => onFocusNode(w.id, node.id)}
                         title={node.title}

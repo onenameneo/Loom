@@ -18,6 +18,8 @@ export default function App() {
   const [workspaces, setWorkspaces] = useState<WorkspaceMeta[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const [chatNodeId, setChatNodeId] = useState<string | null>(null);
+  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "canvas">("chat");
   const [treeVersion, setTreeVersion] = useState(0);
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -184,6 +186,10 @@ export default function App() {
     theme,
     focusNodeId,
     clearFocusNode: () => setFocusNodeId(null),
+    chatNodeId,
+    setChatNodeId,
+    workspaceMode,
+    setWorkspaceMode,
     treeVersion,
     bumpTreeVersion: () => setTreeVersion((v) => v + 1),
     agentCount: agents.length,
@@ -220,14 +226,26 @@ export default function App() {
                 activeSurface={activeSurface}
                 setSurface={setActiveSurface}
                 ctx={ctx}
-                onSelectWorkspace={(id) => {
+                onSelectWorkspace={async (id) => {
                   setActiveWorkspaceId(id);
-                  setFocusNodeId(null);
+                  if (workspaceMode !== "canvas") {
+                    setFocusNodeId(null);
+                    setChatNodeId(null);
+                    return;
+                  }
+                  const nodes = window.api ? await window.api.canvas.list(id) : [];
+                  const root = nodes.find((node) => !node.parentId) ?? nodes[0];
+                  setFocusNodeId(root?.id ?? null);
                 }}
                 onFocusNode={(workspaceId, nodeId) => {
                   setActiveWorkspaceId(workspaceId);
                   setActiveSurface("workspace");
-                  setFocusNodeId(nodeId);
+                  if (workspaceMode === "canvas") {
+                    setFocusNodeId(nodeId);
+                  } else {
+                    setChatNodeId(nodeId);
+                    setFocusNodeId(null);
+                  }
                 }}
                 onCreateWorkspace={createWorkspace}
                 onRenameWorkspace={async (id, name) => {

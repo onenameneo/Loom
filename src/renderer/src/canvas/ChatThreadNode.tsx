@@ -1,6 +1,6 @@
-import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Handle, NodeResizeControl, Position, type ResizeParams } from "@xyflow/react";
-import { Check, Trash2 } from "lucide-react";
+import { Check, ChevronDown, MessageSquareText, Pencil, Trash2 } from "lucide-react";
 import type { NodeBudget, NodeMsg } from "../env";
 import { Composer, type ComposerImage } from "../composer/Composer";
 import { IconArrowUpRight, IconChevronRight, IconSplit } from "../icons";
@@ -10,6 +10,52 @@ import { useComposerHeightVar } from "./useComposerHeightVar";
 
 type Role = "user" | "assistant" | "error";
 type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown };
+type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number };
+type RectLike = Pick<DOMRect, "left" | "top" | "bottom" | "width" | "height">;
+
+export function selectionToolbarFromRects({
+  text,
+  selection,
+  container,
+  scrollLeft,
+  scrollTop,
+  clientWidth,
+  zoom,
+}: {
+  text: string;
+  selection: RectLike;
+  container: RectLike;
+  scrollLeft: number;
+  scrollTop: number;
+  clientWidth: number;
+  zoom: number;
+}): SelectionToolbar | null {
+  if (selection.width === 0 && selection.height === 0) return null;
+  const scale = zoom > 0 ? zoom : 1;
+  const toolbarWidth = Math.min(240, Math.max(0, clientWidth - 24));
+  const toolbarHalf = toolbarWidth / 2;
+  const gutter = 12;
+  const selectionCenterX = (selection.left - container.left + selection.width / 2) / scale;
+  const rawX = scrollLeft + selectionCenterX;
+  const minX = scrollLeft + gutter + toolbarHalf;
+  const maxX = scrollLeft + clientWidth - gutter - toolbarHalf;
+  const x = maxX >= minX ? Math.min(Math.max(rawX, minX), maxX) : rawX;
+  const arrowX = Math.min(Math.max(rawX - x + toolbarHalf, 14), Math.max(14, toolbarWidth - 14));
+  const selectionGap = 16;
+  const preferredTop = scrollTop + (selection.top - container.top) / scale - selectionGap;
+  const toolbarHeight = 104;
+  const place = preferredTop - toolbarHeight < scrollTop + gutter ? "bottom" : "top";
+
+  return {
+    text,
+    x,
+    y: place === "top"
+      ? preferredTop
+      : scrollTop + (selection.bottom - container.top) / scale + selectionGap,
+    place,
+    arrowX,
+  };
+}
 
 // macOS Finder 式颜色标签（存语义名，渲染走 --label-* token，明暗自适配）。
 const NODE_COLORS = ["gray", "red", "orange", "yellow", "green", "blue", "purple"] as const;
@@ -34,7 +80,7 @@ export function ChatThreadNode(props: any) {
   const [input, setInput] = useState(() => localStorage.getItem(`loom:draft:${id}`) ?? "");
   const [mount, setMount] = useState<boolean>(!!data.mountAncestors);
   const [budget, setBudget] = useState<NodeBudget | null>(null);
-  const [tb, setTb] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [tb, setTb] = useState<SelectionToolbar | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [title, setTitle] = useState(String(data.title ?? ""));
   const [editingTitle, setEditingTitle] = useState(false);
@@ -157,11 +203,18 @@ export function ChatThreadNode(props: any) {
       return;
     }
     const box = bodyRef.current.getBoundingClientRect();
-    setTb({
+    const el = bodyRef.current;
+    const zoom = box.width > 0 && el.clientWidth > 0 ? box.width / el.clientWidth : 1;
+    const toolbar = selectionToolbarFromRects({
       text,
-      x: r.left - box.left + bodyRef.current.scrollLeft + r.width / 2,
-      y: r.top - box.top + bodyRef.current.scrollTop - 8,
+      selection: r,
+      container: box,
+      scrollLeft: el.scrollLeft,
+      scrollTop: el.scrollTop,
+      clientWidth: el.clientWidth,
+      zoom,
     });
+    setTb(toolbar);
   }, []);
 
   const doBranch = () => {
@@ -267,6 +320,8 @@ export function ChatThreadNode(props: any) {
 
   const seedText = String(data.seed?.text ?? "");
   const seedPreview = seedText.length > 42 ? `${seedText.slice(0, 42)}…` : seedText;
+  const titleEditUnits = Array.from(title || "标题").reduce((sum, char) => sum + (char.charCodeAt(0) > 255 ? 2 : 1), 0);
+  const titleEditWidth = `${Math.min(Math.max(titleEditUnits + 2, 8), 36)}ch`;
   const tokens = budget ? (mount ? budget.withAncestors : budget.withoutAncestors) : null;
   const tokenLabel =
     tokens == null ? "—" : tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : `${tokens}`;
@@ -358,6 +413,7 @@ export function ChatThreadNode(props: any) {
           {editingTitle ? (
             <input
               className="title-edit nodrag"
+              style={{ width: titleEditWidth }}
               value={title}
               autoFocus
               onChange={(e) => setTitle(e.target.value)}
@@ -371,9 +427,20 @@ export function ChatThreadNode(props: any) {
               }}
             />
           ) : (
-            <button className="title title-btn nodrag" onDoubleClick={() => setEditingTitle(true)} onClick={() => data.onSelect?.(id)}>
-              {title}
-            </button>
+            <div className="title-row">
+              <span className="title title-text" title={title}>
+                {title}
+              </span>
+              <button
+                className="title-edit-btn nodrag"
+                type="button"
+                title="编辑标题"
+                aria-label="编辑标题"
+                onClick={() => setEditingTitle(true)}
+              >
+                <Pencil size={12} />
+              </button>
+            </div>
           )}
           <div className="head-meta">
             {nodeModel && <span className="model" title={nodeModel}>{nodeModel}</span>}
@@ -383,6 +450,15 @@ export function ChatThreadNode(props: any) {
             </span>
           </div>
         </div>
+        <button
+          className="head-icon nodrag"
+          type="button"
+          title="回到聊天模式"
+          aria-label="回到聊天模式"
+          onClick={() => data.onReturnChat?.(id)}
+        >
+          <MessageSquareText size={13} />
+        </button>
         {!data.isRoot && (
           <button className="head-icon danger nodrag" title="删除分支" onClick={() => data.onDelete?.(id)}>
             <Trash2 size={13} />
@@ -457,28 +533,36 @@ export function ChatThreadNode(props: any) {
           {thinking && <div className="thinking"><span className="dot">·</span> 思考中…</div>}
 
           {tb && (
-            <div className="seltb" style={{ left: tb.x, top: tb.y }} onMouseDown={(e) => e.preventDefault()}>
+            <div
+              className={`seltb seltb--${tb.place}`}
+              style={{ left: tb.x, top: tb.y, "--seltb-arrow-x": `${tb.arrowX}px` } as CSSProperties}
+              onMouseDown={(e) => e.preventDefault()}
+            >
               <button onClick={doBranch}>
                 <span><IconSplit size={13} /> 岔出分支</span>
                 <small>{tb.text.length > 40 ? `${tb.text.slice(0, 40)}…` : tb.text}</small>
               </button>
             </div>
           )}
-          {!autoScroll && (
-            <button
-              className="to-latest to-latest--card nodrag"
-              onClick={() => {
-                setAutoScroll(true);
-                requestAnimationFrame(() => {
-                  const el = bodyRef.current;
-                  if (el) el.scrollTop = el.scrollHeight;
-                });
-              }}
-            >
-              ↓ 回到最新
-            </button>
-          )}
       </div>
+
+      {!autoScroll && (
+        <button
+          className="to-latest to-latest--card nodrag"
+          type="button"
+          aria-label="回到最新"
+          title="回到最新"
+          onClick={() => {
+            setAutoScroll(true);
+            requestAnimationFrame(() => {
+              const el = bodyRef.current;
+              if (el) el.scrollTop = el.scrollHeight;
+            });
+          }}
+        >
+          <ChevronDown size={18} />
+        </button>
+      )}
 
       <div className="card__foot nodrag" ref={footRef}>
         <Composer

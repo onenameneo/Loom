@@ -46,31 +46,6 @@
   outline-offset: 2px;
 }
 
-/* 头部：对话/画布 模式指示 + 展开画布按钮 */
-.ws-mode {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--faint);
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  padding: 2px 8px;
-  -webkit-app-region: no-drag;
-}
-.head-btn {
-  -webkit-app-region: no-drag;
-  font-size: 11px;
-  color: var(--muted);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  padding: 3px 11px;
-  cursor: pointer;
-}
-.head-btn:hover {
-  color: var(--text);
-  border-color: var(--border-strong);
-}
-
 /* =====================================================================
    对话优先视图（ChatView）—— 居中长栏聊天，「聊天 = 单节点画布」。
    ===================================================================== */
@@ -467,23 +442,56 @@
   font-weight: 550;
   font-size: 12.5px;
 }
-.title-btn {
-  display: block;
-  width: 100%;
+.title-row {
+  display: inline-grid;
+  grid-template-columns: minmax(0, max-content) 22px;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px;
   min-width: 0;
-  border: none;
-  background: transparent;
+  width: fit-content;
+  max-width: 100%;
+}
+.title-text {
+  display: block;
+  min-width: 0;
   color: var(--text);
-  padding: 0;
-  cursor: pointer;
-  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.title-edit-btn {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms cubic-bezier(0.2, 0, 0, 1), color 0.12s ease, background 0.12s ease;
+}
+.card__head:hover .title-edit-btn,
+.card__head:focus-within .title-edit-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+.title-edit-btn:hover,
+.title-edit-btn:focus-visible {
+  color: var(--text);
+  background: var(--surface-2);
+  outline: none;
+}
+.title-edit-btn svg {
+  stroke: currentColor;
+}
 .title-edit {
   min-width: 0;
-  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--surface-2);
@@ -576,13 +584,15 @@
   position: relative;
   flex: 1;
   min-height: 0;
-  padding: 12px;
-  /* 给悬浮输入框让出底部空间 */
-  padding-bottom: calc(var(--composer-h, 64px) + 8px);
+  /* 与默认聊天窗口保持同一套消息留白：工具条有稳定落点，最后一条能滚到输入框上方。 */
+  padding: 24px 24px calc(var(--composer-h, 64px) + 28px);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 30px;
   overflow-y: auto;
+}
+.card__body .m--user + .m--assistant {
+  margin-top: 12px;
 }
 .to-latest {
   position: sticky;
@@ -617,15 +627,30 @@
   z-index: 25;
   transition: color 0.12s ease, background 0.12s ease;
 }
-.chatview .to-latest:hover {
+.card > .to-latest--card {
+  /* 与 ChatView 一样脱离滚动流，避免被消息内容或滚动裁剪影响。 */
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--composer-h, 64px) + 14px);
+  transform: translateX(-50%);
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--muted);
+  z-index: 25;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.chatview .to-latest:hover,
+.card > .to-latest--card:hover {
   color: var(--text);
   background: var(--surface-2);
 }
-.chatview .to-latest svg {
+.chatview .to-latest svg,
+.card > .to-latest--card svg {
   stroke: currentColor;
-}
-.to-latest--card {
-  bottom: calc(var(--composer-h, 64px) + 8px);
 }
 
 /* seed chip = 可点击来源标本签 */
@@ -722,6 +747,9 @@
   z-index: 20;
   width: min(240px, calc(100% - 24px));
 }
+.seltb--bottom {
+  transform: translate(-50%, 0);
+}
 .seltb button {
   width: 100%;
   display: grid;
@@ -766,13 +794,20 @@
   content: "";
   position: absolute;
   bottom: -5px;
-  left: 50%;
+  left: var(--seltb-arrow-x, 50%);
   transform: translateX(-50%) rotate(45deg);
   width: 8px;
   height: 8px;
   background: var(--surface);
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
+}
+.seltb--bottom::after {
+  top: -5px;
+  bottom: auto;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-top: 1px solid var(--border);
 }
 
 /* 底部 = 真·悬浮大输入框：定位与 pointer-events 走共用底座（见 .chatview .composer），

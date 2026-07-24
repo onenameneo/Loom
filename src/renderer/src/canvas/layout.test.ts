@@ -63,4 +63,34 @@ describe("canvas layout helpers", () => {
 
     expect(read?.(node)).toEqual({ x: 120, y: -30, width: 410, height: 330 });
   });
+
+  it("keeps the preferred branch placement when it does not overlap", () => {
+    const place = (layoutModule as any).findBranchPlacement;
+    const preferred = { x: 510, y: 20, width: 360, height: 440 };
+
+    expect(
+      place?.({
+        existing: [{ x: 0, y: 0, width: 360, height: 440 }],
+        preferred,
+        gapX: 150,
+        rowH: 300,
+      }),
+    ).toEqual(preferred);
+  });
+
+  it("moves a new branch to the nearest open row when the preferred slot is occupied", () => {
+    const place = (layoutModule as any).findBranchPlacement;
+
+    expect(
+      place?.({
+        existing: [
+          { x: 510, y: 20, width: 360, height: 440 },
+          { x: 510, y: 540, width: 360, height: 440 },
+        ],
+        preferred: { x: 510, y: 20, width: 360, height: 440 },
+        gapX: 150,
+        rowH: 520,
+      }),
+    ).toEqual({ x: 510, y: -500, width: 360, height: 440 });
+  });
 });
