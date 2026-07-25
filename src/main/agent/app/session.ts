@@ -5,7 +5,10 @@ import { saveNodeLayout, saveNodeLayouts } from "../../store/layoutPersistence";
 import { ancestorChain, descendants, type Seed } from "../core/graph";
 import { buildContextPlan, isLlmMessage, roleOf, textOf } from "../core/context";
 import { budget as computeBudget, type Budget } from "../core/budget";
-import { createHookRegistry } from "./hooks";
+import type { ReadonlyAgentTool } from "../core/tool";
+import { createHookRegistry, createToolLifecycleHook } from "../hooks";
+import { createDefaultReadonlyTools } from "../tools";
+import { createToolRegistry } from "./toolRuntime";
 import type {
   AgentHook,
   ClockPort,
@@ -51,8 +54,29 @@ export interface SessionDeps {
   createEngine: (hooks: {
     buildContext: (nodeId: string, own: AgentMessage[]) => Message[] | Promise<Message[]>;
     getNodeInit: (nodeId: string) => NodeInit | undefined;
+    getTools: (nodeId: string) => ReadonlyAgentTool[];
     dispatcher: HookDispatcher;
   }) => LlmEnginePort;
+}
+
+interface CanvasMessageDto {
+  role: "user" | "assistant" | "tool";
+  text: string;
+  images?: { data: string; mimeType: string }[];
+  seq: number;
+  usage?: { totalTokens?: number };
+  meta?: unknown;
+  toolCall?: {
+    id: string;
+    name: string;
+    state: "start" | "update" | "end";
+    isError: boolean;
+    summary?: string;
+    args?: unknown;
+    details?: unknown;
+    startedAt: number;
+    updatedAt: number;
+  };
 }
 
 const NO_KEY_ERROR = "未配置 API key（去设置填写，或设置 ANTHROPIC_API_KEY）。";
@@ -129,9 +153,12 @@ export function createAgentSession(deps: SessionDeps) {
     return n ? { systemPrompt: n.systemPrompt, model: n.model, messages: n.messages } : undefined;
   }
 
-  // Hook 扩展面：H1+ 能力经 registerHook 落卡片；本阶段无人注册 → 行为中性。
+  const tools = createToolRegistry(createDefaultReadonlyTools(clock));
+
+  // Hook 扩展面：能力经 registerHook 落卡片；工具生命周期经稳定 Loom 事件输出。
   const hookRegistry = createHookRegistry();
-  const engine = deps.createEngine({ buildContext, getNodeInit, dispatcher: hookRegistry });
+  hookRegistry.use(createToolLifecycleHook(events));
+  const engine = deps.createEngine({ buildContext, getNodeInit, getTools: () => tools.list(), dispatcher: hookRegistry });
 
   // ---- DTO ------------------------------------------------------------------
 
@@ -158,8 +185,32 @@ export function createAgentSession(deps: SessionDeps) {
     model: n.model,
     color: n.color,
     layout: n.layout,
-    messages: n.messages.flatMap((m, seq) => {
+    messages: n.messages.flatMap<CanvasMessageDto>((m, seq) => {
       const role = roleOf(m);
+      if (role === "toolResult") {
+        const anyMsg = m as any;
+        const text = textOf(m);
+        const toolName = typeof anyMsg.toolName === "string" ? anyMsg.toolName : "tool";
+        const toolCallId = typeof anyMsg.toolCallId === "string" ? anyMsg.toolCallId : `tool-${seq}`;
+        return [
+          {
+            role: "tool",
+            text,
+            seq,
+            meta: n.messageMeta[seq],
+            toolCall: {
+              id: toolCallId,
+              name: toolName,
+              state: "end" as const,
+              isError: Boolean(anyMsg.isError),
+              summary: text || (anyMsg.isError ? "error" : "done"),
+              details: anyMsg.details ?? anyMsg.content,
+              startedAt: 0,
+              updatedAt: 0,
+            },
+          },
+        ];
+      }
       if (role !== "user" && role !== "assistant") return [];
       const usage = (m as any)?.usage;
       return [{ role, text: textOf(m), images: imagesOf(m), seq, usage, meta: n.messageMeta[seq] }];

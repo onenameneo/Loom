@@ -6,7 +6,9 @@ import type {
   BeforeToolCallContext,
 } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
+import type { ReadonlyAgentTool } from "../core/tool";
 import type { EngineHandle, EventSinkPort, HookDispatcher, LlmEnginePort, NodeInit } from "../ports";
+import { adaptReadonlyToolsToPi } from "./piTools";
 
 // ---------------------------------------------------------------------------
 // ④ 适配器 · pi 引擎：pi（pi-agent-core / pi-ai）的全部使用收敛于此，实现 LlmEnginePort。
@@ -30,12 +32,14 @@ export interface PiEngineDeps {
   buildContext: (nodeId: string, own: AgentMessage[]) => Message[] | Promise<Message[]>;
   /** 创建引擎时读取节点初值（系统提示 / 模型 / 初始转写）。 */
   getNodeInit: (nodeId: string) => NodeInit | undefined;
+  /** 创建引擎时读取可用工具（中性契约，由 app 层提供）。 */
+  getTools: (nodeId: string) => ReadonlyAgentTool[];
   /** hook 分发器：pi 的 before/afterToolCall/transformContext/事件转发至此。 */
   dispatcher: HookDispatcher;
 }
 
 export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
-  const { events, resolveModel, buildContext, getNodeInit, dispatcher } = deps;
+  const { events, resolveModel, buildContext, getNodeInit, getTools, dispatcher } = deps;
   const cache = new Map<string, { agent: Agent; handle: EngineHandle }>();
 
   async function buildModels() {
@@ -91,6 +95,7 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
         systemPrompt: init?.systemPrompt || SYSTEM_PROMPT,
         model,
         messages: [...(init?.messages ?? [])],
+        tools: adaptReadonlyToolsToPi(getTools(nodeId)),
       },
       streamFn: models.streamSimple.bind(models),
       getApiKey: async () => resolveModel().apiKey,

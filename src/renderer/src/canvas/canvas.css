@@ -101,6 +101,107 @@
 .chatview .thinking .dot {
   color: var(--accent);
 }
+
+.tool-timeline {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.tool-timeline--comfortable {
+  margin: -12px 0 -20px;
+}
+.tool-timeline--compact {
+  margin: -8px 0 -18px;
+}
+.tool-row {
+  border-left: 1px solid var(--border-strong);
+  color: var(--muted);
+}
+.tool-row--running {
+  border-left-color: var(--accent);
+}
+.tool-row--done {
+  border-left-color: var(--ok);
+}
+.tool-row--error {
+  border-left-color: var(--err);
+}
+.tool-row__main {
+  width: 100%;
+  min-height: 24px;
+  display: grid;
+  grid-template-columns: 18px max-content minmax(0, 1fr) max-content 16px;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 2px 9px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.tool-row__main:hover {
+  background: var(--surface-2);
+}
+.tool-row__state {
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+}
+.tool-row--running .tool-row__state {
+  color: var(--accent);
+}
+.tool-row--done .tool-row__state {
+  color: var(--ok);
+}
+.tool-row--error .tool-row__state {
+  color: var(--err);
+}
+.tool-row__name,
+.tool-row__id {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.tool-row__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
+}
+.tool-row__summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+}
+.tool-row__id {
+  color: var(--faint);
+}
+.tool-row__chev {
+  color: var(--faint);
+  transition: transform 0.14s cubic-bezier(0.2, 0, 0, 1);
+}
+.tool-row__main[aria-expanded="true"] .tool-row__chev {
+  transform: rotate(180deg);
+}
+.tool-row__details {
+  margin: 1px 0 6px 27px;
+  padding: 6px 8px;
+  max-height: 180px;
+  overflow: auto;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--r-sm);
+  color: var(--code-text);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
 /* 悬浮输入框共用底座：绝对定位盖在滚动正文之上，透明渐隐区不吃点击，
    只有输入框本体接管交互。ChatView 与画布节点卡片（.card__foot）共用。 */
 .chatview .composer,

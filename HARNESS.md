@@ -65,6 +65,11 @@ src/main/
       compaction.ts          ·  压缩策略（何时压/留哪些）
       tool.ts                ·  ToolContract interface（名/schema/结果形状）
     ports.ts                 ← ③ 所有端口 interface
+    hooks/                   ← ② hook substrate：注册表 + 具体 hook（按 concern 分组）
+      registry.ts            ·  createHookRegistry，中间件组合语义
+      events/                ·  onEvent 观测类 hook（toolLifecycle/usage/turnTimer）
+      tools/                 ·  onToolCall/onToolResult 类 hook（permissionGate/resultSanitizer）
+      context/               ·  onContextTransform 类 hook（compaction/memoryRecall）
     app/                     ← ② 编排（依赖 core + ports）
       session.ts             ·  单节点 agent 生命周期（对标 pi agent-session.ts）
       toolRuntime.ts         ·  注册表 + 执行 + 调权限决策
@@ -75,8 +80,9 @@ src/main/
       sqliteStore.ts         ·  StorePort（挪现有 store/）
       ipcEventSink.ts        ·  EventSinkPort ← webContents.send
       approvalDialog.ts      ·  ApprovalPort ← IPC 弹窗（H2）
-      tools/                 ·  web_fetch/search/now/calc（H1）→ fs/bash（H2）
+      piTools.ts             ·  Loom neutral tool → pi AgentTool
       gbrainMemory.ts        ·  MemoryPort ← gbrain CLI（H4）
+    tools/                   ← 具体 agent tools catalog：now/ calc/ webfetch/ websearch/ bash/
   canvas.ts                  ← 瘦身：只剩 IPC 编排（把 handler 转给 ② 服务）
   index.ts                   ← 组装根：new 各适配器，注入 ② 服务
 ```
@@ -113,6 +119,75 @@ Loom 遵循 pi-coding-agent 的类型构造方式，但不把 pi 类型误当成
 - ④ `adapters/piEngine.ts` 是 pi 运行时值唯一入口；在此完成 pi 分子和 Loom 中性 Hook 上下文的双向映射。
 - `convertToLlm` 是材料降级为原子的唯一出口：保留 `Message`，转换需要送达模型的 Loom 消息，过滤纯 UI 消息；返回安全回退而非抛错。
 - Hook 覆写必须覆盖 pi 的完整字段语义。当前 `ResultOverride` 与 `AfterToolCallResult` 对齐：`content`、`details`、`isError`、`usage`、`terminate`，均按字段替换、无深合并。
+
+## 4.2 Hook 代码规范
+
+`src/main/agent/hooks/` 是 Loom agent runtime hook 的唯一实现目录，采用 Claude Code 式“hook catalog”组织方式。这里的 hook 指 pi agent runtime 的四个接缝：`onToolCall`、`onToolResult`、`onContextTransform`、`onEvent`；不要和工作站里 Claude Code hooks / Codex notify 的外部活动采集混用。
+
+目录约定：
+
+```
+src/main/agent/hooks/
+  registry.ts              # createHookRegistry；组合语义，不写具体能力
+  index.ts                 # 统一导出 hook registry 和默认 hook factories
+  events/                  # onEvent 观测类：toolLifecycle / turnTimer / usageTelemetry
+  tools/                   # 工具调用链：permissionGate / resultSanitizer
+  context/                 # 上下文链：compaction / memoryRecall / branchSummary
+```
+
+落地规则：
+
+- `ports.ts` 只放 hook 契约类型：`AgentHook`、`HookDispatcher`、上下文与覆写结果；不放具体 hook 实现。
+- `hooks/registry.ts` 只负责组合语义：拒绝优先、结果链式、上下文顺序、事件广播；不得依赖具体能力。
+- 具体 hook 必须是小 factory，例如 `createToolLifecycleHook(deps)`、`createTurnTimerHook(deps)`；依赖显式通过参数传入，不从全局抓 store/window。
+- `app/session.ts` 只负责创建 registry 和注册 hook：`hookRegistry.use(createXHook(deps))`；不得写 hook 策略、事件归一化、权限判断或计时逻辑。
+- `adapters/piEngine.ts` 只安装 pi 接缝并转发给 `HookDispatcher`；新增能力不得继续修改 piEngine。
+- 新 hook 按主接缝分类放目录：只观察事件放 `hooks/events/`，拦截/改写工具放 `hooks/tools/`，改上下文放 `hooks/context/`。
+- 每个 hook 文件应有同名单测；至少覆盖触发事件、非目标事件 no-op、边界/错误行为。
+- `onEvent` hook 是观测面，单个 hook 异常由 registry 隔离；`onToolCall` / `onToolResult` / `onContextTransform` 不应依赖吞异常来表达业务分支。
+- 危险能力默认不在工具实现里自判安全，必须通过 `hooks/tools/permissionGate.ts` 这类 hook 统一决策。
+
+## 4.3 Tool 代码规范
+
+`src/main/agent/tools/` 是 agent 可调用工具的 catalog，只放**具体工具实现**，例如 `now/`、`calc/`、`webfetch/`，未来扩展 `websearch/`、`bash/`、`mcp/`。不要把工具平台代码塞进这里。
+
+目录约定：
+
+```
+src/main/agent/tools/
+  index.ts                 # 工具 catalog 聚合出口：createDefaultReadonlyTools / export concrete factories
+  now/
+    index.ts               # createNowTool
+    index.test.ts          # 可选：复杂工具同目录测；当前也可由 app/tools.test.ts 覆盖
+  calc/
+    index.ts               # createCalcTool + pure evaluator
+  webfetch/
+    index.ts               # createWebFetchTool
+  websearch/               # H1+：真实 provider 配置后加入
+  bash/                    # H2：必须经 permissionGate 才能启用
+```
+
+分层边界：
+
+- `core/tool.ts` 放 neutral tool contract：`ReadonlyAgentTool`、`ToolResult`、内容块、截断/错误 helper。
+- `app/toolRuntime.ts` 放 registry/runtime：注册、查找、执行编排、重复名校验、错误归一化。
+- `hooks/tools/` 放工具权限和结果策略：permission gate、result sanitizer、脱敏/截断策略。危险判断不写在具体工具里。
+- `hooks/events/` 放工具观测：tool lifecycle、usage、计时。
+- `adapters/piTools.ts` 放唯一 pi 适配：Loom neutral tool → pi `AgentTool`。
+- `app/session.ts` 只从 `tools/index.ts` 拿默认工具列表并注册；不得 import 具体工具子目录做临时拼装。
+
+具体工具实现规则：
+
+- 每个工具一个目录，目录名用稳定小写短名；工具名用 provider 友好的 snake_case，例如目录 `webfetch/` 暴露工具名 `web_fetch`。
+- 每个工具导出 `createXTool(deps?)` factory，依赖通过参数显式传入；不要从全局读取 store/window/env，除非该工具的 adapter 层显式传入。
+- 工具实现只依赖 `core/tool.ts` 的 neutral contract 和必要端口/标准库；不得 import `pi-agent-core`、Electron renderer、IPC、React。
+- 参数 schema 必须用结构化 schema（当前 typebox），描述字段用途；不要让模型传任意未声明 blob。
+- 输出必须返回 normalized `ToolResult`：`content` 用 text/image block，`details` 放结构化元数据。
+- 输出必须有上限：文本长度、响应大小、执行时间、错误详情都要 bounded；截断要在 `details` 标明。
+- 只读工具不得产生本地/远程副作用；副作用工具（如 `bash`、写文件、远程 mutation、MCP action）必须默认不可无批准运行，接入 `hooks/tools/permissionGate.ts`。
+- 工具失败优先抛错或返回 normalized error，由 runtime/adapter 统一转成 agent 可理解的错误结果；不要把异常漏到主进程顶层。
+- 每个新增工具至少有单测覆盖：参数拒绝、安全边界、成功结果、失败/超时/截断路径。
+- `web_search` 不得做假搜索；没有真实 provider/config 时不注册。
 
 ## 5. 现状 → 目标：canvas.ts 拆解
 

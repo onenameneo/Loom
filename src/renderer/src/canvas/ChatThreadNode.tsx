@@ -6,10 +6,12 @@ import { Composer, type ComposerImage } from "../composer/Composer";
 import { IconArrowUpRight, IconChevronRight, IconSplit } from "../icons";
 import { Message } from "../message/Message";
 import { BranchContext } from "./branch";
+import { ToolCallTimeline } from "./ToolCallTimeline";
+import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
 import { useComposerHeightVar } from "./useComposerHeightVar";
 
-type Role = "user" | "assistant" | "error";
-type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown };
+type Role = "user" | "assistant" | "error" | "tool";
+type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; toolCall?: ToolCallView };
 type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number };
 type RectLike = Pick<DOMRect, "left" | "top" | "bottom" | "width" | "height">;
 
@@ -71,7 +73,7 @@ export function ChatThreadNode(props: any) {
   const idRef = useRef(1);
 
   const toMsgs = useCallback((items: NodeMsg[] = []) => (
-    items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta }))
+    items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, toolCall: m.toolCall }))
   ), []);
 
   const [msgs, setMsgs] = useState<Msg[]>(() => toMsgs(data.messages ?? []));
@@ -129,6 +131,15 @@ export function ChatThreadNode(props: any) {
     }
   }, [data.workspaceId, id, toMsgs]);
 
+  const upsertToolMessage = useCallback((payload: Parameters<typeof upsertToolTimelineMessage<Msg>>[1]) => {
+    setMsgs((current) => upsertToolTimelineMessage(current, payload, (toolCall) => ({
+      id: idRef.current++,
+      role: "tool",
+      text: toolCall.summary ?? "",
+      toolCall,
+    })));
+  }, []);
+
   useEffect(() => {
     setInput(localStorage.getItem(`loom:draft:${id}`) ?? "");
   }, [id]);
@@ -153,6 +164,12 @@ export function ChatThreadNode(props: any) {
     return window.api.canvas.onEvent((e) => {
       if (e.nodeId !== id) return;
       switch (e.type) {
+        case "tool":
+          {
+            const payload = e.payload;
+            if (isToolCanvasEventPayload(payload)) upsertToolMessage(payload);
+          }
+          break;
         case "thinking":
           setThinking(true);
           setBusy(true);
@@ -183,7 +200,7 @@ export function ChatThreadNode(props: any) {
           break;
       }
     });
-  }, [id, refreshBudget, reloadNode]);
+  }, [id, refreshBudget, reloadNode, upsertToolMessage]);
 
   const onMouseUp = useCallback(() => {
     const sel = window.getSelection();
@@ -513,21 +530,25 @@ export function ChatThreadNode(props: any) {
             <div className="empty">{data.seed ? "顺着这个片段往下问…" : "从主线开始一段思考…"}</div>
           )}
 
-          {msgs.map((m, i) => (
-            <Message
-              key={i}
-              role={m.role}
-              text={m.text}
-              images={m.images}
-              density="compact"
-              streaming={m.role === "assistant" && streaming && i === msgs.length - 1}
-              meta={m.role === "assistant" ? metaFor(m) : undefined}
-              canRegenerate={m.role === "assistant" && i === msgs.length - 1 && !busy}
-              canEdit={m.role === "user" && !busy}
-              onRegenerate={regenerate}
-              onEditResend={(text) => editResend(m.seq, text)}
-              onRetry={m.role === "error" ? regenerate : undefined}
-            />
+          {groupToolTimelineMessages(msgs).map((item) => (
+            item.kind === "tools" ? (
+              <ToolCallTimeline key={item.key} calls={item.calls} density="compact" />
+            ) : (
+              <Message
+                key={item.message.id}
+                role={item.message.role}
+                text={item.message.text}
+                images={item.message.images}
+                density="compact"
+                streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1]?.id}
+                meta={item.message.role === "assistant" ? metaFor(item.message) : undefined}
+                canRegenerate={item.message.role === "assistant" && item.message.id === msgs[msgs.length - 1]?.id && !busy}
+                canEdit={item.message.role === "user" && !busy}
+                onRegenerate={regenerate}
+                onEditResend={(text) => editResend(item.message.seq, text)}
+                onRetry={item.message.role === "error" ? regenerate : undefined}
+              />
+            )
           ))}
 
           {thinking && <div className="thinking"><span className="dot">·</span> 思考中…</div>}

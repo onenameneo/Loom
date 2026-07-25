@@ -1,12 +1,25 @@
 export {};
 
+export interface ToolCallDto {
+  id: string;
+  name: string;
+  state: "start" | "update" | "end";
+  isError: boolean;
+  summary?: string;
+  args?: unknown;
+  details?: unknown;
+  startedAt: number;
+  updatedAt: number;
+}
+
 export interface NodeMsg {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "tool";
   text: string;
   images?: { data: string; mimeType: string }[];
   seq: number;
   usage?: { totalTokens?: number };
   meta?: unknown;
+  toolCall?: ToolCallDto;
 }
 export interface NodeSeed {
   text: string;
@@ -36,6 +49,20 @@ export interface CanvasEvent {
   type: string;
   payload?: unknown;
 }
+
+export interface ToolCanvasEventPayload {
+  state: "start" | "update" | "end";
+  toolCallId: string;
+  toolName: string;
+  isError?: boolean;
+  summary?: string;
+  args?: unknown;
+  details?: unknown;
+}
+
+export type TypedCanvasEvent =
+  | { nodeId: string; type: "tool"; payload: ToolCanvasEventPayload }
+  | CanvasEvent;
 
 export interface AgentProc {
   pid: number;

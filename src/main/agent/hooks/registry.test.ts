@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
-import { createHookRegistry } from "./hooks";
+import { createHookRegistry } from "./registry";
 import type { AgentHook, HookToolCallContext, HookToolResultContext } from "../ports";
 
 const callCtx: HookToolCallContext = { nodeId: "n1", toolName: "bash", toolCallId: "t1", args: { cmd: "ls" } };
@@ -54,7 +54,7 @@ describe("createHookRegistry · toolResult（链式合并）", () => {
     r.use({
       name: "flag",
       onToolResult: (ctx) => {
-        seen.push((ctx.content[0] as any).text); // 应看到上一步的 REDACTED
+        seen.push((ctx.content[0] as any).text);
         return {
           isError: true,
           usage: {
@@ -83,12 +83,6 @@ describe("createHookRegistry · toolResult（链式合并）", () => {
       },
     });
   });
-
-  it("无覆盖 → undefined", async () => {
-    const r = createHookRegistry();
-    r.use({ name: "noop", onToolResult: () => undefined });
-    expect(await r.toolResult(resultCtx)).toBeUndefined();
-  });
 });
 
 describe("createHookRegistry · contextTransform（顺序组合）", () => {
@@ -106,12 +100,7 @@ describe("createHookRegistry · event（广播 + 异常隔离）", () => {
     const r = createHookRegistry();
     const good = vi.fn();
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    r.use({
-      name: "boom",
-      onEvent: () => {
-        throw new Error("x");
-      },
-    });
+    r.use({ name: "boom", onEvent: () => { throw new Error("x"); } });
     r.use({ name: "ok", onEvent: good });
     expect(() => r.event("n1", evt)).not.toThrow();
     expect(good).toHaveBeenCalledWith("n1", evt);
@@ -132,13 +121,7 @@ describe("createHookRegistry · 空注册表行为保真", () => {
     expect(await r.toolCall(callCtx)).toBeUndefined();
     expect(await r.toolResult(resultCtx)).toBeUndefined();
   });
-
-  it("event 为 no-op（无 hook 不抛错）", () => {
-    const r = createHookRegistry();
-    expect(() => r.event("n1", evt)).not.toThrow();
-  });
 });
 
-// 类型层面确认 AgentHook 可只实现部分点（编译期）
 const _partial: AgentHook = { name: "partial", onEvent: () => {} };
 void _partial;

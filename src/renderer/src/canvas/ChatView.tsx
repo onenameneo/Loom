@@ -5,10 +5,12 @@ import { IconSplit, IconWorkspace } from "../icons";
 import { Message } from "../message/Message";
 import { Composer, type ComposerImage } from "../composer/Composer";
 import { useTitlebarActions } from "../titlebar/Titlebar";
+import { ToolCallTimeline } from "./ToolCallTimeline";
+import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
 import { useComposerHeightVar } from "./useComposerHeightVar";
 
-type Role = "user" | "assistant" | "error";
-type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown };
+type Role = "user" | "assistant" | "error" | "tool";
+type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; toolCall?: ToolCallView };
 
 // 对话优先视图：单条主线摊开成经典居中聊天（「聊天 = 只有一个节点的画布」）。
 // 走同一套 window.api.canvas；在回复里划词 → 岔出第一个分支 → 上层切成画布视图。
@@ -45,6 +47,7 @@ export default function ChatView({
     seq: m.seq,
     usage: m.usage,
     meta: m.meta,
+    toolCall: m.toolCall,
   }));
   const [msgs, setMsgs] = useState<Msg[]>(seed);
   const [busy, setBusy] = useState(false);
@@ -90,7 +93,16 @@ export default function ChatView({
   useTitlebarActions(titlebarActions);
 
   const reloadFromInitial = useCallback((items: NodeMsg[]) => {
-    setMsgs(items.map((m) => ({ id: idRef.current++, role: m.role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta })));
+    setMsgs(items.map((m) => ({ id: idRef.current++, role: m.role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, toolCall: m.toolCall })));
+  }, []);
+
+  const upsertToolMessage = useCallback((payload: Parameters<typeof upsertToolTimelineMessage<Msg>>[1]) => {
+    setMsgs((current) => upsertToolTimelineMessage(current, payload, (toolCall) => ({
+      id: idRef.current++,
+      role: "tool",
+      text: toolCall.summary ?? "",
+      toolCall,
+    })));
   }, []);
 
   const refreshBudget = useCallback(async () => {
@@ -121,6 +133,12 @@ export default function ChatView({
     return window.api.canvas.onEvent((e) => {
       if (e.nodeId !== nodeId) return;
       switch (e.type) {
+        case "tool":
+          {
+            const payload = e.payload;
+            if (isToolCanvasEventPayload(payload)) upsertToolMessage(payload);
+          }
+          break;
         case "thinking":
           setThinking(true);
           break;
@@ -149,7 +167,7 @@ export default function ChatView({
           break;
       }
     });
-  }, [nodeId, refreshBudget]);
+  }, [nodeId, refreshBudget, upsertToolMessage]);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -293,21 +311,25 @@ export default function ChatView({
               <span className="mono">在回复里划选文字，即可岔出一条分支</span>
             </div>
           )}
-          {msgs.map((m) => (
-            <Message
-              key={m.id}
-              role={m.role}
-              text={m.text}
-              images={m.images}
-              density="comfortable"
-              streaming={m.role === "assistant" && streaming && m.id === msgs[msgs.length - 1].id}
-              meta={m.role === "assistant" ? metaFor(m) : undefined}
-              canRegenerate={m.role === "assistant" && m.id === msgs[msgs.length - 1]?.id && !busy}
-              canEdit={m.role === "user" && !busy}
-              onRegenerate={regenerate}
-              onEditResend={(text) => editResend(m.seq, text)}
-              onRetry={m.role === "error" ? regenerate : undefined}
-            />
+          {groupToolTimelineMessages(msgs).map((item) => (
+            item.kind === "tools" ? (
+              <ToolCallTimeline key={item.key} calls={item.calls} density="comfortable" />
+            ) : (
+              <Message
+                key={item.message.id}
+                role={item.message.role}
+                text={item.message.text}
+                images={item.message.images}
+                density="comfortable"
+                streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1].id}
+                meta={item.message.role === "assistant" ? metaFor(item.message) : undefined}
+                canRegenerate={item.message.role === "assistant" && item.message.id === msgs[msgs.length - 1]?.id && !busy}
+                canEdit={item.message.role === "user" && !busy}
+                onRegenerate={regenerate}
+                onEditResend={(text) => editResend(item.message.seq, text)}
+                onRetry={item.message.role === "error" ? regenerate : undefined}
+              />
+            )
           ))}
           {thinking && (
             <div className="thinking">

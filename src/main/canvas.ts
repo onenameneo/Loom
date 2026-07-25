@@ -39,6 +39,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
         resolveModel: () => resolveModelConfig(store),
         buildContext: hooks.buildContext,
         getNodeInit: hooks.getNodeInit,
+        getTools: hooks.getTools,
         dispatcher: hooks.dispatcher,
       }),
   });
