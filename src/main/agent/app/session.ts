@@ -8,7 +8,12 @@ import { budget as computeBudget, type Budget } from "../core/budget";
 import type { ReadonlyAgentTool } from "../core/tool";
 import { createHookRegistry, createToolLifecycleHook } from "../hooks";
 import { createDefaultReadonlyTools } from "../tools";
+import { createApprovalBroker } from "./approvalBroker";
+import { createApprovalPolicyStore } from "./approvalPolicy";
 import { createToolRegistry } from "./toolRuntime";
+import { createTurnRunner } from "./turnRunner";
+import { createNodeQueryEngine } from "./nodeQueryEngine";
+import { createApprovalGate } from "../hooks/tools/approvalGate";
 import type {
   AgentHook,
   ClockPort,
@@ -56,6 +61,7 @@ export interface SessionDeps {
     getNodeInit: (nodeId: string) => NodeInit | undefined;
     getTools: (nodeId: string) => ReadonlyAgentTool[];
     dispatcher: HookDispatcher;
+    getCurrentTurnId: (nodeId: string) => string | undefined;
   }) => LlmEnginePort;
 }
 
@@ -158,7 +164,30 @@ export function createAgentSession(deps: SessionDeps) {
   // Hook 扩展面：能力经 registerHook 落卡片；工具生命周期经稳定 Loom 事件输出。
   const hookRegistry = createHookRegistry();
   hookRegistry.use(createToolLifecycleHook(events));
-  const engine = deps.createEngine({ buildContext, getNodeInit, getTools: () => tools.list(), dispatcher: hookRegistry });
+  const turns = createTurnRunner({ events });
+  let queries!: ReturnType<typeof createNodeQueryEngine>;
+  const approvals = createApprovalBroker({ events, clock });
+  const policies = createApprovalPolicyStore({
+    isPersistentAllowed: (toolName, target) => Boolean(store.isApprovalPolicyAllowed?.(toolName, target)),
+    grantPersistent: (toolName, target) => store.grantApprovalPolicy?.(toolName, target),
+  });
+  hookRegistry.use(
+    createApprovalGate({
+      approvals,
+      policies,
+      getTool: (name) => tools.get(name),
+      setAwaitingApproval: (nodeId, turnId, approval) => queries.setAwaitingApproval(nodeId, turnId, approval),
+      setRunning: (nodeId, turnId) => queries.setRunning(nodeId, turnId),
+    }),
+  );
+  const engine = deps.createEngine({
+    buildContext,
+    getNodeInit,
+    getTools: () => tools.list(),
+    dispatcher: hookRegistry,
+    getCurrentTurnId: (nodeId) => queries.state(nodeId)?.turnId,
+  });
+  queries = createNodeQueryEngine({ engine, turns });
 
   // ---- DTO ------------------------------------------------------------------
 
@@ -244,18 +273,6 @@ export function createAgentSession(deps: SessionDeps) {
     }
   }
 
-  async function continueFrom(node: CanvasNode, handle: EngineHandle) {
-    const from = node.messages.length;
-    await handle.continue();
-    appendDelta(node, handle, from);
-  }
-
-  async function promptFrom(node: CanvasNode, handle: EngineHandle, msg: AgentMessage) {
-    const from = node.messages.length;
-    await handle.prompt(msg);
-    appendDelta(node, handle, from);
-  }
-
   // ---- 对外方法（一一对应 IPC）---------------------------------------------
 
   function list(workspaceId: string) {
@@ -297,32 +314,39 @@ export function createAgentSession(deps: SessionDeps) {
       events.emit(arg.nodeId, "error", NO_KEY_ERROR);
       return { ok: false };
     }
-    try {
-      const handle = await engine.ensure(arg.nodeId);
-      const text = arg.text.trim();
-      const images = (arg.images ?? []).filter((img) => img.data && img.mimeType);
-      const content =
-        images.length > 0
-          ? [
-              ...(text ? [{ type: "text", text } satisfies TextContent] : []),
-              ...images.map((img) => ({ type: "image", data: img.data, mimeType: img.mimeType }) satisfies ImageContent),
-            ]
-          : text;
-      const userMessage: AgentMessage = { role: "user", content, timestamp: clock.now() };
-      store.appendMessages(arg.nodeId, [persisted(userMessage)]);
-      node.messages.push(userMessage);
-      node.messageMeta.push(undefined);
-
-      await promptFrom(node, handle, userMessage);
-      return { ok: true };
-    } catch (err: any) {
-      events.emit(arg.nodeId, "error", String(err?.message ?? err));
-      return { ok: false };
+    const query = await queries.run({
+      nodeId: arg.nodeId,
+      operation: "send",
+      prepare: () => {
+        const text = arg.text.trim();
+        const images = (arg.images ?? []).filter((img) => img.data && img.mimeType);
+        const content =
+          images.length > 0
+            ? [
+                ...(text ? [{ type: "text", text } satisfies TextContent] : []),
+                ...images.map((img) => ({ type: "image", data: img.data, mimeType: img.mimeType }) satisfies ImageContent),
+              ]
+            : text;
+        const userMessage: AgentMessage = { role: "user", content, timestamp: clock.now() };
+        store.appendMessages(arg.nodeId, [persisted(userMessage)]);
+        node.messages.push(userMessage);
+        node.messageMeta.push(undefined);
+        return { kind: "prompt", message: userMessage, from: node.messages.length };
+      },
+      finalize: (handle, from) => appendDelta(node, handle, from),
+    });
+    const { result } = query;
+    if (!result.ok) {
+      if (result.reason === "failed") events.emit(arg.nodeId, "error", String((query.error as any)?.message ?? query.error));
+      return { ok: false, reason: result.reason };
     }
+    return { ok: true };
   }
 
   function abort(nodeId: string) {
-    engine.peek(nodeId)?.abort();
+    const active = queries.state(nodeId);
+    queries.abort(nodeId);
+    if (active) approvals.cancelByTurn(nodeId, active.turnId, "aborted");
     return { ok: true };
   }
 
@@ -338,15 +362,21 @@ export function createAgentSession(deps: SessionDeps) {
     }
     const lastUser = [...node.messages].map(roleOf).lastIndexOf("user");
     if (lastUser < 0) return { ok: false };
-    try {
-      const handle = await engine.ensure(nodeId);
-      truncateTranscript(node, lastUser + 1, handle);
-      await continueFrom(node, handle);
-      return { ok: true };
-    } catch (err: any) {
-      events.emit(nodeId, "error", String(err?.message ?? err));
-      return { ok: false };
+    const query = await queries.run({
+      nodeId,
+      operation: "regenerate",
+      prepare: (handle) => {
+        truncateTranscript(node, lastUser + 1, handle);
+        return { kind: "continue", from: node.messages.length };
+      },
+      finalize: (handle, from) => appendDelta(node, handle, from),
+    });
+    const { result } = query;
+    if (!result.ok) {
+      if (result.reason === "failed") events.emit(nodeId, "error", String((query.error as any)?.message ?? query.error));
+      return { ok: false, reason: result.reason };
     }
+    return { ok: true };
   }
 
   async function editResend(arg: { nodeId: string; seq: number; text: string }) {
@@ -361,16 +391,22 @@ export function createAgentSession(deps: SessionDeps) {
       events.emit(arg.nodeId, "error", NO_KEY_ERROR);
       return { ok: false };
     }
-    try {
-      const handle = await engine.ensure(arg.nodeId);
-      truncateTranscript(node, arg.seq, handle);
-      const userMessage: AgentMessage = { role: "user", content: text, timestamp: clock.now() };
-      await promptFrom(node, handle, userMessage);
-      return { ok: true };
-    } catch (err: any) {
-      events.emit(arg.nodeId, "error", String(err?.message ?? err));
-      return { ok: false };
+    const query = await queries.run({
+      nodeId: arg.nodeId,
+      operation: "edit-resend",
+      prepare: (handle) => {
+        truncateTranscript(node, arg.seq, handle);
+        const userMessage: AgentMessage = { role: "user", content: text, timestamp: clock.now() };
+        return { kind: "prompt", message: userMessage, from: node.messages.length };
+      },
+      finalize: (handle, from) => appendDelta(node, handle, from),
+    });
+    const { result } = query;
+    if (!result.ok) {
+      if (result.reason === "failed") events.emit(arg.nodeId, "error", String((query.error as any)?.message ?? query.error));
+      return { ok: false, reason: result.reason };
     }
+    return { ok: true };
   }
 
   function setSystemPrompt(arg: { nodeId: string; text: string }) {
@@ -378,6 +414,9 @@ export function createAgentSession(deps: SessionDeps) {
     const text = arg.text.trim();
     store.updateNode(arg.nodeId, { systemPrompt: text });
     if (node) node.systemPrompt = text || undefined;
+    queries.invalidate(arg.nodeId);
+    approvals.cancelByNode(arg.nodeId, "system prompt changed");
+    policies.clearNodeSession(arg.nodeId);
     engine.drop(arg.nodeId);
     return { ok: true };
   }
@@ -427,6 +466,9 @@ export function createAgentSession(deps: SessionDeps) {
     store.deleteNode(nodeId);
     for (const id of deletedIds) {
       nodes.delete(id);
+      queries.invalidate(id);
+      approvals.cancelByNode(id, "node deleted");
+      policies.clearNodeSession(id);
       engine.drop(id);
     }
     return { ok: true, deletedIds };
@@ -454,6 +496,9 @@ export function createAgentSession(deps: SessionDeps) {
     const model = arg.model.trim();
     store.updateNode(arg.nodeId, { model });
     if (node) node.model = model || undefined;
+    queries.invalidate(arg.nodeId);
+    approvals.cancelByNode(arg.nodeId, "model changed");
+    policies.clearNodeSession(arg.nodeId);
     engine.drop(arg.nodeId);
     return { ok: true };
   }
@@ -465,13 +510,25 @@ export function createAgentSession(deps: SessionDeps) {
       node.messages = [];
       node.messageMeta = [];
     }
+    queries.invalidate(nodeId);
+    approvals.cancelByNode(nodeId, "reset");
+    policies.clearNodeSession(nodeId);
     engine.peek(nodeId)?.reset();
     return { ok: true };
   }
 
   /** 设置变更（模型/baseUrl/key）→ 丢弃所有引擎，下次发送按新配置重建。 */
   function invalidate() {
+    queries.invalidateAll();
+    for (const nodeId of nodes.keys()) {
+      approvals.cancelByNode(nodeId, "invalidated");
+      policies.clearNodeSession(nodeId);
+    }
     engine.invalidateAll();
+  }
+
+  function decideApproval(decision: Parameters<typeof approvals.decide>[0]) {
+    return approvals.decide(decision);
   }
 
   return {
@@ -493,6 +550,7 @@ export function createAgentSession(deps: SessionDeps) {
     setModel,
     reset,
     invalidate,
+    decideApproval,
     /** 注册一个 hook（H1+ 能力的落点）。 */
     registerHook: (hook: AgentHook) => hookRegistry.use(hook),
   };

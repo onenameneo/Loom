@@ -6,6 +6,7 @@ import { createPiEngine } from "./agent/adapters/piEngine";
 import { createIds, systemClock } from "./agent/adapters/runtime";
 import { createAgentSession } from "./agent/app/session";
 import type { Seed } from "./agent/core/graph";
+import type { ApprovalDecision } from "./agent/ports";
 
 // ---------------------------------------------------------------------------
 // 画布引擎接线（主进程）：组装洋葱四圈 + 把 node:* IPC 绑定到 ② session。
@@ -41,6 +42,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
         getNodeInit: hooks.getNodeInit,
         getTools: hooks.getTools,
         dispatcher: hooks.dispatcher,
+        getCurrentTurnId: hooks.getCurrentTurnId,
       }),
   });
 
@@ -69,6 +71,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   ipcMain.handle("node:models", () => session.models());
   ipcMain.handle("node:setModel", (_e, arg: { nodeId: string; model: string }) => session.setModel(arg));
   ipcMain.handle("node:reset", (_e, nodeId: string) => session.reset(nodeId));
+  ipcMain.handle("approval:decide", (_e, decision: ApprovalDecision) => session.decideApproval(decision));
 
   /** 设置变更（模型/baseUrl/key）→ 丢弃所有引擎，下次发送按新配置重建。 */
   return { invalidate: () => session.invalidate() };

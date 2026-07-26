@@ -30,6 +30,53 @@ export interface EngineHandle {
   syncMessages(msgs: AgentMessage[]): void;
 }
 
+export type TurnOperationKind = "send" | "regenerate" | "edit-resend";
+export type TurnState = "idle" | "running" | "awaiting_approval" | "completed" | "aborted" | "failed";
+export type TurnFailureReason = "node_busy" | "failed" | "aborted" | "stale";
+export type TurnResult = { ok: true; turnId: string } | { ok: false; reason: TurnFailureReason; turnId?: string };
+
+export interface TurnLifecycleEvent {
+  nodeId: string;
+  turnId: string;
+  operation: TurnOperationKind;
+  state: Exclude<TurnState, "idle">;
+  error?: string;
+  approval?: {
+    requestId: string;
+    toolName: string;
+    toolCallId: string;
+  };
+}
+
+export interface TurnRunContext {
+  nodeId: string;
+  turnId: string;
+  operation: TurnOperationKind;
+  signal: AbortSignal;
+  setAbortHandle(handle: Pick<EngineHandle, "abort"> | undefined): void;
+  setAwaitingApproval(approval?: TurnLifecycleEvent["approval"]): boolean;
+  setRunning(): boolean;
+  isStale(): boolean;
+}
+
+/** QueryEngine 对引擎的一次调用；pi 内部仍自行完成模型/工具迭代。 */
+export type QueryInvocation =
+  | { kind: "prompt"; message: AgentMessage; from?: number }
+  | { kind: "continue"; from?: number };
+
+/** 应用层 QueryEngine 的节点查询请求。转写操作由 session 注入，生命周期由 QueryEngine 持有。 */
+export interface NodeQueryRequest {
+  nodeId: string;
+  operation: TurnOperationKind;
+  prepare(handle: EngineHandle): QueryInvocation | Promise<QueryInvocation>;
+  finalize(handle: EngineHandle, from: number): void | Promise<void>;
+}
+
+export interface NodeQueryResult {
+  result: TurnResult;
+  error?: unknown;
+}
+
 /** LLM 引擎端口：惰性按 nodeId 创建/缓存引擎，屏蔽 pi。 */
 export interface LlmEnginePort {
   /** 惰性拿到/创建某节点的引擎（装好 convertToLlm 与事件转发）。 */
@@ -73,9 +120,55 @@ export interface IdPort {
 /** 工具调用前的中性上下文（映射自 pi BeforeToolCallContext）。 */
 export interface HookToolCallContext {
   nodeId: string;
+  turnId?: string;
   toolName: string;
   toolCallId: string;
   args: unknown;
+}
+
+export type ApprovalScope = "once" | "node-session" | "persistent";
+
+export interface ToolApprovalRequirement {
+  required: true;
+  defaultScope?: ApprovalScope;
+  target: string;
+  preview: {
+    title: string;
+    description?: string;
+    args?: unknown;
+  };
+}
+
+export type ApprovalDecision = {
+  requestId: string;
+  nodeId: string;
+  turnId: string;
+  toolCallId: string;
+  toolName: string;
+  action: "allow" | "deny";
+  scope?: ApprovalScope;
+};
+
+export interface ApprovalRequest {
+  requestId: string;
+  nodeId: string;
+  turnId: string;
+  toolCallId: string;
+  toolName: string;
+  target: string;
+  preview: ToolApprovalRequirement["preview"];
+  defaultScope: ApprovalScope;
+  createdAt: number;
+  expiresAt: number;
+}
+
+export type PendingApprovalDecision = Promise<ApprovalDecision> & { requestId: string };
+
+export interface ApprovalPort {
+  request(input: Omit<ApprovalRequest, "requestId" | "createdAt" | "expiresAt">): PendingApprovalDecision;
+  decide(decision: ApprovalDecision): { ok: boolean; reason?: "not_found" | "stale" | "mismatch" };
+  cancelByTurn(nodeId: string, turnId: string, reason: string): void;
+  cancelByNode(nodeId: string, reason: string): void;
 }
 
 /** 阻止工具执行的决策（→ pi BeforeToolCallResult）。 */

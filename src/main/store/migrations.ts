@@ -3,7 +3,7 @@ import { dirname, join } from "path";
 import type Database from "better-sqlite3";
 import { DEFAULT_SETTINGS, type StoreData, type Workspace } from "./store";
 
-export const DB_SCHEMA_VERSION = 2;
+export const DB_SCHEMA_VERSION = 3;
 
 type SettingRow = { key: string; value: string };
 
@@ -97,6 +97,19 @@ export function migrate(db: Database.Database): void {
       `);
     });
     migrateLayout();
+    version = 2;
+  }
+
+  if (version < 3) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS approval_policies(
+        tool_name TEXT NOT NULL,
+        target TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(tool_name, target)
+      );
+      PRAGMA user_version = 3;
+    `);
   }
 
   db.pragma("foreign_keys = ON");

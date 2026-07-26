@@ -36,10 +36,12 @@ export interface PiEngineDeps {
   getTools: (nodeId: string) => ReadonlyAgentTool[];
   /** hook 分发器：pi 的 before/afterToolCall/transformContext/事件转发至此。 */
   dispatcher: HookDispatcher;
+  /** 当前节点活跃 outer turn id；仅用于把工具调用与应用 turn 相关联。 */
+  getCurrentTurnId?: (nodeId: string) => string | undefined;
 }
 
 export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
-  const { events, resolveModel, buildContext, getNodeInit, getTools, dispatcher } = deps;
+  const { events, resolveModel, buildContext, getNodeInit, getTools, dispatcher, getCurrentTurnId } = deps;
   const cache = new Map<string, { agent: Agent; handle: EngineHandle }>();
 
   async function buildModels() {
@@ -105,7 +107,13 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
       //   空注册表下：transformContext 恒等、before/after 返回 undefined → 行为中性。
       transformContext: (messages: AgentMessage[]) => dispatcher.contextTransform(messages),
       beforeToolCall: async ({ toolCall, args }: BeforeToolCallContext) => {
-        const d = await dispatcher.toolCall({ nodeId, toolName: toolCall.name, toolCallId: toolCall.id, args });
+        const d = await dispatcher.toolCall({
+          nodeId,
+          turnId: getCurrentTurnId?.(nodeId),
+          toolName: toolCall.name,
+          toolCallId: toolCall.id,
+          args,
+        });
         return d ? { block: true, reason: d.reason } : undefined;
       },
       afterToolCall: ({ toolCall, args, result, isError }: AfterToolCallContext) =>

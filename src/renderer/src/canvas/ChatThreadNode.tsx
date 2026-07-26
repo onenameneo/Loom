@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Handle, NodeResizeControl, Position, type ResizeParams } from "@xyflow/react";
-import { Check, ChevronDown, MessageSquareText, Pencil, Trash2 } from "lucide-react";
-import type { NodeBudget, NodeMsg } from "../env";
+import { Check, ChevronDown, MessageSquareText, Pencil, Trash2, X } from "lucide-react";
+import type { ApprovalRequestPayload, ApprovalScope, NodeBudget, NodeMsg, TurnCanvasEventPayload } from "../env";
 import { Composer, type ComposerImage } from "../composer/Composer";
 import { IconArrowUpRight, IconChevronRight, IconSplit } from "../icons";
 import { Message } from "../message/Message";
@@ -12,6 +12,7 @@ import { useComposerHeightVar } from "./useComposerHeightVar";
 
 type Role = "user" | "assistant" | "error" | "tool";
 type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; toolCall?: ToolCallView };
+type ApprovalState = ApprovalRequestPayload & { scope: ApprovalScope };
 type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number };
 type RectLike = Pick<DOMRect, "left" | "top" | "bottom" | "width" | "height">;
 
@@ -79,6 +80,8 @@ export function ChatThreadNode(props: any) {
   const [msgs, setMsgs] = useState<Msg[]>(() => toMsgs(data.messages ?? []));
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState(false);
+  const [turn, setTurn] = useState<TurnCanvasEventPayload | null>(null);
+  const [approval, setApproval] = useState<ApprovalState | null>(null);
   const [input, setInput] = useState(() => localStorage.getItem(`loom:draft:${id}`) ?? "");
   const [mount, setMount] = useState<boolean>(!!data.mountAncestors);
   const [budget, setBudget] = useState<NodeBudget | null>(null);
@@ -168,6 +171,32 @@ export function ChatThreadNode(props: any) {
           {
             const payload = e.payload;
             if (isToolCanvasEventPayload(payload)) upsertToolMessage(payload);
+          }
+          break;
+        case "approval":
+          {
+            const payload = e.payload as ApprovalRequestPayload;
+            if (payload?.requestId && payload.nodeId === id) setApproval({ ...payload, scope: payload.defaultScope });
+          }
+          break;
+        case "turn":
+          {
+            const payload = e.payload as TurnCanvasEventPayload;
+            if (!payload?.turnId) break;
+            setTurn(payload);
+            if (payload.state === "running") {
+              setBusy(true);
+              setApproval(null);
+            } else if (payload.state === "awaiting_approval") {
+              setBusy(true);
+              setThinking(false);
+            } else if (payload.state === "completed" || payload.state === "aborted" || payload.state === "failed") {
+              setThinking(false);
+              setBusy(false);
+              setApproval(null);
+              refreshBudget();
+              reloadNode();
+            }
           }
           break;
         case "thinking":
@@ -265,6 +294,21 @@ export function ChatThreadNode(props: any) {
     if (window.api) await window.api.canvas.abort(id);
   }
 
+  async function decideApproval(action: "allow" | "deny") {
+    if (!window.api || !approval) return;
+    const current = approval;
+    setApproval(null);
+    await window.api.canvas.decideApproval({
+      requestId: current.requestId,
+      nodeId: current.nodeId,
+      turnId: current.turnId,
+      toolCallId: current.toolCallId,
+      toolName: current.toolName,
+      action,
+      scope: action === "allow" ? current.scope : undefined,
+    });
+  }
+
   async function regenerate() {
     if (!window.api || busy) return;
     setBusy(true);
@@ -343,6 +387,7 @@ export function ChatThreadNode(props: any) {
   const tokenLabel =
     tokens == null ? "—" : tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : `${tokens}`;
   const streaming = busy && msgs[msgs.length - 1]?.role === "assistant";
+  const awaitingApproval = turn?.state === "awaiting_approval" && approval;
   const hasChildren = Boolean(data.hasChildren);
   const treeCollapsed = Boolean(data.isTreeCollapsed);
   const collapsedCount = Number(data.collapsedCount ?? 0);
@@ -551,6 +596,33 @@ export function ChatThreadNode(props: any) {
             )
           ))}
 
+          {awaitingApproval && (
+            <div className="approval-box approval-box--compact nodrag" role="group" aria-label="工具审批">
+              <div className="approval-copy">
+                <div className="approval-title">{approval.preview.title}</div>
+                {approval.preview.description && <div className="approval-desc">{approval.preview.description}</div>}
+                <div className="approval-meta">{approval.toolName} · {approval.target}</div>
+              </div>
+              <div className="approval-actions">
+                <select
+                  value={approval.scope}
+                  aria-label="审批范围"
+                  onChange={(e) => setApproval((current) => current ? { ...current, scope: e.target.value as ApprovalScope } : current)}
+                >
+                  <option value="once">本次</option>
+                  <option value="node-session">当前节点</option>
+                  <option value="persistent">记住目标</option>
+                </select>
+                <button type="button" className="approval-deny" onClick={() => decideApproval("deny")} aria-label="拒绝工具调用" title="拒绝">
+                  <X size={14} />
+                </button>
+                <button type="button" className="approval-allow" onClick={() => decideApproval("allow")} aria-label="允许工具调用" title="允许">
+                  <Check size={14} />
+                </button>
+              </div>
+            </div>
+          )}
+
           {thinking && <div className="thinking"><span className="dot">·</span> 思考中…</div>}
 
           {tb && (
@@ -591,7 +663,7 @@ export function ChatThreadNode(props: any) {
           value={input}
           onChange={setInput}
           busy={busy}
-          placeholder={busy ? "回复中…" : msgs.length ? "继续追问…" : data.seed ? "顺着这个往下问…" : "开始一段思考…"}
+          placeholder={awaitingApproval ? "等待工具审批…" : busy ? "回复中…" : msgs.length ? "继续追问…" : data.seed ? "顺着这个往下问…" : "开始一段思考…"}
           mount={mount}
           canRegenerate={msgs.some((m) => m.role === "user") && !busy}
           onSubmit={submit}

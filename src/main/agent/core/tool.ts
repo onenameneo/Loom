@@ -20,12 +20,26 @@ export interface ToolExecutionContext<TArgs = unknown> {
   update?: (result: ToolResult) => void;
 }
 
+export type ToolApprovalScope = "once" | "node-session" | "persistent";
+
+export interface ToolApprovalRequirement<TArgs = unknown> {
+  required: true;
+  defaultScope?: ToolApprovalScope;
+  normalizeTarget(args: TArgs): string;
+  preview(args: TArgs): {
+    title: string;
+    description?: string;
+    args?: unknown;
+  };
+}
+
 export interface ReadonlyAgentTool<TArgs = unknown, TDetails = unknown> {
   name: string;
   label: string;
   description: string;
   parameters: TSchema;
   readOnly: true;
+  approval?: ToolApprovalRequirement<TArgs>;
   executionMode?: ReadonlyToolExecutionMode;
   execute(ctx: ToolExecutionContext<TArgs>): Promise<ToolResult<TDetails>>;
 }

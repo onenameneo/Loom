@@ -46,3 +46,29 @@ describe("agent/core 纯度护栏", () => {
     expect(violations).toEqual([]);
   });
 });
+
+describe("agent orchestration boundary guardrails", () => {
+  it("Node QueryEngine, Turn Runner, and approval gate avoid pi adapter, Electron renderer, and tool implementation imports", () => {
+    const files = [
+      join(process.cwd(), "src/main/agent/app/nodeQueryEngine.ts"),
+      join(process.cwd(), "src/main/agent/app/turnRunner.ts"),
+      join(process.cwd(), "src/main/agent/hooks/tools/approvalGate.ts"),
+    ];
+    const violations: string[] = [];
+    for (const file of files) {
+      const src = readFileSync(file, "utf-8");
+      for (const m of src.matchAll(IMPORT_RE)) {
+        const mod = m[3];
+        if (
+          mod.includes("/adapters/") ||
+          mod === "electron" ||
+          mod.includes("/renderer/") ||
+          mod.includes("/tools/")
+        ) {
+          violations.push(`${file}: forbidden orchestration import "${mod}"`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+});

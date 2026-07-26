@@ -835,6 +835,83 @@
   color: var(--accent);
 }
 
+.approval-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin: 10px 0;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--warn);
+  border-radius: var(--r-md);
+}
+.approval-box--compact {
+  grid-template-columns: 1fr;
+  gap: 8px;
+  padding: 9px 10px;
+}
+.approval-copy {
+  min-width: 0;
+}
+.approval-title {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.approval-desc,
+.approval-meta {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.approval-meta {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.approval-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.approval-actions select {
+  height: 28px;
+  min-width: 84px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: 11px;
+}
+.approval-actions button {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.approval-actions button:hover,
+.approval-actions button:focus-visible,
+.approval-actions select:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+.approval-allow svg {
+  color: var(--ok);
+}
+.approval-deny svg {
+  color: var(--err);
+}
+
 /* 划词工具条 */
 .seltb {
   position: absolute;

@@ -1,6 +1,16 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 type CanvasEvent = { nodeId: string; type: string; payload?: unknown };
+type ApprovalScope = "once" | "node-session" | "persistent";
+type ApprovalDecision = {
+  requestId: string;
+  nodeId: string;
+  turnId: string;
+  toolCallId: string;
+  toolName: string;
+  action: "allow" | "deny";
+  scope?: ApprovalScope;
+};
 type AgentProc = {
   pid: number;
   tool: "codex" | "claude";
@@ -78,6 +88,8 @@ const api = {
     budget: (nodeId: string): Promise<{ withoutAncestors: number; withAncestors: number; estimated: boolean }> =>
       ipcRenderer.invoke("node:budget", nodeId),
     reset: (nodeId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("node:reset", nodeId),
+    decideApproval: (decision: ApprovalDecision): Promise<{ ok: boolean; reason?: string }> =>
+      ipcRenderer.invoke("approval:decide", decision),
     onEvent: (cb: (e: CanvasEvent) => void) => {
       const l = (_: unknown, d: CanvasEvent) => cb(d);
       ipcRenderer.on("canvas:event", l);

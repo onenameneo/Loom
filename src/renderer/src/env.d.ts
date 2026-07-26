@@ -50,6 +50,50 @@ export interface CanvasEvent {
   payload?: unknown;
 }
 
+export type TurnOperationKind = "send" | "regenerate" | "edit-resend";
+export type TurnState = "running" | "awaiting_approval" | "completed" | "aborted" | "failed";
+export type ApprovalScope = "once" | "node-session" | "persistent";
+
+export interface TurnCanvasEventPayload {
+  nodeId: string;
+  turnId: string;
+  operation: TurnOperationKind;
+  state: TurnState;
+  error?: string;
+  approval?: {
+    requestId: string;
+    toolName: string;
+    toolCallId: string;
+  };
+}
+
+export interface ApprovalRequestPayload {
+  requestId: string;
+  nodeId: string;
+  turnId: string;
+  toolCallId: string;
+  toolName: string;
+  target: string;
+  preview: {
+    title: string;
+    description?: string;
+    args?: unknown;
+  };
+  defaultScope: ApprovalScope;
+  createdAt: number;
+  expiresAt: number;
+}
+
+export interface ApprovalDecisionPayload {
+  requestId: string;
+  nodeId: string;
+  turnId: string;
+  toolCallId: string;
+  toolName: string;
+  action: "allow" | "deny";
+  scope?: ApprovalScope;
+}
+
 export interface ToolCanvasEventPayload {
   state: "start" | "update" | "end";
   toolCallId: string;
@@ -62,6 +106,8 @@ export interface ToolCanvasEventPayload {
 
 export type TypedCanvasEvent =
   | { nodeId: string; type: "tool"; payload: ToolCanvasEventPayload }
+  | { nodeId: string; type: "turn"; payload: TurnCanvasEventPayload }
+  | { nodeId: string; type: "approval"; payload: ApprovalRequestPayload }
   | CanvasEvent;
 
 export interface AgentProc {
@@ -231,6 +277,7 @@ declare global {
         models: () => Promise<{ id: string; name: string }[]>;
         budget: (nodeId: string) => Promise<NodeBudget>;
         reset: (nodeId: string) => Promise<{ ok: boolean }>;
+        decideApproval: (decision: ApprovalDecisionPayload) => Promise<{ ok: boolean; reason?: string }>;
         onEvent: (cb: (e: CanvasEvent) => void) => () => void;
       };
       settings: {

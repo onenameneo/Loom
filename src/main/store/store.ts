@@ -133,6 +133,9 @@ export interface Store {
   appendMessages(nodeId: string, msgs: PersistedMessage[]): void;
   deleteMessagesFrom(nodeId: string, seq: number): void;
   listMessages(nodeId: string): PersistedMessage[];
+
+  isApprovalPolicyAllowed?(toolName: string, target: string): boolean;
+  grantApprovalPolicy?(toolName: string, target: string): void;
 }
 
 export const DEFAULT_SETTINGS: Settings = {

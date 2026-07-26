@@ -362,6 +362,21 @@ export class SqliteStore implements Store {
     }));
   }
 
+  isApprovalPolicyAllowed(toolName: string, target: string): boolean {
+    const row = this.db
+      .prepare("SELECT 1 FROM approval_policies WHERE tool_name = ? AND target = ?")
+      .get(toolName, target);
+    return Boolean(row);
+  }
+
+  grantApprovalPolicy(toolName: string, target: string): void {
+    this.db
+      .prepare(
+        "INSERT INTO approval_policies(tool_name, target, created_at) VALUES (?, ?, ?) ON CONFLICT(tool_name, target) DO NOTHING",
+      )
+      .run(toolName, target, Date.now());
+  }
+
   private toNode(row: NodeRow): NodeRecord {
     const meta = decode<Record<string, unknown>>(row.meta, {});
     const systemPrompt = typeof meta.systemPrompt === "string" ? meta.systemPrompt : undefined;
