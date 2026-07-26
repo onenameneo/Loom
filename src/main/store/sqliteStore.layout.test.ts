@@ -12,6 +12,40 @@ afterEach(() => {
 });
 
 describe("SqliteStore node layouts", () => {
+  it("keeps node graphs isolated by session inside one project", () => {
+    const dir = mkdtempSync(join(tmpdir(), "loom-session-scope-"));
+    dirs.push(dir);
+    const store = new SqliteStore(join(dir, "loom.db"));
+    const project = store.createWorkspace("Project");
+    const firstSession = store.ensureDefaultSession(project.id);
+    const secondSession = store.createSession(project.id, "Second");
+    const first = store.createNode({ sessionId: firstSession.id, title: "First root" });
+    const second = store.createNode({ sessionId: secondSession.id, title: "Second root" });
+
+    expect(store.listNodes(firstSession.id).map((node) => node.id)).toEqual([first.id]);
+    expect(store.listNodes(secondSession.id).map((node) => node.id)).toEqual([second.id]);
+    expect(first.workspaceId).toBe(project.id);
+    expect(second.workspaceId).toBe(project.id);
+  });
+
+  it("cascades nodes and messages when deleting a session", () => {
+    const dir = mkdtempSync(join(tmpdir(), "loom-session-cascade-"));
+    dirs.push(dir);
+    const store = new SqliteStore(join(dir, "loom.db"));
+    const project = store.createWorkspace("Project");
+    const firstSession = store.ensureDefaultSession(project.id);
+    const secondSession = store.createSession(project.id, "Second");
+    const first = store.createNode({ sessionId: firstSession.id, title: "First root" });
+    const second = store.createNode({ sessionId: secondSession.id, title: "Second root" });
+    store.appendMessages(second.id, [{ id: "m1", seq: 0, role: "user", content: { role: "user", content: "hello" } as any }]);
+
+    store.deleteSession(secondSession.id);
+
+    expect(store.getNode(first.id)?.id).toBe(first.id);
+    expect(store.getNode(second.id)).toBeUndefined();
+    expect(store.listMessages(second.id)).toEqual([]);
+  });
+
   it("returns a layout only when all four persisted values are valid", () => {
     const dir = mkdtempSync(join(tmpdir(), "loom-layout-"));
     dirs.push(dir);

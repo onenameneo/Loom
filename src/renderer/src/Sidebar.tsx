@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { Bot, ChevronDown, ChevronRight, Pencil, Pin, Terminal, Trash2 } from "lucide-react";
-import type { ActivityTool, AgentProc, CanvasNodeDto, SettingsPayload, WorkspaceMeta } from "./env";
+import type { ActivityTool, AgentProc, CanvasNodeDto, ProjectMeta, SessionMeta, SettingsPayload, WorkspaceMeta } from "./env";
 import { IconMoon, IconPlus, IconSun } from "./icons";
 import {
   agentTitle,
@@ -16,7 +16,7 @@ import {
   SURFACES,
   type SurfaceCtx,
 } from "./surfaces";
-import { ConfirmDialog, RenameDialog, Tip } from "./ui/dialogs";
+import { ConfirmDialog, CreateProjectDialog, RenameDialog, Tip } from "./ui/dialogs";
 
 // 由某会话的节点列表推导「主线→分支」的缩进行（父子关系，深度优先）。
 function outlineRows(nodes: CanvasNodeDto[]): Array<{ node: CanvasNodeDto; depth: number }> {
@@ -43,6 +43,10 @@ export default function Sidebar({
   onRenameWorkspace,
   onDeleteWorkspace,
   onPinWorkspace,
+  onSelectProject,
+  onCreateSession,
+  onRenameSession,
+  onDeleteSession,
   theme,
   toggleTheme,
 }: {
@@ -51,33 +55,40 @@ export default function Sidebar({
   ctx: SurfaceCtx;
   onSelectWorkspace: (id: string) => void | Promise<void>;
   onFocusNode: (workspaceId: string, nodeId: string) => void;
-  onCreateWorkspace: () => void;
+  onCreateWorkspace: (input?: { name?: string; sourceFolders?: string[] }) => void | Promise<void>;
   onRenameWorkspace: (id: string, name: string) => void;
   onDeleteWorkspace: (id: string) => void;
   onPinWorkspace: (id: string, pinned: boolean) => void;
+  onSelectProject?: (id: string) => void;
+  onCreateSession?: () => void;
+  onRenameSession?: (id: string, title: string) => void;
+  onDeleteSession?: (id: string) => void;
   theme: "light" | "dark";
   toggleTheme: () => void;
   settings?: SettingsPayload | null;
 }) {
-  const [renaming, setRenaming] = useState<WorkspaceMeta | null>(null);
-  const [deleting, setDeleting] = useState<WorkspaceMeta | null>(null);
+  const [renaming, setRenaming] = useState<ProjectMeta | null>(null);
+  const [deleting, setDeleting] = useState<ProjectMeta | null>(null);
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [renamingSession, setRenamingSession] = useState<SessionMeta | null>(null);
+  const [deletingSession, setDeletingSession] = useState<SessionMeta | null>(null);
   // 每个会话独立展开：expanded 记哪些会话展开，outlines 存各自的节点列表。
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["agent:claude", "agent:codex"]));
   const [outlines, setOutlines] = useState<Record<string, CanvasNodeDto[]>>({});
 
-  // 活跃会话自动展开（切到它时把它的树打开）
+  // 活跃 Session 自动展开（切到它时把它的树打开）
   useEffect(() => {
-    if (ctx.activeWorkspaceId) {
-      setExpanded((prev) => (prev.has(ctx.activeWorkspaceId!) ? prev : new Set(prev).add(ctx.activeWorkspaceId!)));
+    if (ctx.activeSessionId) {
+      setExpanded((prev) => (prev.has(ctx.activeSessionId!) ? prev : new Set(prev).add(ctx.activeSessionId!)));
     }
-  }, [ctx.activeWorkspaceId]);
+  }, [ctx.activeSessionId]);
 
-  // 为所有「已展开」的会话拉取各自的节点（树变化时 treeVersion 触发重取）
+  // 为所有「已展开」的 Session 拉取各自的节点（树变化时 treeVersion 触发重取）
   useEffect(() => {
     if (!window.api || activeSurface !== "workspace") return;
     let alive = true;
-    const workspaceIds = new Set(ctx.workspaces.map((w) => w.id));
-    const ids = [...expanded].filter((id) => workspaceIds.has(id));
+    const sessionIds = new Set(ctx.sessions.map((session) => session.id));
+    const ids = [...expanded].filter((id) => sessionIds.has(id));
     Promise.all(
       ids.map((id) => window.api!.canvas.list(id).then((nodes) => [id, nodes] as const)),
     ).then((entries) => {
@@ -204,37 +215,28 @@ export default function Sidebar({
       {activeSurface === "workspace" && (
         <>
           <div className="sb-label">
-            会话
-            <Tip label="新建会话 (⌘N)">
-              <button className="sb-add" onClick={onCreateWorkspace}>
+            项目
+            <Tip label="新建项目">
+              <button className="sb-add" onClick={() => setCreatingProject(true)}>
                 <IconPlus />
               </button>
             </Tip>
           </div>
-          {ctx.workspaces.length === 0 && <div className="sb-hint">（还没有，点 + 新建）</div>}
-          {ctx.workspaces.map((w: WorkspaceMeta) => {
-            const isExp = expanded.has(w.id);
-            const rows = isExp ? outlineRows(outlines[w.id] ?? []) : [];
-            const activeNodeId = ctx.workspaceMode === "canvas" ? ctx.focusNodeId : ctx.chatNodeId;
+          {ctx.projects.length === 0 && <div className="sb-hint">（还没有，点 + 新建）</div>}
+          {ctx.projects.map((w: WorkspaceMeta) => {
             return (
               <Fragment key={w.id}>
                 <div
-                  className={`sb-ws ${ctx.activeWorkspaceId === w.id ? "active" : ""}`}
-                  onClick={() => onSelectWorkspace(w.id)}
+                  className={`sb-ws ${ctx.activeProjectId === w.id ? "active" : ""}`}
+                  onClick={() => onSelectProject?.(w.id)}
                   onDoubleClick={() => setRenaming(w)}
                 >
-                  <button
-                    className="sb-ws-chev"
-                    title={isExp ? "收起" : "展开分支"}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleExpand(w.id);
-                    }}
-                  >
-                    {isExp ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                  </button>
+                  <span className="sb-ws-chev" />
                   <span className={`sq ${w.pinned ? "pinned" : ""}`} />
-                  <span className="ws-name">{w.name}</span>
+                  <span className="ws-name">
+                    {w.name}
+                    {w.sourceFolders?.[0] && <small>{w.sourceFolders[0]}</small>}
+                  </span>
                   <span className="ws-actions">
                     <Tip label={w.pinned ? "取消置顶" : "置顶"}>
                       <button
@@ -268,25 +270,87 @@ export default function Sidebar({
                     </Tip>
                   </span>
                 </div>
-                {isExp && rows.length > 0 && (
-                  <div className="sb-outline">
-                    {rows.map(({ node, depth }) => (
-                      <button
-                        key={node.id}
-                        className={`sb-branch ${ctx.activeWorkspaceId === w.id && (activeNodeId === node.id || (!activeNodeId && depth === 0)) ? "active" : ""}`}
-                        style={{ paddingLeft: 30 + depth * 14 }}
-                        onClick={() => onFocusNode(w.id, node.id)}
-                        title={node.title}
-                      >
-                        <span className="branch-dot" />
-                        <span>{depth === 0 ? "主线" : node.title || "分支"}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
               </Fragment>
             );
           })}
+          {ctx.activeProjectId && (
+            <>
+              <div className="sb-label">
+                会话
+                <Tip label="新建会话 (⌘N)">
+                  <button className="sb-add" onClick={onCreateSession}>
+                    <IconPlus />
+                  </button>
+                </Tip>
+              </div>
+              {ctx.sessions.length === 0 && <div className="sb-hint">（当前项目还没有会话）</div>}
+              {ctx.sessions.map((session) => {
+                const isExp = expanded.has(session.id);
+                const rows = isExp ? outlineRows(outlines[session.id] ?? []) : [];
+                const activeNodeId = ctx.workspaceMode === "canvas" ? ctx.focusNodeId : ctx.chatNodeId;
+                return (
+                  <Fragment key={session.id}>
+                    <div
+                      className={`sb-ws ${ctx.activeSessionId === session.id ? "active" : ""}`}
+                      onClick={() => onSelectWorkspace(session.id)}
+                      onDoubleClick={() => setRenamingSession(session)}
+                    >
+                      <button
+                        className="sb-ws-chev"
+                        title={isExp ? "收起" : "展开分支"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleExpand(session.id);
+                        }}
+                      >
+                        {isExp ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                      </button>
+                      <span className="sq" />
+                      <span className="ws-name">{session.title}</span>
+                      <span className="ws-actions">
+                        <Tip label="重命名">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRenamingSession(session);
+                            }}
+                          >
+                            <Pencil size={13} />
+                          </button>
+                        </Tip>
+                        <Tip label="删除">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeletingSession(session);
+                            }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </Tip>
+                      </span>
+                    </div>
+                    {isExp && rows.length > 0 && (
+                      <div className="sb-outline">
+                        {rows.map(({ node, depth }) => (
+                          <button
+                            key={node.id}
+                            className={`sb-branch ${ctx.activeSessionId === session.id && (activeNodeId === node.id || (!activeNodeId && depth === 0)) ? "active" : ""}`}
+                            style={{ paddingLeft: 30 + depth * 14 }}
+                            onClick={() => onFocusNode(session.id, node.id)}
+                            title={node.title}
+                          >
+                            <span className="branch-dot" />
+                            <span>{depth === 0 ? "主线" : node.title || "分支"}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </>
+          )}
         </>
       )}
 
@@ -302,18 +366,46 @@ export default function Sidebar({
       <RenameDialog
         open={!!renaming}
         onOpenChange={(o) => !o && setRenaming(null)}
-        title="重命名会话"
+        title="重命名项目"
         initial={renaming?.name ?? ""}
         onSubmit={(name) => renaming && onRenameWorkspace(renaming.id, name)}
+      />
+      <RenameDialog
+        open={!!renamingSession}
+        onOpenChange={(o) => !o && setRenamingSession(null)}
+        title="重命名会话"
+        initial={renamingSession?.title ?? ""}
+        onSubmit={(name) => renamingSession && onRenameSession?.(renamingSession.id, name)}
+      />
+      <CreateProjectDialog
+        open={creatingProject}
+        onOpenChange={setCreatingProject}
+        onPickFolder={async () => {
+          const picker = window.api?.projects?.pickSourceFolder ?? window.api?.acp?.pickDir;
+          if (!picker) throw new Error("当前窗口未暴露目录选择器，请重启应用后再试。");
+          const result = await picker();
+          return result.canceled ? undefined : result.path;
+        }}
+        onSubmit={onCreateWorkspace}
       />
       <ConfirmDialog
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(null)}
-        title={`删除会话「${deleting?.name ?? ""}」？`}
+        title={`删除项目「${deleting?.name ?? ""}」？`}
         description="此操作不可撤销。"
         onConfirm={() => {
           if (deleting) onDeleteWorkspace(deleting.id);
           setDeleting(null);
+        }}
+      />
+      <ConfirmDialog
+        open={!!deletingSession}
+        onOpenChange={(o) => !o && setDeletingSession(null)}
+        title={`删除会话「${deletingSession?.title ?? ""}」？`}
+        description="此操作不可撤销。"
+        onConfirm={() => {
+          if (deletingSession) onDeleteSession?.(deletingSession.id);
+          setDeletingSession(null);
         }}
       />
     </div>

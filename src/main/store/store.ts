@@ -38,12 +38,24 @@ export interface Settings {
   apiKeyEnc?: string; // 本地保存的 API key 载荷；字段名沿用旧 schema，避免迁移。
 }
 
-export interface Workspace {
+export interface Project {
   id: string;
   name: string;
   createdAt: number;
   updatedAt: number;
   pinned: boolean;
+  order: number;
+  sourceFolders?: string[];
+}
+
+export type Workspace = Project;
+
+export interface SessionRecord {
+  id: string;
+  projectId: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
   order: number;
 }
 
@@ -51,6 +63,7 @@ export interface StoreData {
   version: number;
   settings: Settings;
   workspaces: Workspace[];
+  sessions?: SessionRecord[];
 }
 
 export interface PersistedMessage {
@@ -90,6 +103,7 @@ export function isValidNodeLayout(value: unknown): value is NodeLayout {
 
 export interface NodeRecord {
   id: string;
+  sessionId: string;
   workspaceId: string;
   parentId?: string;
   title: string;
@@ -109,15 +123,23 @@ export interface Store {
   setApiKeyEnc(enc: string | undefined): void;
 
   listWorkspaces(): Workspace[];
-  createWorkspace(name?: string): Workspace;
+  createWorkspace(input?: string | { name?: string; sourceFolders?: string[] }): Workspace;
   renameWorkspace(id: string, name: string): void;
   deleteWorkspace(id: string): void;
   setPinned(id: string, pinned: boolean): void;
 
-  listNodes(workspaceId: string): NodeRecord[];
+  listSessions(projectId: string): SessionRecord[];
+  getSession(id: string): SessionRecord | undefined;
+  ensureDefaultSession(projectId: string): SessionRecord;
+  createSession(projectId: string, title?: string): SessionRecord;
+  renameSession(id: string, title: string): void;
+  deleteSession(id: string): void;
+
+  listNodes(sessionId: string): NodeRecord[];
   getNode(id: string): NodeRecord | undefined;
   createNode(input: {
-    workspaceId: string;
+    sessionId?: string;
+    workspaceId?: string;
     parentId?: string;
     title: string;
     seed?: unknown;

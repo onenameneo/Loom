@@ -469,7 +469,7 @@ export default function Canvas({
         dtos = await window.api.canvas.open(workspaceId);
       } else {
         // 浏览器预览：本地起一条主线，画布仍可渲染
-        dtos = [{ id: "root", workspaceId, title: "主线", mountAncestors: false, messages: [] }];
+        dtos = [{ id: "root", sessionId: workspaceId, projectId: "project_demo", workspaceId, title: "主线", mountAncestors: false, messages: [] }];
       }
       if (!alive) return;
       const pos = layout(dtos);
@@ -534,7 +534,7 @@ export default function Canvas({
       const seed = { text: seedText, from, parent: sourceId };
       let id: string;
       if (window.api) {
-        const dto = await window.api.canvas.create({ workspaceId, parentId: sourceId, seed });
+        const dto = await window.api.canvas.create({ sessionId: workspaceId, parentId: sourceId, seed });
         id = dto.id;
       } else {
         id = `local_${Math.round(performance.now())}`;
@@ -591,6 +591,8 @@ export default function Canvas({
   const tidyLayout = useCallback(() => {
     const dtos = nodes.map((node) => ({
       id: node.id,
+      sessionId: String((node.data as any)?.workspaceId ?? workspaceId),
+      projectId: String((node.data as any)?.projectId ?? "project"),
       workspaceId: String((node.data as any)?.workspaceId ?? workspaceId),
       parentId: (node.data as any)?.parentId,
       title: String((node.data as any)?.title ?? ""),

@@ -28,6 +28,8 @@ export interface NodeSeed {
 }
 export interface CanvasNodeDto {
   id: string;
+  sessionId: string;
+  projectId: string;
   workspaceId: string;
   parentId?: string;
   title: string;
@@ -230,12 +232,23 @@ export interface AcpEvent {
   hint?: string;
 }
 
-export interface WorkspaceMeta {
+export interface ProjectMeta {
   id: string;
   name: string;
   createdAt: number;
   updatedAt: number;
   pinned: boolean;
+  order: number;
+  sourceFolders?: string[];
+}
+export type WorkspaceMeta = ProjectMeta;
+
+export interface SessionMeta {
+  id: string;
+  projectId: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
   order: number;
 }
 
@@ -255,9 +268,9 @@ declare global {
     api: {
       platform: NodeJS.Platform;
       canvas: {
-        list: (workspaceId: string) => Promise<CanvasNodeDto[]>;
-        open: (workspaceId: string) => Promise<CanvasNodeDto[]>;
-        create: (arg: { workspaceId: string; parentId?: string; seed?: NodeSeed; title?: string }) => Promise<CanvasNodeDto>;
+        list: (sessionId: string) => Promise<CanvasNodeDto[]>;
+        open: (sessionId: string) => Promise<CanvasNodeDto[]>;
+        create: (arg: { sessionId: string; parentId?: string; seed?: NodeSeed; title?: string }) => Promise<CanvasNodeDto>;
         send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[]) => Promise<{ ok: boolean }>;
         abort: (nodeId: string) => Promise<{ ok: boolean }>;
         regenerate: (nodeId: string) => Promise<{ ok: boolean }>;
@@ -313,6 +326,20 @@ declare global {
         rename: (id: string, name: string) => Promise<{ ok: boolean }>;
         delete: (id: string) => Promise<{ ok: boolean }>;
         pin: (id: string, pinned: boolean) => Promise<{ ok: boolean }>;
+      };
+      projects: {
+        list: () => Promise<ProjectMeta[]>;
+        create: (input?: string | { name?: string; sourceFolders?: string[] }) => Promise<ProjectMeta>;
+        rename: (id: string, name: string) => Promise<{ ok: boolean }>;
+        delete: (id: string) => Promise<{ ok: boolean }>;
+        pin: (id: string, pinned: boolean) => Promise<{ ok: boolean }>;
+        pickSourceFolder: () => Promise<{ canceled: boolean; path?: string }>;
+      };
+      sessions: {
+        list: (projectId: string) => Promise<SessionMeta[]>;
+        create: (projectId: string, title?: string) => Promise<SessionMeta>;
+        rename: (id: string, title: string) => Promise<{ ok: boolean }>;
+        delete: (id: string) => Promise<{ ok: boolean }>;
       };
       onMenu: (cb: (action: string) => void) => () => void;
       onFullScreen: (cb: (fullscreen: boolean) => void) => () => void;

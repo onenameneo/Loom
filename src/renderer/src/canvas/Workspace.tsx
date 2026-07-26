@@ -40,7 +40,7 @@ export default function Workspace({
   const reload = useCallback(async () => {
     let dtos: CanvasNodeDto[];
     if (window.api) dtos = await window.api.canvas.open(workspaceId);
-    else dtos = [{ id: "root", workspaceId, title: "主线", mountAncestors: false, messages: [] }];
+    else dtos = [{ id: "root", sessionId: workspaceId, projectId: "project_demo", workspaceId, title: "主线", mountAncestors: false, messages: [] }];
     setNodeList(dtos);
     setNodeCount(dtos.length);
   }, [workspaceId]);
@@ -82,7 +82,7 @@ export default function Workspace({
       if (!chatNode) return;
       if (window.api) {
         await window.api.canvas.create({
-          workspaceId,
+          sessionId: workspaceId,
           parentId: chatNode.id,
           seed: { text: seedText, from: chatNode.title || "主线", parent: chatNode.id },
         });

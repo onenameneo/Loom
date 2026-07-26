@@ -18,7 +18,9 @@ import type {
   ActivityTool,
   ActivityToolStatus,
   AgentProc,
+  ProjectMeta,
   SettingsPayload,
+  SessionMeta,
   WorkspaceMeta,
 } from "./env";
 import { IconEye, IconPlus, IconSettings, IconWorkspace } from "./icons";
@@ -27,8 +29,14 @@ import { useTitlebarActions, useTitlebarContext } from "./titlebar/Titlebar";
 
 export interface SurfaceCtx {
   workspaces: WorkspaceMeta[];
+  projects: ProjectMeta[];
+  sessions: SessionMeta[];
   activeWorkspaceId: string | null;
-  createWorkspace: () => void;
+  activeProjectId: string | null;
+  activeSessionId: string | null;
+  createWorkspace: (input?: { name?: string; sourceFolders?: string[] }) => void | Promise<void>;
+  createProject: (input?: { name?: string; sourceFolders?: string[] }) => void | Promise<void>;
+  createSession: () => void;
   goSettings: () => void;
   settings: SettingsPayload | null;
   reloadSettings: () => void;
@@ -62,14 +70,26 @@ export interface Surface {
 
 // ---- 会话主面（对话/画布合一；本阶段单节点聊天）----
 function WorkspacePanel({ ctx }: { ctx: SurfaceCtx }) {
-  const ws = ctx.workspaces.find((w) => w.id === ctx.activeWorkspaceId);
+  const project = ctx.projects.find((p) => p.id === ctx.activeProjectId);
+  const session = ctx.sessions.find((s) => s.id === ctx.activeSessionId);
   const noKey = ctx.settings && !ctx.settings.hasKey;
-  if (!ws) {
+  if (!project) {
+    return (
+      <div className="surface-empty">
+        <div className="big">还没有项目</div>
+        <div className="sub">一个项目可以包含多个独立会话。</div>
+        <button className="btn" onClick={() => void ctx.createProject()}>
+          <IconPlus /> 新建项目
+        </button>
+      </div>
+    );
+  }
+  if (!session) {
     return (
       <div className="surface-empty">
         <div className="big">还没有会话</div>
         <div className="sub">一个会话 = 一张可分支的研究画布。</div>
-        <button className="btn" onClick={ctx.createWorkspace}>
+        <button className="btn" onClick={ctx.createSession}>
           <IconPlus /> 新建会话
         </button>
       </div>
@@ -77,9 +97,9 @@ function WorkspacePanel({ ctx }: { ctx: SurfaceCtx }) {
   }
   return (
     <Workspace
-      key={ws.id}
-      workspaceId={ws.id}
-      workspaceName={ws.name}
+      key={session.id}
+      workspaceId={session.id}
+      workspaceName={session.title}
       model={ctx.settings?.resolvedModel}
       noKey={Boolean(noKey)}
       goSettings={ctx.goSettings}
@@ -628,7 +648,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
 }
 
 export const SURFACES: Surface[] = [
-  { id: "workspace", label: "会话", icon: IconWorkspace, Panel: WorkspacePanel },
+  { id: "workspace", label: "项目", icon: IconWorkspace, Panel: WorkspacePanel },
   {
     id: "observatory",
     label: "工作站",

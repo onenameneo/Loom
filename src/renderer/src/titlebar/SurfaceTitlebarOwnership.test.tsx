@@ -27,8 +27,14 @@ beforeEach(() => {
 function surfaceCtx(): SurfaceCtx {
   return {
     workspaces: [],
+    projects: [],
+    sessions: [],
     activeWorkspaceId: null,
+    activeProjectId: null,
+    activeSessionId: null,
     createWorkspace: vi.fn(),
+    createProject: vi.fn(),
+    createSession: vi.fn(),
     goSettings: vi.fn(),
     settings: null,
     reloadSettings: vi.fn(),

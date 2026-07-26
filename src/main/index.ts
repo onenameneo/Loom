@@ -1,6 +1,6 @@
 import "dotenv/config"; // 先加载 .env（ANTHROPIC_API_KEY / MODEL_ID / BASE_URL）
 import { join } from "path";
-import { app, BrowserWindow, ipcMain, Menu, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from "electron";
 import { dbPath, SqliteStore } from "./store/sqliteStore";
 import type { Store } from "./store/store";
 import { registerCanvas } from "./canvas";
@@ -71,9 +71,14 @@ function registerIpc() {
     return { ok: true, encrypted: r.encrypted };
   });
 
-  // ---- workspaces ----
+  // ---- projects / sessions ----
+  const createProject = (input?: string | { name?: string; sourceFolders?: string[] }) => {
+    const project = store.createWorkspace(input);
+    store.ensureDefaultSession(project.id);
+    return project;
+  };
   ipcMain.handle("ws:list", () => store.listWorkspaces());
-  ipcMain.handle("ws:create", (_e, name?: string) => store.createWorkspace(name));
+  ipcMain.handle("ws:create", (_e, name?: string) => createProject(name));
   ipcMain.handle("ws:rename", (_e, { id, name }) => {
     store.renameWorkspace(id, name);
     return { ok: true };
@@ -86,6 +91,51 @@ function registerIpc() {
     store.setPinned(id, pinned);
     return { ok: true };
   });
+  ipcMain.handle("project:list", () => store.listWorkspaces());
+  ipcMain.handle("project:create", (_e, input?: string | { name?: string; sourceFolders?: string[] }) => createProject(input));
+  ipcMain.handle("project:rename", (_e, { id, name }) => {
+    store.renameWorkspace(id, name);
+    return { ok: true };
+  });
+  ipcMain.handle("project:delete", (_e, id: string) => {
+    store.deleteWorkspace(id);
+    return { ok: true };
+  });
+  ipcMain.handle("project:pin", (_e, { id, pinned }) => {
+    store.setPinned(id, pinned);
+    return { ok: true };
+  });
+  ipcMain.handle("project:pickSourceFolder", async () => {
+    const options: Electron.OpenDialogOptions = {
+      properties: ["openDirectory", "createDirectory"],
+      title: "选择项目文件夹",
+    };
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    return { canceled: result.canceled, path: result.filePaths[0] };
+  });
+  ipcMain.handle("session:list", (_e, projectId: string) => {
+    store.ensureDefaultSession(projectId);
+    return store.listSessions(projectId);
+  });
+  ipcMain.handle("session:create", (_e, { projectId, title }: { projectId: string; title?: string }) => {
+    const session = store.createSession(projectId, title);
+    store.createNode({ sessionId: session.id, title: "主线", mountAncestors: false });
+    return session;
+  });
+  ipcMain.handle("session:rename", (_e, { id, title }: { id: string; title: string }) => {
+    store.renameSession(id, title);
+    return { ok: true };
+  });
+  ipcMain.handle("session:delete", (_e, id: string) => {
+    const session = store.getSession(id);
+    if (!session) return { ok: false };
+    store.deleteSession(id);
+    if (store.listSessions(session.projectId).length === 0) {
+      const replacement = store.ensureDefaultSession(session.projectId);
+      store.createNode({ sessionId: replacement.id, title: "主线", mountAncestors: false });
+    }
+    return { ok: true };
+  });
 }
 
 function buildMenu() {
@@ -96,7 +146,8 @@ function buildMenu() {
     {
       label: "文件",
       submenu: [
-        { label: "新建会话", accelerator: "CmdOrCtrl+N", click: menuAction("new-workspace") },
+        { label: "新建项目", accelerator: "CmdOrCtrl+Shift+N", click: menuAction("new-project") },
+        { label: "新建会话", accelerator: "CmdOrCtrl+N", click: menuAction("new-session") },
         { type: "separator" as const },
         { label: "设置…", accelerator: "CmdOrCtrl+,", click: menuAction("settings") },
         isMac ? { role: "close" as const } : { role: "quit" as const },
@@ -108,7 +159,7 @@ function buildMenu() {
       submenu: [
         { label: "切换侧栏", accelerator: "CmdOrCtrl+\\", click: menuAction("toggle-sidebar") },
         { type: "separator" as const },
-        { label: "会话", accelerator: "CmdOrCtrl+1", click: menuAction("surface:workspace") },
+        { label: "项目", accelerator: "CmdOrCtrl+1", click: menuAction("surface:workspace") },
         { label: "工作站", accelerator: "CmdOrCtrl+2", click: menuAction("surface:observatory") },
         { type: "separator" as const },
         { role: "toggleDevTools" as const },

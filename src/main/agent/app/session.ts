@@ -7,7 +7,7 @@ import { buildContextPlan, isLlmMessage, roleOf, textOf } from "../core/context"
 import { budget as computeBudget, type Budget } from "../core/budget";
 import type { ReadonlyAgentTool } from "../core/tool";
 import { createHookRegistry, createToolLifecycleHook } from "../hooks";
-import { createDefaultReadonlyTools } from "../tools";
+import { createDefaultReadonlyTools, createProjectFileTools } from "../tools";
 import { createApprovalBroker } from "./approvalBroker";
 import { createApprovalPolicyStore } from "./approvalPolicy";
 import { createToolRegistry } from "./toolRuntime";
@@ -27,7 +27,7 @@ import type {
 } from "../ports";
 
 // ---------------------------------------------------------------------------
-// ② 应用编排 · 单画布的多节点会话：运行时图缓存 + 消息持久化编排 + 引擎驱动。
+// ② 应用编排 · 单 Session 画布的多节点运行时：图缓存 + 消息持久化编排 + 引擎驱动。
 // 只依赖 ① 核心与 ③ 端口（store/engine/events/ids/clock）；不认 pi/electron/sqlite。
 // 树运算走 core/graph，上下文装配走 core/context，预算走 core/budget。
 // ---------------------------------------------------------------------------
@@ -35,7 +35,8 @@ import type {
 /** 运行时视角的节点（图缓存读快照，含 layout/messageMeta 等运行期字段）。 */
 export interface CanvasNode {
   id: string;
-  workspaceId: string;
+  sessionId: string;
+  projectId: string;
   parentId?: string;
   title: string;
   seed?: Seed;
@@ -48,7 +49,7 @@ export interface CanvasNode {
   messageMeta: unknown[];
 }
 
-export interface SessionDeps {
+export interface CanvasRuntimeDeps {
   store: StorePort;
   events: EventSinkPort;
   ids: IdPort;
@@ -87,9 +88,10 @@ interface CanvasMessageDto {
 
 const NO_KEY_ERROR = "未配置 API key（去设置填写，或设置 ANTHROPIC_API_KEY）。";
 
-export function createAgentSession(deps: SessionDeps) {
+export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   const { store, events, ids, clock, getApiKey } = deps;
   const nodes = new Map<string, CanvasNode>();
+  let activeSessionId: string | undefined;
 
   // ---- 图缓存 & 映射 --------------------------------------------------------
 
@@ -100,7 +102,8 @@ export function createAgentSession(deps: SessionDeps) {
   function toCanvasNode(record: NodeRecord): CanvasNode {
     return {
       id: record.id,
-      workspaceId: record.workspaceId,
+      sessionId: record.sessionId,
+      projectId: record.workspaceId,
       parentId: record.parentId,
       title: record.title,
       seed: record.seed as Seed | undefined,
@@ -114,14 +117,26 @@ export function createAgentSession(deps: SessionDeps) {
     };
   }
 
-  function hydrateWorkspace(workspaceId: string): CanvasNode[] {
-    const records = store.listNodes(workspaceId);
+  function hydrateSession(sessionId: string): CanvasNode[] {
+    const records = store.listNodes(sessionId);
     for (const [id, node] of nodes) {
-      if (node.workspaceId === workspaceId) nodes.delete(id);
+      if (node.sessionId === sessionId) nodes.delete(id);
     }
     const list = records.map(toCanvasNode);
     for (const node of list) nodes.set(node.id, node);
     return list;
+  }
+
+  function activateSession(sessionId: string) {
+    if (activeSessionId === sessionId) return;
+    activeSessionId = sessionId;
+    for (const node of nodes.values()) {
+      if (node.sessionId === sessionId) continue;
+      queries.invalidate(node.id);
+      approvals.cancelByNode(node.id, "session changed");
+      policies.clearNodeSession(node.id);
+      engine.drop(node.id);
+    }
   }
 
   function loadNode(nodeId: string): CanvasNode | undefined {
@@ -159,6 +174,12 @@ export function createAgentSession(deps: SessionDeps) {
     return n ? { systemPrompt: n.systemPrompt, model: n.model, messages: n.messages } : undefined;
   }
 
+  function sourceFoldersFor(nodeId: string): string[] {
+    const node = loadNode(nodeId);
+    if (!node) return [];
+    return store.listWorkspaces().find((project) => project.id === node.projectId)?.sourceFolders ?? [];
+  }
+
   const tools = createToolRegistry(createDefaultReadonlyTools(clock));
 
   // Hook 扩展面：能力经 registerHook 落卡片；工具生命周期经稳定 Loom 事件输出。
@@ -183,7 +204,7 @@ export function createAgentSession(deps: SessionDeps) {
   const engine = deps.createEngine({
     buildContext,
     getNodeInit,
-    getTools: () => tools.list(),
+    getTools: (nodeId) => [...tools.list(), ...createProjectFileTools(sourceFoldersFor(nodeId))],
     dispatcher: hookRegistry,
     getCurrentTurnId: (nodeId) => queries.state(nodeId)?.turnId,
   });
@@ -205,7 +226,9 @@ export function createAgentSession(deps: SessionDeps) {
 
   const dto = (n: CanvasNode) => ({
     id: n.id,
-    workspaceId: n.workspaceId,
+    sessionId: n.sessionId,
+    projectId: n.projectId,
+    workspaceId: n.sessionId,
     parentId: n.parentId,
     title: n.title,
     seed: n.seed,
@@ -275,25 +298,26 @@ export function createAgentSession(deps: SessionDeps) {
 
   // ---- 对外方法（一一对应 IPC）---------------------------------------------
 
-  function list(workspaceId: string) {
-    return hydrateWorkspace(workspaceId).map(dto);
+  function list(sessionId: string) {
+    return hydrateSession(sessionId).map(dto);
   }
 
-  // 打开会话：原子地「返回已有节点，或没有则建一条主线」。
-  function open(workspaceId: string) {
-    let items = hydrateWorkspace(workspaceId);
+  // 打开产品 Session：返回已有节点，或没有则建一条主线。
+  function open(sessionId: string) {
+    activateSession(sessionId);
+    let items = hydrateSession(sessionId);
     if (items.length === 0) {
-      const root = toCanvasNode(store.createNode({ workspaceId, title: "主线", mountAncestors: false }));
+      const root = toCanvasNode(store.createNode({ sessionId, title: "主线", mountAncestors: false }));
       nodes.set(root.id, root);
       items = [root];
     }
     return items.map(dto);
   }
 
-  function create(arg: { workspaceId: string; parentId?: string; seed?: Seed; title?: string }) {
+  function create(arg: { sessionId: string; parentId?: string; seed?: Seed; title?: string }) {
     const node = toCanvasNode(
       store.createNode({
-        workspaceId: arg.workspaceId,
+        sessionId: arg.sessionId,
         parentId: arg.parentId,
         title: arg.title ?? (arg.seed ? "新分支" : "主线"),
         seed: arg.seed,
@@ -461,7 +485,7 @@ export function createAgentSession(deps: SessionDeps) {
   function deleteNode(nodeId: string) {
     const target = loadNode(nodeId);
     if (!target || !target.parentId) return { ok: false, deletedIds: [] };
-    hydrateWorkspace(target.workspaceId);
+    hydrateSession(target.sessionId);
     const deletedIds = [nodeId, ...descendantsOf(nodeId)];
     store.deleteNode(nodeId);
     for (const id of deletedIds) {
@@ -555,3 +579,5 @@ export function createAgentSession(deps: SessionDeps) {
     registerHook: (hook: AgentHook) => hookRegistry.use(hook),
   };
 }
+
+export const createAgentSession = createCanvasRuntime;

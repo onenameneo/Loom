@@ -60,9 +60,9 @@ type AcpEvent = {
 const api = {
   platform: process.platform,
   canvas: {
-    list: (workspaceId: string): Promise<any[]> => ipcRenderer.invoke("node:list", workspaceId),
-    open: (workspaceId: string): Promise<any[]> => ipcRenderer.invoke("node:open", workspaceId),
-    create: (arg: { workspaceId: string; parentId?: string; seed?: any; title?: string }): Promise<any> =>
+    list: (sessionId: string): Promise<any[]> => ipcRenderer.invoke("node:list", sessionId),
+    open: (sessionId: string): Promise<any[]> => ipcRenderer.invoke("node:open", sessionId),
+    create: (arg: { sessionId: string; parentId?: string; seed?: any; title?: string }): Promise<any> =>
       ipcRenderer.invoke("node:create", arg),
     send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[]): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("node:send", { nodeId, text, images }),
@@ -148,6 +148,25 @@ const api = {
     delete: (id: string): Promise<any> => ipcRenderer.invoke("ws:delete", id),
     pin: (id: string, pinned: boolean): Promise<any> =>
       ipcRenderer.invoke("ws:pin", { id, pinned }),
+  },
+  projects: {
+    list: (): Promise<any[]> => ipcRenderer.invoke("project:list"),
+    create: (input?: string | { name?: string; sourceFolders?: string[] }): Promise<any> => ipcRenderer.invoke("project:create", input),
+    rename: (id: string, name: string): Promise<any> =>
+      ipcRenderer.invoke("project:rename", { id, name }),
+    delete: (id: string): Promise<any> => ipcRenderer.invoke("project:delete", id),
+    pin: (id: string, pinned: boolean): Promise<any> =>
+      ipcRenderer.invoke("project:pin", { id, pinned }),
+    pickSourceFolder: (): Promise<{ canceled: boolean; path?: string }> =>
+      ipcRenderer.invoke("project:pickSourceFolder"),
+  },
+  sessions: {
+    list: (projectId: string): Promise<any[]> => ipcRenderer.invoke("session:list", projectId),
+    create: (projectId: string, title?: string): Promise<any> =>
+      ipcRenderer.invoke("session:create", { projectId, title }),
+    rename: (id: string, title: string): Promise<any> =>
+      ipcRenderer.invoke("session:rename", { id, title }),
+    delete: (id: string): Promise<any> => ipcRenderer.invoke("session:delete", id),
   },
   onMenu: (cb: (action: string) => void) => {
     const l = (_: unknown, action: string) => cb(action);

@@ -10,6 +10,7 @@ import {
   type NodeLayout,
   type NodeRecord,
   type PersistedMessage,
+  type SessionRecord,
   type Settings,
   type Store,
   type Workspace,
@@ -22,10 +23,21 @@ type WorkspaceRow = {
   updated_at: number;
   pinned: number;
   order: number;
+  meta: string | null;
+};
+
+type SessionRow = {
+  id: string;
+  project_id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  order: number;
 };
 
 type NodeRow = {
   id: string;
+  session_id: string;
   workspace_id: string;
   parent_id: string | null;
   title: string;
@@ -64,12 +76,28 @@ function decode<T>(value: string | null | undefined, fallback: T): T {
 }
 
 function toWorkspace(row: WorkspaceRow): Workspace {
+  const meta = decode<Record<string, unknown>>(row.meta, {});
+  const sourceFolders = Array.isArray(meta.sourceFolders)
+    ? meta.sourceFolders.filter((item): item is string => typeof item === "string" && item.length > 0)
+    : undefined;
   return {
     id: row.id,
     name: row.name,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     pinned: Boolean(row.pinned),
+    order: row.order,
+    sourceFolders,
+  };
+}
+
+function toSession(row: SessionRow): SessionRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    title: row.title,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
     order: row.order,
   };
 }
@@ -150,7 +178,7 @@ export class SqliteStore implements Store {
 
   listWorkspaces(): Workspace[] {
     const rows = this.db
-      .prepare('SELECT id, name, created_at, updated_at, pinned, "order" FROM workspaces')
+      .prepare('SELECT id, name, created_at, updated_at, pinned, "order", meta FROM workspaces')
       .all() as WorkspaceRow[];
     return rows
       .map(toWorkspace)
@@ -160,7 +188,11 @@ export class SqliteStore implements Store {
       );
   }
 
-  createWorkspace(name = "未命名会话"): Workspace {
+  createWorkspace(input: string | { name?: string; sourceFolders?: string[] } = "未命名项目"): Workspace {
+    const name = typeof input === "string" ? input : input.name?.trim() || "未命名项目";
+    const sourceFolders = typeof input === "string"
+      ? []
+      : [...new Set((input.sourceFolders ?? []).map((item) => item.trim()).filter(Boolean))];
     const now = Date.now();
     const ws: Workspace = {
       id: id("ws"),
@@ -172,12 +204,13 @@ export class SqliteStore implements Store {
         (this.db.prepare("SELECT COUNT(*) AS count FROM workspaces").get() as { count: number } | undefined)
           ?.count ?? 0,
       ),
+      sourceFolders,
     };
     this.db
       .prepare(
         'INSERT INTO workspaces(id, name, created_at, updated_at, pinned, "order", meta) VALUES (?, ?, ?, ?, ?, ?, ?)',
       )
-      .run(ws.id, ws.name, ws.createdAt, ws.updatedAt, 0, ws.order, encode({}));
+      .run(ws.id, ws.name, ws.createdAt, ws.updatedAt, 0, ws.order, encode({ sourceFolders }));
     return ws;
   }
 
@@ -195,33 +228,97 @@ export class SqliteStore implements Store {
       .run(pinned ? 1 : 0, Date.now(), id);
   }
 
-  listNodes(workspaceId: string): NodeRecord[] {
+  listSessions(projectId: string): SessionRecord[] {
     const rows = this.db
       .prepare(
-        "SELECT id, workspace_id, parent_id, title, seed, mount_ancestors, meta, layout_x, layout_y, layout_width, layout_height FROM nodes WHERE workspace_id = ? ORDER BY created_at, id",
+        'SELECT id, project_id, title, created_at, updated_at, "order" FROM sessions WHERE project_id = ? ORDER BY "order", created_at, id',
       )
-      .all(workspaceId) as NodeRow[];
+      .all(projectId) as SessionRow[];
+    return rows.map(toSession);
+  }
+
+  getSession(id: string): SessionRecord | undefined {
+    const row = this.db
+      .prepare('SELECT id, project_id, title, created_at, updated_at, "order" FROM sessions WHERE id = ?')
+      .get(id) as SessionRow | undefined;
+    return row ? toSession(row) : undefined;
+  }
+
+  ensureDefaultSession(projectId: string): SessionRecord {
+    const existing = this.listSessions(projectId)[0];
+    if (existing) return existing;
+    return this.createSession(projectId, "默认会话");
+  }
+
+  createSession(projectId: string, title = "新会话"): SessionRecord {
+    const project = this.db.prepare("SELECT 1 FROM workspaces WHERE id = ?").get(projectId);
+    if (!project) throw new Error("Project not found.");
+    const now = Date.now();
+    const order = Number(
+      (this.db.prepare("SELECT COUNT(*) AS count FROM sessions WHERE project_id = ?").get(projectId) as { count: number } | undefined)
+        ?.count ?? 0,
+    );
+    const session: SessionRecord = {
+      id: id("sess"),
+      projectId,
+      title,
+      createdAt: now,
+      updatedAt: now,
+      order,
+    };
+    this.db
+      .prepare(
+        'INSERT INTO sessions(id, project_id, title, created_at, updated_at, "order", meta) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(session.id, session.projectId, session.title, session.createdAt, session.updatedAt, session.order, encode({}));
+    return session;
+  }
+
+  renameSession(id: string, title: string): void {
+    this.db.prepare("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?").run(title, Date.now(), id);
+  }
+
+  deleteSession(id: string): void {
+    this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+  }
+
+  listNodes(sessionId: string): NodeRecord[] {
+    const rows = this.db
+      .prepare(
+        "SELECT id, session_id, workspace_id, parent_id, title, seed, mount_ancestors, meta, layout_x, layout_y, layout_width, layout_height FROM nodes WHERE session_id = ? ORDER BY created_at, id",
+      )
+      .all(sessionId) as NodeRow[];
     return rows.map((row) => this.toNode(row));
   }
 
   getNode(id: string): NodeRecord | undefined {
     const row = this.db
-      .prepare("SELECT id, workspace_id, parent_id, title, seed, mount_ancestors, meta, layout_x, layout_y, layout_width, layout_height FROM nodes WHERE id = ?")
+      .prepare("SELECT id, session_id, workspace_id, parent_id, title, seed, mount_ancestors, meta, layout_x, layout_y, layout_width, layout_height FROM nodes WHERE id = ?")
       .get(id) as NodeRow | undefined;
     return row ? this.toNode(row) : undefined;
   }
 
   createNode(input: {
-    workspaceId: string;
+    sessionId?: string;
+    workspaceId?: string;
     parentId?: string;
     title: string;
     seed?: unknown;
     mountAncestors?: boolean;
   }): NodeRecord {
+    const sessionId = input.sessionId ?? (input.workspaceId ? this.ensureDefaultSession(input.workspaceId).id : undefined);
+    if (!sessionId) throw new Error("Session not found.");
+    const session = this.getSession(sessionId);
+    if (!session) throw new Error("Session not found.");
+    if (input.parentId) {
+      const parent = this.getNode(input.parentId);
+      if (!parent || parent.sessionId !== sessionId) throw new Error("Parent node belongs to another Session.");
+    }
     const now = Date.now();
     const node: NodeRecord = {
       id: id("n"),
-      workspaceId: input.workspaceId,
+      sessionId,
+      workspaceId: session.projectId,
       parentId: input.parentId,
       title: input.title,
       seed: input.seed,
@@ -231,11 +328,12 @@ export class SqliteStore implements Store {
     this.db
       .prepare(
         `INSERT INTO nodes(
-          id, workspace_id, parent_id, title, seed, mount_ancestors, created_at, updated_at, meta
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id, session_id, workspace_id, parent_id, title, seed, mount_ancestors, created_at, updated_at, meta
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         node.id,
+        node.sessionId,
         node.workspaceId,
         node.parentId ?? null,
         node.title,
@@ -384,6 +482,7 @@ export class SqliteStore implements Store {
     const color = typeof meta.color === "string" ? meta.color : undefined;
     return {
       id: row.id,
+      sessionId: row.session_id,
       workspaceId: row.workspace_id,
       parentId: row.parent_id ?? undefined,
       title: row.title,

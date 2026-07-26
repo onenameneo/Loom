@@ -6,6 +6,7 @@ import {
   type NodeLayout,
   type NodeRecord,
   type PersistedMessage,
+  type SessionRecord,
   type Settings,
   type Store,
   type StoreData,
@@ -28,12 +29,13 @@ export class JsonStore implements Store {
           version: raw.version ?? SCHEMA_VERSION,
           settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}) },
           workspaces: Array.isArray(raw.workspaces) ? raw.workspaces : [],
+          sessions: Array.isArray(raw.sessions) ? raw.sessions : [],
         };
       } catch {
         // 损坏文件不阻塞启动；退回默认（旧文件保留在磁盘上）
       }
     }
-    return { version: SCHEMA_VERSION, settings: { ...DEFAULT_SETTINGS }, workspaces: [] };
+    return { version: SCHEMA_VERSION, settings: { ...DEFAULT_SETTINGS }, workspaces: [], sessions: [] };
   }
 
   private flush() {
@@ -71,7 +73,11 @@ export class JsonStore implements Store {
         Number(b.pinned) - Number(a.pinned) || a.order - b.order || b.updatedAt - a.updatedAt,
     );
   }
-  createWorkspace(name = "未命名会话"): Workspace {
+  createWorkspace(input: string | { name?: string; sourceFolders?: string[] } = "未命名项目"): Workspace {
+    const name = typeof input === "string" ? input : input.name?.trim() || "未命名项目";
+    const sourceFolders = typeof input === "string"
+      ? []
+      : [...new Set((input.sourceFolders ?? []).map((item) => item.trim()).filter(Boolean))];
     const now = Date.now();
     const ws: Workspace = {
       id: `ws_${now.toString(36)}_${Math.floor(now % 100000).toString(36)}`,
@@ -80,6 +86,7 @@ export class JsonStore implements Store {
       updatedAt: now,
       pinned: false,
       order: this.data.workspaces.length,
+      sourceFolders,
     };
     this.data.workspaces.push(ws);
     this.flush();
@@ -106,14 +113,53 @@ export class JsonStore implements Store {
     }
   }
 
-  listNodes(_workspaceId: string): NodeRecord[] {
+  listSessions(projectId: string): SessionRecord[] {
+    return [...(this.data.sessions ?? [])]
+      .filter((session) => session.projectId === projectId)
+      .sort((a, b) => a.order - b.order || a.createdAt - b.createdAt);
+  }
+  getSession(id: string): SessionRecord | undefined {
+    return (this.data.sessions ?? []).find((session) => session.id === id);
+  }
+  ensureDefaultSession(projectId: string): SessionRecord {
+    return this.listSessions(projectId)[0] ?? this.createSession(projectId, "默认会话");
+  }
+  createSession(projectId: string, title = "新会话"): SessionRecord {
+    const now = Date.now();
+    const session: SessionRecord = {
+      id: `sess_${now.toString(36)}_${Math.floor(now % 100000).toString(36)}`,
+      projectId,
+      title,
+      createdAt: now,
+      updatedAt: now,
+      order: this.listSessions(projectId).length,
+    };
+    this.data.sessions = [...(this.data.sessions ?? []), session];
+    this.flush();
+    return session;
+  }
+  renameSession(id: string, title: string): void {
+    const session = this.getSession(id);
+    if (session) {
+      session.title = title;
+      session.updatedAt = Date.now();
+      this.flush();
+    }
+  }
+  deleteSession(id: string): void {
+    this.data.sessions = (this.data.sessions ?? []).filter((session) => session.id !== id);
+    this.flush();
+  }
+
+  listNodes(_sessionId: string): NodeRecord[] {
     return [];
   }
   getNode(_id: string): NodeRecord | undefined {
     return undefined;
   }
   createNode(_input: {
-    workspaceId: string;
+    sessionId?: string;
+    workspaceId?: string;
     parentId?: string;
     title: string;
     seed?: unknown;

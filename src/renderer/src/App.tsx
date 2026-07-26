@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ActivitySession, ActivityStatus, ActivityTool, AgentProc, SettingsPayload, WorkspaceMeta } from "./env";
+import type { ActivitySession, ActivityStatus, ActivityTool, AgentProc, ProjectMeta, SessionMeta, SettingsPayload } from "./env";
 import Sidebar from "./Sidebar";
 import { CanvasLayoutProvider } from "./canvas/CanvasLayoutContext";
 import { AppChrome, TitlebarProvider } from "./titlebar/Titlebar";
@@ -15,11 +15,15 @@ import {
 
 export default function App() {
   const [activeSurface, setActiveSurface] = useState("workspace");
-  const [workspaces, setWorkspaces] = useState<WorkspaceMeta[]>([]);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [projects, setProjects] = useState<ProjectMeta[]>([]);
+  const [sessions, setSessions] = useState<SessionMeta[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [chatNodeId, setChatNodeId] = useState<string | null>(null);
   const [workspaceMode, setWorkspaceMode] = useState<"chat" | "canvas">("chat");
+  const sessionUiStateRef = useRef(new Map<string, { focusNodeId: string | null; chatNodeId: string | null; mode: "chat" | "canvas" }>());
+  const previousSessionIdRef = useRef<string | null>(null);
   const [treeVersion, setTreeVersion] = useState(0);
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -57,26 +61,65 @@ export default function App() {
     setTheme(s.resolvedTheme);
   }, []);
 
-  const reloadWorkspaces = useCallback(async () => {
+  const reloadProjects = useCallback(async () => {
     if (!window.api) {
-      const demo: WorkspaceMeta[] = [
-        { id: "ws_demo", name: "理解 Transformer", createdAt: 0, updatedAt: 0, pinned: true, order: 0 },
-        { id: "ws_demo2", name: "freqtrade 策略研究", createdAt: 0, updatedAt: 0, pinned: false, order: 1 },
+      const demo: ProjectMeta[] = [
+        { id: "project_demo", name: "理解 Transformer", createdAt: 0, updatedAt: 0, pinned: true, order: 0 },
+        { id: "project_demo2", name: "freqtrade 策略研究", createdAt: 0, updatedAt: 0, pinned: false, order: 1 },
       ];
-      setWorkspaces(demo);
-      setActiveWorkspaceId((cur) => cur ?? demo[0].id);
+      setProjects(demo);
+      setActiveProjectId((cur) => cur ?? demo[0].id);
       return demo;
     }
-    const list = await window.api.workspaces.list();
-    setWorkspaces(list);
-    setActiveWorkspaceId((cur) => cur ?? list[0]?.id ?? null);
+    const list = await window.api.projects.list();
+    setProjects(list);
+    setActiveProjectId((cur) => cur ?? list[0]?.id ?? null);
     return list;
   }, []);
 
+  const reloadSessions = useCallback(async (projectId: string | null = activeProjectId) => {
+    if (!projectId) {
+      setSessions([]);
+      setActiveSessionId(null);
+      return [];
+    }
+    if (!window.api) {
+      const demo: SessionMeta[] = [
+        { id: `${projectId}:session-main`, projectId, title: "默认会话", createdAt: 0, updatedAt: 0, order: 0 },
+        { id: `${projectId}:session-notes`, projectId, title: "实验分支", createdAt: 0, updatedAt: 0, order: 1 },
+      ];
+      setSessions(demo);
+      setActiveSessionId((cur) => (cur && demo.some((s) => s.id === cur) ? cur : demo[0]?.id ?? null));
+      return demo;
+    }
+    const list = await window.api.sessions.list(projectId);
+    setSessions(list);
+    setActiveSessionId((cur) => (cur && list.some((s) => s.id === cur) ? cur : list[0]?.id ?? null));
+    return list;
+  }, [activeProjectId]);
+
   useEffect(() => {
     reloadSettings();
-    reloadWorkspaces();
-  }, [reloadSettings, reloadWorkspaces]);
+    reloadProjects();
+  }, [reloadSettings, reloadProjects]);
+
+  useEffect(() => {
+    reloadSessions(activeProjectId);
+  }, [activeProjectId, reloadSessions]);
+
+  useEffect(() => {
+    const previous = previousSessionIdRef.current;
+    if (previous && previous !== activeSessionId) {
+      sessionUiStateRef.current.set(previous, { focusNodeId, chatNodeId, mode: workspaceMode });
+    }
+    if (activeSessionId && previous !== activeSessionId) {
+      const saved = sessionUiStateRef.current.get(activeSessionId);
+      setFocusNodeId(saved?.focusNodeId ?? null);
+      setChatNodeId(saved?.chatNodeId ?? null);
+      setWorkspaceMode(saved?.mode ?? "chat");
+    }
+    previousSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
 
   useEffect(() => {
     if (!window.api?.monitor) return;
@@ -137,25 +180,38 @@ export default function App() {
     setActivityStatus(result.status);
   }, []);
 
-  const createWorkspace = useCallback(async () => {
+  const createProject = useCallback(async (input?: { name?: string; sourceFolders?: string[] }) => {
     if (!window.api) return;
-    const ws = await window.api.workspaces.create();
-    await reloadWorkspaces();
-    setActiveWorkspaceId(ws.id);
+    const project = await window.api.projects.create(input);
+    await reloadProjects();
+    setActiveProjectId(project.id);
     setActiveSurface("workspace");
-  }, [reloadWorkspaces]);
+  }, [reloadProjects]);
+
+  const createSession = useCallback(async () => {
+    if (!window.api || !activeProjectId) return;
+    const session = await window.api.sessions.create(activeProjectId);
+    await reloadSessions(activeProjectId);
+    setActiveSessionId(session.id);
+    setFocusNodeId(null);
+    setChatNodeId(null);
+    setActiveSurface("workspace");
+  }, [activeProjectId, reloadSessions]);
+
+  const createWorkspace = createProject;
 
   // 原生菜单动作
   useEffect(() => {
     if (!window.api) return;
     return window.api.onMenu((action) => {
-      if (action === "new-workspace") createWorkspace();
+      if (action === "new-project" || action === "new-workspace") createProject();
+      else if (action === "new-session") createSession();
       else if (action === "settings") setActiveSurface("settings");
       else if (action === "surface:workspace") setActiveSurface("workspace");
       else if (action === "surface:observatory") setActiveSurface("observatory");
       else if (action === "toggle-sidebar") shellController.requestToggle("menu");
     });
-  }, [createWorkspace, shellController.requestToggle]);
+  }, [createProject, createSession, shellController.requestToggle]);
 
   useEffect(() => {
     if (window.api) return;
@@ -177,9 +233,15 @@ export default function App() {
   }, [theme, reloadSettings]);
 
   const ctx: SurfaceCtx = {
-    workspaces,
-    activeWorkspaceId,
+    workspaces: projects,
+    projects,
+    sessions,
+    activeWorkspaceId: activeSessionId,
+    activeProjectId,
+    activeSessionId,
     createWorkspace,
+    createProject,
+    createSession,
     goSettings: () => setActiveSurface("settings"),
     settings,
     reloadSettings,
@@ -227,7 +289,7 @@ export default function App() {
                 setSurface={setActiveSurface}
                 ctx={ctx}
                 onSelectWorkspace={async (id) => {
-                  setActiveWorkspaceId(id);
+                  setActiveSessionId(id);
                   if (workspaceMode !== "canvas") {
                     setFocusNodeId(null);
                     setChatNodeId(null);
@@ -238,7 +300,7 @@ export default function App() {
                   setFocusNodeId(root?.id ?? null);
                 }}
                 onFocusNode={(workspaceId, nodeId) => {
-                  setActiveWorkspaceId(workspaceId);
+                  setActiveSessionId(workspaceId);
                   setActiveSurface("workspace");
                   if (workspaceMode === "canvas") {
                     setFocusNodeId(nodeId);
@@ -249,17 +311,28 @@ export default function App() {
                 }}
                 onCreateWorkspace={createWorkspace}
                 onRenameWorkspace={async (id, name) => {
-                  await window.api.workspaces.rename(id, name);
-                  reloadWorkspaces();
+                  await window.api.projects.rename(id, name);
+                  reloadProjects();
                 }}
                 onDeleteWorkspace={async (id) => {
-                  await window.api.workspaces.delete(id);
-                  setActiveWorkspaceId((cur) => (cur === id ? null : cur));
-                  reloadWorkspaces();
+                  await window.api.projects.delete(id);
+                  setActiveProjectId((cur) => (cur === id ? null : cur));
+                  reloadProjects();
                 }}
                 onPinWorkspace={async (id, pinned) => {
-                  await window.api.workspaces.pin(id, pinned);
-                  reloadWorkspaces();
+                  await window.api.projects.pin(id, pinned);
+                  reloadProjects();
+                }}
+                onSelectProject={(id) => setActiveProjectId(id)}
+                onCreateSession={createSession}
+                onRenameSession={async (id, title) => {
+                  await window.api.sessions.rename(id, title);
+                  reloadSessions(activeProjectId);
+                }}
+                onDeleteSession={async (id) => {
+                  await window.api.sessions.delete(id);
+                  setActiveSessionId((cur) => (cur === id ? null : cur));
+                  reloadSessions(activeProjectId);
                 }}
                 theme={theme}
                 toggleTheme={toggleTheme}
