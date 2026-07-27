@@ -35,6 +35,7 @@ vi.mock("./CanvasLayoutContext", () => ({
 
 vi.mock("@xyflow/react", async () => {
   const React = await import("react");
+  const { BranchContext } = await import("./branch");
   return {
     Background: () => <div data-testid="background" />,
     BackgroundVariant: { Dots: "dots" },
@@ -50,6 +51,13 @@ vi.mock("@xyflow/react", async () => {
       return (
         <div data-testid="react-flow">
           {children}
+          <BranchContext.Consumer>
+            {(branch) => (
+              <button type="button" onClick={() => void branch?.onBranch("root", "branch seed")}>
+                模拟新建分支
+              </button>
+            )}
+          </BranchContext.Consumer>
           <button type="button" onClick={() => onMove?.(null, { zoom: 0.75 })}>
             模拟画布移动
           </button>
@@ -83,6 +91,8 @@ beforeEach(() => {
   document.body.innerHTML = "";
   Reflect.deleteProperty(window, "api");
   Object.values(flow).forEach((mock) => mock.mockReset());
+  Object.values(layoutStore).forEach((mock) => mock.mockReset());
+  layoutStore.getDirty.mockReturnValue(undefined);
   reactFlowProps.current = null;
   layoutPersistence.current = { status: "idle", error: null, retry: vi.fn() };
 });
@@ -198,5 +208,50 @@ describe("Canvas titlebar integration", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: "上一个动作" })).toBeTruthy());
     expect(screen.queryByRole("button", { name: "适配全部节点" })).toBeNull();
+  });
+
+  it("keeps project ownership on optimistic branch nodes", async () => {
+    Object.defineProperty(window, "api", {
+      configurable: true,
+      value: {
+        canvas: {
+          open: vi.fn(async () => [
+            {
+              id: "root",
+              sessionId: "session-1",
+              projectId: "project-1",
+              title: "Main",
+              mountAncestors: false,
+              messages: [],
+            },
+          ]),
+          create: vi.fn(async () => ({
+            id: "branch-1",
+            sessionId: "session-1",
+            projectId: "project-1",
+            parentId: "root",
+            title: "新分支",
+            seed: { text: "branch seed", from: "Main", parent: "root" },
+            mountAncestors: false,
+            messages: [],
+          })),
+        },
+      },
+    });
+    render(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <Canvas sessionId="session-1" />
+      </TitlebarProvider>,
+    );
+
+    await waitFor(() => expect((reactFlowProps.current?.nodes as any[])?.[0]?.id).toBe("root"));
+    fireEvent.click(screen.getByRole("button", { name: "模拟新建分支" }));
+
+    await waitFor(() => {
+      const branch = (reactFlowProps.current?.nodes as any[]).find((node) => node.id === "branch-1");
+      expect(branch?.data.projectId).toBe("project-1");
+      expect(branch?.data.sessionId).toBe("session-1");
+    });
+    expect(layoutStore.enqueue).toHaveBeenCalledWith("session-1", "branch-1", expect.any(Object));
   });
 });

@@ -534,13 +534,16 @@ export default function Canvas({
       const from = titleRef.current.get(sourceId) ?? "";
       const seed = { text: seedText, from, parent: sourceId };
       let id: string;
+      let createdDto: CanvasNodeDto | undefined;
       if (window.api) {
         const dto = await window.api.canvas.create({ sessionId, parentId: sourceId, seed });
         id = dto.id;
+        createdDto = dto;
       } else {
         id = `local_${Math.round(performance.now())}`;
       }
-      titleRef.current.set(id, "新分支");
+      const title = createdDto?.title ?? "新分支";
+      titleRef.current.set(id, title);
       const nodeActions = actions();
       const src = nodes.find((n) => n.id === sourceId);
       const baseX = src ? src.position.x : ROOT_X;
@@ -559,26 +562,24 @@ export default function Canvas({
         rowH: ROW_H,
       });
       setNodes((nds) => {
-        const newNode: Node = {
-          id,
-          type: "chatThread",
-          dragHandle: ".card__head",
-          style: { width: initialLayout.width, height: initialLayout.height },
-          // 出现在来源节点的右侧，必要时做轻量避让，避免压到已有分支。
-          position: { x: initialLayout.x, y: initialLayout.y },
-          data: {
+        const newNode = toNode(
+          createdDto ?? {
+            id,
             sessionId,
+            projectId: String((src?.data as any)?.projectId ?? "project_demo"),
             parentId: sourceId,
-            title: "新分支",
+            title,
             seed,
             messages: [],
             mountAncestors: false,
             model,
-            fresh: true,
-            isRoot: false,
-            ...nodeActions,
           },
-        };
+          { x: initialLayout.x, y: initialLayout.y },
+          model,
+          true,
+          nodeActions,
+          initialLayout,
+        );
         return nds.concat(newNode);
       });
       layoutStore.enqueue(sessionId, id, initialLayout);
@@ -593,7 +594,7 @@ export default function Canvas({
     const dtos = nodes.map((node) => ({
       id: node.id,
       sessionId: String((node.data as any)?.sessionId ?? sessionId),
-      projectId: String((node.data as any)?.projectId ?? "project"),
+      projectId: String((node.data as any)?.projectId ?? "project_demo"),
       parentId: (node.data as any)?.parentId,
       title: String((node.data as any)?.title ?? ""),
       seed: (node.data as any)?.seed,

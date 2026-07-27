@@ -97,7 +97,7 @@ export default function Sidebar({
     return () => {
       alive = false;
     };
-  }, [expanded, activeSurface, ctx.treeVersion]);
+  }, [expanded, activeSurface, ctx.treeVersion, ctx.sessions]);
 
   const toggleExpand = useCallback((id: string) => {
     setExpanded((prev) => {
