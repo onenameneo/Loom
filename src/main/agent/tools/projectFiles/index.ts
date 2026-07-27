@@ -57,22 +57,22 @@ function truncation(reason?: string) {
   return { truncated: Boolean(reason), reason };
 }
 
-export function createProjectFileTools(sourceFolders: string[]): ReadonlyAgentTool[] {
-  if (sourceFolders.length === 0) return [];
+export function createProjectFileTools(sourceRoots: string[]): ReadonlyAgentTool[] {
+  if (sourceRoots.length === 0) return [];
 
   const listFiles: ReadonlyAgentTool<{ root?: string; path?: string; maxEntries?: number }, unknown> = {
     name: "project_list_files",
     label: "List Project Files",
-    description: "List direct files and folders inside one source folder of the current Loom Project.",
+    description: "List direct files and folders inside one source root of the current Loom Project.",
     parameters: Type.Object({
-      root: Type.Optional(Type.String({ description: "One configured Project source folder. Defaults to the first." })),
-      path: Type.Optional(Type.String({ description: "Relative directory path inside the selected source folder." })),
+      root: Type.Optional(Type.String({ description: "One configured Project source root. Defaults to the first." })),
+      path: Type.Optional(Type.String({ description: "Relative directory path inside the selected source root." })),
       maxEntries: Type.Optional(Type.Number({ description: "Maximum entries to return." })),
     }),
     readOnly: true,
     execute: async ({ args, signal }) => {
       abortIfNeeded(signal);
-      const root = await selectProjectRoot(sourceFolders, args.root);
+      const root = await selectProjectRoot(sourceRoots, args.root);
       const directory = await resolveInside(root, args.path ?? ".");
       const stat = await fs.stat(directory);
       if (!stat.isDirectory()) throw new Error("Path is not a directory.");
@@ -106,15 +106,15 @@ export function createProjectFileTools(sourceFolders: string[]): ReadonlyAgentTo
     label: "Read Project File",
     description: "Read a bounded, numbered UTF-8 text range from a file inside the current Loom Project.",
     parameters: Type.Object({
-      root: Type.Optional(Type.String({ description: "One configured Project source folder. Defaults to the first." })),
-      path: Type.String({ description: "Relative file path inside the selected source folder." }),
+      root: Type.Optional(Type.String({ description: "One configured Project source root. Defaults to the first." })),
+      path: Type.String({ description: "Relative file path inside the selected source root." }),
       offset: Type.Optional(Type.Number({ description: "1-based first line to return." })),
       limit: Type.Optional(Type.Number({ description: "Maximum lines to return." })),
     }),
     readOnly: true,
     execute: async ({ args, signal }) => {
       abortIfNeeded(signal);
-      const root = await selectProjectRoot(sourceFolders, args.root);
+      const root = await selectProjectRoot(sourceRoots, args.root);
       const file = await resolveInside(root, args.path);
       const stat = await fs.stat(file);
       if (!stat.isFile()) throw new Error("Path is not a file.");
@@ -147,9 +147,9 @@ export function createProjectFileTools(sourceFolders: string[]): ReadonlyAgentTo
   const findFiles: ReadonlyAgentTool<{ root?: string; path?: string; pattern: string; limit?: number }, unknown> = {
     name: "project_find_files",
     label: "Find Project Files",
-    description: "Find files by glob pattern inside the current Loom Project source folder.",
+    description: "Find files by glob pattern inside the current Loom Project source root.",
     parameters: Type.Object({
-      root: Type.Optional(Type.String({ description: "One configured Project source folder. Defaults to the first." })),
+      root: Type.Optional(Type.String({ description: "One configured Project source root. Defaults to the first." })),
       path: Type.Optional(Type.String({ description: "Relative directory or file path to search." })),
       pattern: Type.String({ description: "Glob pattern, for example src/**/*.ts." }),
       limit: Type.Optional(Type.Number({ description: "Maximum matching files to return." })),
@@ -157,7 +157,7 @@ export function createProjectFileTools(sourceFolders: string[]): ReadonlyAgentTo
     readOnly: true,
     execute: async ({ args, signal }) => {
       abortIfNeeded(signal);
-      const root = await selectProjectRoot(sourceFolders, args.root);
+      const root = await selectProjectRoot(sourceRoots, args.root);
       const pattern = globRegex(args.pattern);
       const limit = boundedInteger(args.limit, DEFAULT_FIND_LIMIT, MAX_ENTRIES);
       const walked = await walkProjectFiles(root, args.path, signal);
@@ -191,7 +191,7 @@ export function createProjectFileTools(sourceFolders: string[]): ReadonlyAgentTo
     label: "Search Project Files",
     description: "Search UTF-8 Project files by text or regex and return matching line numbers.",
     parameters: Type.Object({
-      root: Type.Optional(Type.String({ description: "One configured Project source folder. Defaults to the first." })),
+      root: Type.Optional(Type.String({ description: "One configured Project source root. Defaults to the first." })),
       path: Type.Optional(Type.String({ description: "Relative directory or file path to search." })),
       pattern: Type.String({ description: "Text or regular expression to search for." }),
       glob: Type.Optional(Type.String({ description: "Optional glob filter, for example **/*.ts." })),
@@ -203,7 +203,7 @@ export function createProjectFileTools(sourceFolders: string[]): ReadonlyAgentTo
     readOnly: true,
     execute: async ({ args, signal }) => {
       abortIfNeeded(signal);
-      const root = await selectProjectRoot(sourceFolders, args.root);
+      const root = await selectProjectRoot(sourceRoots, args.root);
       const flags = args.ignoreCase ? "i" : "";
       const expression = args.literal
         ? new RegExp(args.pattern.replace(/[|\\{}()[\]^$+*?.]/g, "\\$&"), flags)
@@ -296,8 +296,8 @@ function mutationPreviewSummary(args: WriteArgs | EditArgs, kind: "write" | "edi
   };
 }
 
-async function approvalTargetFor(sourceFolders: string[], rootArg: string | undefined, pathArg: string): Promise<string> {
-  const root = await selectProjectRoot(sourceFolders, rootArg);
+async function approvalTargetFor(sourceRoots: string[], rootArg: string | undefined, pathArg: string): Promise<string> {
+  const root = await selectProjectRoot(sourceRoots, rootArg);
   const target = await resolveMutationTarget(root, pathArg);
   return canonicalApprovalTarget(target);
 }
@@ -324,16 +324,16 @@ function replaceExact(content: string, oldText: string, newText: string, replace
   };
 }
 
-export function createProjectMutationTools(sourceFolders: string[]): AgentTool[] {
-  if (sourceFolders.length === 0) return [];
+export function createProjectMutationTools(sourceRoots: string[]): AgentTool[] {
+  if (sourceRoots.length === 0) return [];
 
   const writeFile: AgentTool<WriteArgs, unknown> = {
     name: "project_write_file",
     label: "Write Project File",
-    description: "Create or explicitly overwrite a UTF-8 text file inside the current Loom Project source folders.",
+    description: "Create or explicitly overwrite a UTF-8 text file inside the current Loom Project source roots.",
     parameters: Type.Object({
-      root: Type.Optional(Type.String({ description: "One configured Project source folder. Defaults to the first." })),
-      path: Type.String({ description: "Relative file path inside the selected source folder." }),
+      root: Type.Optional(Type.String({ description: "One configured Project source root. Defaults to the first." })),
+      path: Type.String({ description: "Relative file path inside the selected source root." }),
       content: Type.String({ description: "UTF-8 text content to write." }),
       overwrite: Type.Optional(Type.Boolean({ description: "Required to replace an existing file." })),
     }),
@@ -341,7 +341,7 @@ export function createProjectMutationTools(sourceFolders: string[]): AgentTool[]
     approval: {
       required: true,
       defaultScope: "once",
-      normalizeTarget: (args) => approvalTargetFor(sourceFolders, args.root, args.path),
+      normalizeTarget: (args) => approvalTargetFor(sourceRoots, args.root, args.path),
       preview: (args) => ({
         title: args.overwrite ? `Overwrite ${args.path}` : `Create ${args.path}`,
         args: mutationPreviewSummary(args, "write"),
@@ -349,7 +349,7 @@ export function createProjectMutationTools(sourceFolders: string[]): AgentTool[]
     },
     execute: async ({ args, signal }) => {
       abortIfNeeded(signal);
-      const root = await selectProjectRoot(sourceFolders, args.root);
+      const root = await selectProjectRoot(sourceRoots, args.root);
       const target = await resolveMutationTarget(root, args.path);
       return withFileMutationQueue(target.canonicalKey, async () => {
         abortIfNeeded(signal);
@@ -377,8 +377,8 @@ export function createProjectMutationTools(sourceFolders: string[]): AgentTool[]
     label: "Edit Project File",
     description: "Edit one existing UTF-8 Project file by exact oldText/newText replacement.",
     parameters: Type.Object({
-      root: Type.Optional(Type.String({ description: "One configured Project source folder. Defaults to the first." })),
-      path: Type.String({ description: "Relative file path inside the selected source folder." }),
+      root: Type.Optional(Type.String({ description: "One configured Project source root. Defaults to the first." })),
+      path: Type.String({ description: "Relative file path inside the selected source root." }),
       oldText: Type.String({ description: "Exact text to replace. Must match once unless replaceAll is true." }),
       newText: Type.String({ description: "Replacement text." }),
       replaceAll: Type.Optional(Type.Boolean({ description: "Replace all matches instead of requiring exactly one." })),
@@ -387,7 +387,7 @@ export function createProjectMutationTools(sourceFolders: string[]): AgentTool[]
     approval: {
       required: true,
       defaultScope: "once",
-      normalizeTarget: (args) => approvalTargetFor(sourceFolders, args.root, args.path),
+      normalizeTarget: (args) => approvalTargetFor(sourceRoots, args.root, args.path),
       preview: (args) => ({
         title: `Edit ${args.path}`,
         args: mutationPreviewSummary(args, "edit"),
@@ -395,7 +395,7 @@ export function createProjectMutationTools(sourceFolders: string[]): AgentTool[]
     },
     execute: async ({ args, signal }) => {
       abortIfNeeded(signal);
-      const root = await selectProjectRoot(sourceFolders, args.root);
+      const root = await selectProjectRoot(sourceRoots, args.root);
       const target = await resolveExistingFile(root, args.path);
       return withFileMutationQueue(target.canonicalKey, async () => {
         abortIfNeeded(signal);

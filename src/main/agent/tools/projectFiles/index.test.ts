@@ -11,7 +11,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function workspace() {
+function projectRoot() {
   const root = mkdtempSync(join(tmpdir(), "loom-project-files-"));
   dirs.push(root);
   mkdirSync(join(root, "src"));
@@ -41,12 +41,22 @@ function deferred<T = void>() {
 }
 
 describe("project coding tools", () => {
-  it("are hidden when no source folders are configured", () => {
+  it("are hidden when no source roots are configured", () => {
     expect(createProjectFileTools([])).toEqual([]);
   });
 
+  it("reports missing or unconfigured roots as Project source roots", async () => {
+    const root = projectRoot();
+    const read = tool(root, "project_read_file");
+
+    expect(() => createProjectMutationTools([])).not.toThrow();
+    await expect(read.execute({ toolCallId: "t1", args: { root: join(root, "not-configured"), path: "src/index.ts" } })).rejects.toThrow(
+      "source roots",
+    );
+  });
+
   it("reads numbered bounded lines and reports truncation", async () => {
-    const root = workspace();
+    const root = projectRoot();
     const read = tool(root, "project_read_file");
     const result = await read.execute({ toolCallId: "t1", args: { path: "src/index.ts", offset: 2, limit: 1 } });
 
@@ -55,7 +65,7 @@ describe("project coding tools", () => {
   });
 
   it("lists deterministically with entry types", async () => {
-    const root = workspace();
+    const root = projectRoot();
     const list = tool(root, "project_list_files");
     const result = await list.execute({ toolCallId: "t1", args: { path: ".", maxEntries: 2 } });
 
@@ -64,7 +74,7 @@ describe("project coding tools", () => {
   });
 
   it("rejects path traversal and escaping symbolic links", async () => {
-    const root = workspace();
+    const root = projectRoot();
     const outside = mkdtempSync(join(tmpdir(), "loom-project-outside-"));
     dirs.push(outside);
     writeFileSync(join(outside, "secret.txt"), "secret", "utf-8");
@@ -78,7 +88,7 @@ describe("project coding tools", () => {
   });
 
   it("selects only an explicitly configured second root", async () => {
-    const first = workspace();
+    const first = projectRoot();
     const second = mkdtempSync(join(tmpdir(), "loom-project-second-"));
     dirs.push(second);
     writeFileSync(join(second, "second.ts"), "export const second = true;", "utf-8");
@@ -90,7 +100,7 @@ describe("project coding tools", () => {
   });
 
   it("finds matching files while skipping git and dependencies", async () => {
-    const root = workspace();
+    const root = projectRoot();
     const find = tool(root, "project_find_files");
     const result = await find.execute({ toolCallId: "t1", args: { pattern: "**/*.ts", limit: 1 } });
 
@@ -100,7 +110,7 @@ describe("project coding tools", () => {
   });
 
   it("greps literal text with context and glob filtering", async () => {
-    const root = workspace();
+    const root = projectRoot();
     const grep = tool(root, "project_grep");
     const result = await grep.execute({
       toolCallId: "t1",
@@ -113,13 +123,13 @@ describe("project coding tools", () => {
   });
 
   it("rejects invalid regular expressions before scanning files", async () => {
-    const root = workspace();
+    const root = projectRoot();
     const grep = tool(root, "project_grep");
     await expect(grep.execute({ toolCallId: "t1", args: { pattern: "[" } })).rejects.toThrow();
   });
 
   it("honors an already-aborted signal", async () => {
-    const root = workspace();
+    const root = projectRoot();
     const controller = new AbortController();
     controller.abort();
     const find = tool(root, "project_find_files");
@@ -127,7 +137,7 @@ describe("project coding tools", () => {
   });
 
   it("creates a project file and requires explicit overwrite", async () => {
-    const root = workspace();
+    const root = projectRoot();
     const write = mutationTool(root, "project_write_file");
 
     const created = await write.execute({ toolCallId: "t1", args: { path: "src/new.md", content: "hello Neo!" } });
@@ -144,7 +154,7 @@ describe("project coding tools", () => {
   });
 
   it("edits a project file by exact match and supports explicit replace all", async () => {
-    const root = workspace();
+    const root = projectRoot();
     const edit = mutationTool(root, "project_edit_file");
 
     const single = await edit.execute({ toolCallId: "t1", args: { path: "src/index.ts", oldText: "needle here", newText: "needle there" } });
@@ -166,7 +176,7 @@ describe("project coding tools", () => {
   });
 
   it("rejects mutation boundaries, missing parents, symlinks, invalid UTF-8, and missing matches", async () => {
-    const root = workspace();
+    const root = projectRoot();
     const outside = mkdtempSync(join(tmpdir(), "loom-project-outside-"));
     dirs.push(outside);
     writeFileSync(join(outside, "secret.txt"), "secret", "utf-8");
@@ -184,7 +194,7 @@ describe("project coding tools", () => {
   });
 
   it("serializes same-file mutations and allows independent file queues to progress", async () => {
-    const root = workspace();
+    const root = projectRoot();
     const edit = mutationTool(root, "project_edit_file");
 
     const first = edit.execute({ toolCallId: "t1", args: { path: "src/index.ts", oldText: "zero", newText: "one" } });

@@ -179,6 +179,53 @@ describe("createAgentSession turn runner integration", () => {
     }
   });
 
+  it("resolves local tools from each node's owning Project sourceRoots", async () => {
+    const firstRoot = mkdtempSync(join(tmpdir(), "loom-session-project-one-"));
+    const secondRoot = mkdtempSync(join(tmpdir(), "loom-session-project-two-"));
+    writeFileSync(join(firstRoot, "only-first.ts"), "export const first = true;", "utf-8");
+    writeFileSync(join(secondRoot, "only-second.ts"), "export const second = true;", "utf-8");
+    const store = new MemoryStore();
+    store.projects = [
+      { id: "project-one", name: "One", createdAt: 1, updatedAt: 1, pinned: false, order: 0, sourceRoots: [firstRoot] },
+      { id: "project-two", name: "Two", createdAt: 1, updatedAt: 1, pinned: false, order: 1, sourceRoots: [secondRoot] },
+    ];
+    store.sessions = [
+      { id: "sess", projectId: "project-one", title: "Session", createdAt: 1, updatedAt: 1, order: 0 },
+      { id: "sess2", projectId: "project-two", title: "Second", createdAt: 1, updatedAt: 1, order: 1 },
+    ];
+    store.nodes.get("n1")!.projectId = "project-one";
+    store.nodes.get("n2")!.projectId = "project-two";
+    const eventLog = events();
+    let getTools: ((nodeId: string) => AgentTool[]) | undefined;
+    createAgentSession({
+      store,
+      events: eventLog.sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: (hooks) => {
+        getTools = hooks.getTools;
+        return createEngine(createHandle([], vi.fn()));
+      },
+    });
+
+    try {
+      const firstRead = getTools?.("n1").find((tool) => tool.name === "project_read_file")!;
+      const secondRead = getTools?.("n2").find((tool) => tool.name === "project_read_file")!;
+
+      await expect(firstRead.execute({ toolCallId: "t1", args: { root: firstRoot, path: "only-first.ts" } })).resolves.toMatchObject({
+        content: [{ type: "text", text: expect.stringContaining("first") }],
+      });
+      await expect(firstRead.execute({ toolCallId: "t2", args: { root: secondRoot, path: "only-second.ts" } })).rejects.toThrow("source roots");
+      await expect(secondRead.execute({ toolCallId: "t3", args: { root: secondRoot, path: "only-second.ts" } })).resolves.toMatchObject({
+        content: [{ type: "text", text: expect.stringContaining("second") }],
+      });
+    } finally {
+      rmSync(firstRoot, { recursive: true, force: true });
+      rmSync(secondRoot, { recursive: true, force: true });
+    }
+  });
+
   it("pauses project mutation tools for approval, then persists the tool result transcript", async () => {
     const root = mkdtempSync(join(tmpdir(), "loom-session-mutation-"));
     const store = new MemoryStore();

@@ -36,7 +36,7 @@ export async function walkProjectFiles(root: ProjectRoot, inputPath: string | un
     }
     if (!stat.isDirectory()) return;
     const canonical = await fs.realpath(target);
-    if (!isWithinRoot(root, canonical)) throw new Error("Path is outside this Project's source folders.");
+    if (!isWithinRoot(root, canonical)) throw new Error("Path is outside this Project's source roots.");
     if (visitedDirectories.has(canonical)) return;
     visitedDirectories.add(canonical);
     const entries = await fs.readdir(canonical, { withFileTypes: true });
@@ -51,7 +51,7 @@ export async function walkProjectFiles(root: ProjectRoot, inputPath: string | un
       scannedEntries += 1;
       const entryPath = join(canonical, entry.name);
       const realPath = await fs.realpath(entryPath);
-      if (!isWithinRoot(root, realPath)) throw new Error("Path is outside this Project's source folders.");
+      if (!isWithinRoot(root, realPath)) throw new Error("Path is outside this Project's source roots.");
       await visit(realPath);
       if (scanLimitReached) return;
     }

@@ -36,19 +36,19 @@ function isInside(root: string, target: string): boolean {
   return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !rel.includes(`${sep}..${sep}`));
 }
 
-export async function selectProjectRoot(sourceFolders: string[], requested?: string): Promise<ProjectRoot> {
-  const configured = [...new Set(sourceFolders.map((folder) => resolve(folder)).filter(Boolean))];
-  if (configured.length === 0) throw new Error("No source folders are configured for this Project.");
+export async function selectProjectRoot(sourceRoots: string[], requested?: string): Promise<ProjectRoot> {
+  const configured = [...new Set(sourceRoots.map((root) => resolve(root)).filter(Boolean))];
+  if (configured.length === 0) throw new Error("No source roots are configured for this Project.");
   const configuredPath = requested ? resolve(requested) : configured[0];
-  if (!configured.includes(configuredPath)) throw new Error("Requested root is not one of this Project's source folders.");
+  if (!configured.includes(configuredPath)) throw new Error("Requested root is not one of this Project's source roots.");
   return { configuredPath, realPath: await fs.realpath(configuredPath) };
 }
 
 export async function resolveInside(root: ProjectRoot, inputPath = "."): Promise<string> {
   const lexical = resolve(root.realPath, inputPath);
-  if (!isInside(root.realPath, lexical)) throw new Error("Path is outside this Project's source folders.");
+  if (!isInside(root.realPath, lexical)) throw new Error("Path is outside this Project's source roots.");
   const realPath = await fs.realpath(lexical);
-  if (!isInside(root.realPath, realPath)) throw new Error("Path is outside this Project's source folders.");
+  if (!isInside(root.realPath, realPath)) throw new Error("Path is outside this Project's source roots.");
   return realPath;
 }
 
@@ -67,10 +67,10 @@ export async function resolveExistingFile(root: ProjectRoot, inputPath: string):
 
 export async function resolveMutationTarget(root: ProjectRoot, inputPath: string): Promise<ProjectFileTarget> {
   const lexical = resolve(root.realPath, inputPath);
-  if (!isInside(root.realPath, lexical)) throw new Error("Path is outside this Project's source folders.");
+  if (!isInside(root.realPath, lexical)) throw new Error("Path is outside this Project's source roots.");
   const parent = dirname(lexical);
   const parentRealPath = await fs.realpath(parent);
-  if (!isInside(root.realPath, parentRealPath)) throw new Error("Path is outside this Project's source folders.");
+  if (!isInside(root.realPath, parentRealPath)) throw new Error("Path is outside this Project's source roots.");
 
   let exists = false;
   let absolutePath = join(parentRealPath, basename(lexical));
@@ -79,7 +79,7 @@ export async function resolveMutationTarget(root: ProjectRoot, inputPath: string
     exists = true;
     if (lstat.isSymbolicLink()) throw new Error("Mutation target must not be a symbolic link.");
     const realPath = await fs.realpath(absolutePath);
-    if (!isInside(root.realPath, realPath)) throw new Error("Path is outside this Project's source folders.");
+    if (!isInside(root.realPath, realPath)) throw new Error("Path is outside this Project's source roots.");
     const stat = await fs.stat(realPath);
     if (!stat.isFile()) throw new Error("Mutation target must be a regular file.");
     absolutePath = realPath;
