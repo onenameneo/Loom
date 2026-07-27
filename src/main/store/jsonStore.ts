@@ -17,6 +17,7 @@ import {
 // 上层不变。数据落在 app.getPath('userData')/canvas-data.json。
 export class JsonStore implements Store {
   private data: StoreData;
+  private idSeq = 0;
   constructor(private file: string) {
     this.data = this.load();
   }
@@ -65,6 +66,12 @@ export class JsonStore implements Store {
     renameSync(tmp, this.file); // 原子替换
   }
 
+  private id(prefix: string): string {
+    this.idSeq += 1;
+    const now = Date.now();
+    return `${prefix}_${now.toString(36)}_${this.idSeq.toString(36)}`;
+  }
+
   getSettings(): Settings {
     return this.data.settings;
   }
@@ -100,7 +107,7 @@ export class JsonStore implements Store {
       : [...new Set(((input.sourceRoots ?? input.sourceFolders) ?? []).map((item) => item.trim()).filter(Boolean))];
     const now = Date.now();
     const project: Project = {
-      id: `ws_${now.toString(36)}_${Math.floor(now % 100000).toString(36)}`,
+      id: this.id("project"),
       name,
       createdAt: now,
       updatedAt: now,
@@ -160,7 +167,7 @@ export class JsonStore implements Store {
   createSession(projectId: string, title = "新会话"): SessionRecord {
     const now = Date.now();
     const session: SessionRecord = {
-      id: `sess_${now.toString(36)}_${Math.floor(now % 100000).toString(36)}`,
+      id: this.id("session"),
       projectId,
       title,
       createdAt: now,
