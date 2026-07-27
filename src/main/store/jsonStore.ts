@@ -21,6 +21,24 @@ export class JsonStore implements Store {
     this.data = this.load();
   }
 
+  private normalizeProject(raw: any): Project | undefined {
+    if (!raw || typeof raw !== "object" || typeof raw.id !== "string") return undefined;
+    const sourceRoots: unknown[] = Array.isArray(raw.sourceRoots)
+      ? raw.sourceRoots
+      : Array.isArray(raw.sourceFolders)
+        ? raw.sourceFolders
+        : [];
+    return {
+      id: raw.id,
+      name: typeof raw.name === "string" ? raw.name : "未命名项目",
+      createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now(),
+      updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : Date.now(),
+      pinned: Boolean(raw.pinned),
+      order: typeof raw.order === "number" ? raw.order : 0,
+      sourceRoots: [...new Set(sourceRoots.filter((item): item is string => typeof item === "string" && item.length > 0))],
+    };
+  }
+
   private load(): StoreData {
     if (existsSync(this.file)) {
       try {
@@ -28,7 +46,9 @@ export class JsonStore implements Store {
         return {
           version: raw.version ?? SCHEMA_VERSION,
           settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}) },
-          projects: Array.isArray(raw.projects) ? raw.projects : [],
+          projects: (Array.isArray(raw.projects) ? raw.projects : [])
+            .map((project: any) => this.normalizeProject(project))
+            .filter((project: Project | undefined): project is Project => Boolean(project)),
           sessions: Array.isArray(raw.sessions) ? raw.sessions : [],
         };
       } catch {
@@ -79,7 +99,7 @@ export class JsonStore implements Store {
       ? []
       : [...new Set(((input.sourceRoots ?? input.sourceFolders) ?? []).map((item) => item.trim()).filter(Boolean))];
     const now = Date.now();
-    const ws: Project = {
+    const project: Project = {
       id: `ws_${now.toString(36)}_${Math.floor(now % 100000).toString(36)}`,
       name,
       createdAt: now,
@@ -88,20 +108,21 @@ export class JsonStore implements Store {
       order: this.data.projects.length,
       sourceRoots,
     };
-    this.data.projects.push(ws);
+    this.data.projects.push(project);
     this.flush();
-    return ws;
+    return project;
   }
   renameProject(id: string, name: string): void {
-    const ws = this.data.projects.find((w) => w.id === id);
-    if (ws) {
-      ws.name = name;
-      ws.updatedAt = Date.now();
+    const project = this.data.projects.find((w) => w.id === id);
+    if (project) {
+      project.name = name;
+      project.updatedAt = Date.now();
       this.flush();
     }
   }
   deleteProject(id: string): void {
     this.data.projects = this.data.projects.filter((w) => w.id !== id);
+    this.data.sessions = (this.data.sessions ?? []).filter((session) => session.projectId !== id);
     this.flush();
   }
   listWorkspaces(): Project[] {
@@ -117,10 +138,10 @@ export class JsonStore implements Store {
     this.deleteProject(id);
   }
   setPinned(id: string, pinned: boolean): void {
-    const ws = this.data.projects.find((w) => w.id === id);
-    if (ws) {
-      ws.pinned = pinned;
-      ws.updatedAt = Date.now();
+    const project = this.data.projects.find((w) => w.id === id);
+    if (project) {
+      project.pinned = pinned;
+      project.updatedAt = Date.now();
       this.flush();
     }
   }
