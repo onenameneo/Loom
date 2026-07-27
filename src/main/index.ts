@@ -72,33 +72,19 @@ function registerIpc() {
   });
 
   // ---- projects / sessions ----
-  const createProject = (input?: string | { name?: string; sourceFolders?: string[] }) => {
-    const project = store.createWorkspace(input);
+  const createProject = (input?: string | { name?: string; sourceRoots?: string[] }) => {
+    const project = store.createProject(input);
     store.ensureDefaultSession(project.id);
     return project;
   };
-  ipcMain.handle("ws:list", () => store.listWorkspaces());
-  ipcMain.handle("ws:create", (_e, name?: string) => createProject(name));
-  ipcMain.handle("ws:rename", (_e, { id, name }) => {
-    store.renameWorkspace(id, name);
-    return { ok: true };
-  });
-  ipcMain.handle("ws:delete", (_e, id: string) => {
-    store.deleteWorkspace(id);
-    return { ok: true };
-  });
-  ipcMain.handle("ws:pin", (_e, { id, pinned }) => {
-    store.setPinned(id, pinned);
-    return { ok: true };
-  });
-  ipcMain.handle("project:list", () => store.listWorkspaces());
-  ipcMain.handle("project:create", (_e, input?: string | { name?: string; sourceFolders?: string[] }) => createProject(input));
+  ipcMain.handle("project:list", () => store.listProjects());
+  ipcMain.handle("project:create", (_e, input?: string | { name?: string; sourceRoots?: string[] }) => createProject(input));
   ipcMain.handle("project:rename", (_e, { id, name }) => {
-    store.renameWorkspace(id, name);
+    store.renameProject(id, name);
     return { ok: true };
   });
   ipcMain.handle("project:delete", (_e, id: string) => {
-    store.deleteWorkspace(id);
+    store.deleteProject(id);
     return { ok: true };
   });
   ipcMain.handle("project:pin", (_e, { id, pinned }) => {

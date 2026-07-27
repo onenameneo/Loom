@@ -140,18 +140,9 @@ const api = {
       return () => ipcRenderer.removeListener("acp:event", l);
     },
   },
-  workspaces: {
-    list: (): Promise<any[]> => ipcRenderer.invoke("ws:list"),
-    create: (name?: string): Promise<any> => ipcRenderer.invoke("ws:create", name),
-    rename: (id: string, name: string): Promise<any> =>
-      ipcRenderer.invoke("ws:rename", { id, name }),
-    delete: (id: string): Promise<any> => ipcRenderer.invoke("ws:delete", id),
-    pin: (id: string, pinned: boolean): Promise<any> =>
-      ipcRenderer.invoke("ws:pin", { id, pinned }),
-  },
   projects: {
     list: (): Promise<any[]> => ipcRenderer.invoke("project:list"),
-    create: (input?: string | { name?: string; sourceFolders?: string[] }): Promise<any> => ipcRenderer.invoke("project:create", input),
+    create: (input?: string | { name?: string; sourceRoots?: string[] }): Promise<any> => ipcRenderer.invoke("project:create", input),
     rename: (id: string, name: string): Promise<any> =>
       ipcRenderer.invoke("project:rename", { id, name }),
     delete: (id: string): Promise<any> => ipcRenderer.invoke("project:delete", id),

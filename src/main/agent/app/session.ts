@@ -233,7 +233,6 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     id: n.id,
     sessionId: n.sessionId,
     projectId: n.projectId,
-    workspaceId: n.sessionId,
     parentId: n.parentId,
     title: n.title,
     seed: n.seed,

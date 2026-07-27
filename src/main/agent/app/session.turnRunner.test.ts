@@ -340,4 +340,26 @@ describe("createAgentSession turn runner integration", () => {
     await expect(run).resolves.toEqual({ ok: false, reason: "stale" });
     expect(store.listMessages("n1").map((m) => (m.content as any).content)).toEqual(["go"]);
   });
+
+  it("returns session-scoped node DTOs without legacy workspace ownership", () => {
+    const store = new MemoryStore();
+    const eventLog = events();
+    const session = createAgentSession({
+      store,
+      events: eventLog.sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    expect(session.list("sess")).toEqual([
+      expect.objectContaining({
+        id: "n1",
+        projectId: "ws",
+        sessionId: "sess",
+      }),
+    ]);
+    expect(session.list("sess")[0]).not.toHaveProperty("workspaceId");
+  });
 });
