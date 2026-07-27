@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Handle, NodeResizeControl, Position, type ResizeParams } from "@xyflow/react";
-import { Check, ChevronDown, MessageSquareText, Pencil, Trash2, X } from "lucide-react";
-import type { ApprovalRequestPayload, ApprovalScope, NodeBudget, NodeMsg, TurnCanvasEventPayload } from "../env";
+import { Check, ChevronDown, MessageSquareText, Pencil, Trash2 } from "lucide-react";
+import type { ApprovalRequestPayload, NodeBudget, NodeMsg, TurnCanvasEventPayload } from "../env";
 import { Composer, type ComposerImage } from "../composer/Composer";
 import { IconArrowUpRight, IconChevronRight, IconSplit } from "../icons";
 import { Message } from "../message/Message";
@@ -9,10 +9,10 @@ import { BranchContext } from "./branch";
 import { ToolCallTimeline } from "./ToolCallTimeline";
 import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
 import { useComposerHeightVar } from "./useComposerHeightVar";
+import { ApprovalPrompt, type ApprovalState } from "./ApprovalPrompt";
 
 type Role = "user" | "assistant" | "error" | "tool";
 type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; toolCall?: ToolCallView };
-type ApprovalState = ApprovalRequestPayload & { scope: ApprovalScope };
 type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number };
 type RectLike = Pick<DOMRect, "left" | "top" | "bottom" | "width" | "height">;
 
@@ -294,7 +294,7 @@ export function ChatThreadNode(props: any) {
     if (window.api) await window.api.canvas.abort(id);
   }
 
-  async function decideApproval(action: "allow" | "deny") {
+  async function decideApproval(action: "allow" | "deny", scope?: ApprovalState["scope"]) {
     if (!window.api || !approval) return;
     const current = approval;
     setApproval(null);
@@ -305,7 +305,7 @@ export function ChatThreadNode(props: any) {
       toolCallId: current.toolCallId,
       toolName: current.toolName,
       action,
-      scope: action === "allow" ? current.scope : undefined,
+      scope: action === "allow" ? scope ?? current.scope : undefined,
     });
   }
 
@@ -596,33 +596,6 @@ export function ChatThreadNode(props: any) {
             )
           ))}
 
-          {awaitingApproval && (
-            <div className="approval-box approval-box--compact nodrag" role="group" aria-label="工具审批">
-              <div className="approval-copy">
-                <div className="approval-title">{approval.preview.title}</div>
-                {approval.preview.description && <div className="approval-desc">{approval.preview.description}</div>}
-                <div className="approval-meta">{approval.toolName} · {approval.target}</div>
-              </div>
-              <div className="approval-actions">
-                <select
-                  value={approval.scope}
-                  aria-label="审批范围"
-                  onChange={(e) => setApproval((current) => current ? { ...current, scope: e.target.value as ApprovalScope } : current)}
-                >
-                  <option value="once">本次</option>
-                  <option value="node-session">当前节点</option>
-                  <option value="persistent">记住目标</option>
-                </select>
-                <button type="button" className="approval-deny" onClick={() => decideApproval("deny")} aria-label="拒绝工具调用" title="拒绝">
-                  <X size={14} />
-                </button>
-                <button type="button" className="approval-allow" onClick={() => decideApproval("allow")} aria-label="允许工具调用" title="允许">
-                  <Check size={14} />
-                </button>
-              </div>
-            </div>
-          )}
-
           {thinking && <div className="thinking"><span className="dot">·</span> 思考中…</div>}
 
           {tb && (
@@ -664,6 +637,14 @@ export function ChatThreadNode(props: any) {
           onChange={setInput}
           busy={busy}
           placeholder={awaitingApproval ? "等待工具审批…" : busy ? "回复中…" : msgs.length ? "继续追问…" : data.seed ? "顺着这个往下问…" : "开始一段思考…"}
+          topAccessory={awaitingApproval ? (
+            <ApprovalPrompt
+              approval={approval}
+              compact
+              onScopeChange={(scope) => setApproval((current) => current ? { ...current, scope } : current)}
+              onDecision={decideApproval}
+            />
+          ) : undefined}
           mount={mount}
           canRegenerate={msgs.some((m) => m.role === "user") && !busy}
           onSubmit={submit}

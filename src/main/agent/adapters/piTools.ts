@@ -1,5 +1,5 @@
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { ReadonlyAgentTool, ToolResult } from "../core/tool";
+import type { AgentTool as LoomAgentTool, ReadonlyAgentTool, ToolResult } from "../core/tool";
 
 function toPiResult(result: ToolResult): AgentToolResult<unknown> {
   if (result.isError) throw new Error(result.content.map((c) => (c.type === "text" ? c.text : `[image:${c.mimeType}]`)).join("\n"));
@@ -10,7 +10,7 @@ function toPiResult(result: ToolResult): AgentToolResult<unknown> {
   };
 }
 
-export function adaptReadonlyToolToPi(tool: ReadonlyAgentTool): AgentTool<any> {
+export function adaptAgentToolToPi(tool: LoomAgentTool): AgentTool<any> {
   return {
     name: tool.name,
     label: tool.label,
@@ -29,6 +29,12 @@ export function adaptReadonlyToolToPi(tool: ReadonlyAgentTool): AgentTool<any> {
   };
 }
 
+export const adaptReadonlyToolToPi = adaptAgentToolToPi;
+
+export function adaptAgentToolsToPi(tools: LoomAgentTool[]): AgentTool<any>[] {
+  return tools.map(adaptAgentToolToPi);
+}
+
 export function adaptReadonlyToolsToPi(tools: ReadonlyAgentTool[]): AgentTool<any>[] {
-  return tools.map(adaptReadonlyToolToPi);
+  return adaptAgentToolsToPi(tools);
 }

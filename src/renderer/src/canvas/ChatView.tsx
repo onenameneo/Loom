@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, X } from "lucide-react";
-import type { ApprovalRequestPayload, ApprovalScope, NodeBudget, NodeMsg, TurnCanvasEventPayload } from "../env";
+import { ChevronDown } from "lucide-react";
+import type { ApprovalRequestPayload, NodeBudget, NodeMsg, TurnCanvasEventPayload } from "../env";
 import { IconSplit, IconWorkspace } from "../icons";
 import { Message } from "../message/Message";
 import { Composer, type ComposerImage } from "../composer/Composer";
@@ -8,10 +8,10 @@ import { useTitlebarActions } from "../titlebar/Titlebar";
 import { ToolCallTimeline } from "./ToolCallTimeline";
 import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
 import { useComposerHeightVar } from "./useComposerHeightVar";
+import { ApprovalPrompt, type ApprovalState } from "./ApprovalPrompt";
 
 type Role = "user" | "assistant" | "error" | "tool";
 type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; toolCall?: ToolCallView };
-type ApprovalState = ApprovalRequestPayload & { scope: ApprovalScope };
 
 // 对话优先视图：单条主线摊开成经典居中聊天（「聊天 = 只有一个节点的画布」）。
 // 走同一套 window.api.canvas；在回复里划词 → 岔出第一个分支 → 上层切成画布视图。
@@ -249,7 +249,7 @@ export default function ChatView({
     await window.api.canvas.abort(nodeId);
   }
 
-  async function decideApproval(action: "allow" | "deny") {
+  async function decideApproval(action: "allow" | "deny", scope?: ApprovalState["scope"]) {
     if (!window.api || !approval) return;
     const current = approval;
     setApproval(null);
@@ -260,7 +260,7 @@ export default function ChatView({
       toolCallId: current.toolCallId,
       toolName: current.toolName,
       action,
-      scope: action === "allow" ? current.scope : undefined,
+      scope: action === "allow" ? scope ?? current.scope : undefined,
     });
   }
 
@@ -374,32 +374,6 @@ export default function ChatView({
               />
             )
           ))}
-          {awaitingApproval && (
-            <div className="approval-box nodrag" role="group" aria-label="工具审批">
-              <div className="approval-copy">
-                <div className="approval-title">{approval.preview.title}</div>
-                {approval.preview.description && <div className="approval-desc">{approval.preview.description}</div>}
-                <div className="approval-meta">{approval.toolName} · {approval.target}</div>
-              </div>
-              <div className="approval-actions">
-                <select
-                  value={approval.scope}
-                  aria-label="审批范围"
-                  onChange={(e) => setApproval((current) => current ? { ...current, scope: e.target.value as ApprovalScope } : current)}
-                >
-                  <option value="once">本次</option>
-                  <option value="node-session">当前节点</option>
-                  <option value="persistent">记住目标</option>
-                </select>
-                <button type="button" className="approval-deny" onClick={() => decideApproval("deny")} aria-label="拒绝工具调用" title="拒绝">
-                  <X size={14} />
-                </button>
-                <button type="button" className="approval-allow" onClick={() => decideApproval("allow")} aria-label="允许工具调用" title="允许">
-                  <Check size={14} />
-                </button>
-              </div>
-            </div>
-          )}
           {thinking && (
             <div className="thinking">
               <span className="dot">·</span> 思考中…
@@ -433,6 +407,13 @@ export default function ChatView({
           onChange={setInput}
           busy={busy}
           placeholder={awaitingApproval ? "等待工具审批…" : busy ? "生成中…" : "随心输入…（Enter 发送，Shift+Enter 换行）"}
+          topAccessory={awaitingApproval ? (
+            <ApprovalPrompt
+              approval={approval}
+              onScopeChange={(scope) => setApproval((current) => current ? { ...current, scope } : current)}
+              onDecision={decideApproval}
+            />
+          ) : undefined}
           mount={mount}
           canRegenerate={msgs.some((m) => m.role === "user") && !busy}
           budgetLine={`将发送 ~${(mount ? budget?.withAncestors : budget?.withoutAncestors) ?? 0} tokens`}

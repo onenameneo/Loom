@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Square, X } from "lucide-react";
 import { IconSend } from "../icons";
 import type { CmdCtx } from "./commands";
@@ -16,6 +16,7 @@ export function Composer({
   mount,
   canRegenerate,
   budgetLine,
+  topAccessory,
   onSubmit,
   onStop,
   onToggleMount,
@@ -32,6 +33,7 @@ export function Composer({
   mount: boolean;
   canRegenerate: boolean;
   budgetLine?: string;
+  topAccessory?: ReactNode;
   onSubmit: (text: string, images: ComposerImage[]) => void;
   onStop: () => void;
   onToggleMount: (on: boolean) => void;
@@ -129,6 +131,7 @@ export function Composer({
   return (
     <div className="composer-wrap nodrag">
       {budgetLine && <div className="budget-line">{budgetLine}</div>}
+      {topAccessory}
       <div className="composer-box">
         <SlashPalette
           ref={slashRef}

@@ -1,21 +1,21 @@
 import type { ApprovalPort, AgentHook, BlockDecision, HookToolCallContext } from "../../ports";
 import type { ApprovalPolicyStore } from "../../app/approvalPolicy";
-import type { ReadonlyAgentTool } from "../../core/tool";
+import type { AgentTool } from "../../core/tool";
 
 export function createApprovalGate(deps: {
   approvals: ApprovalPort;
   policies: ApprovalPolicyStore;
-  getTool(name: string): ReadonlyAgentTool | undefined;
+  getTool(nodeId: string, name: string): AgentTool | undefined;
   setAwaitingApproval(nodeId: string, turnId: string, approval: { requestId: string; toolName: string; toolCallId: string }): boolean;
   setRunning(nodeId: string, turnId: string): boolean;
 }): AgentHook {
   async function onToolCall(ctx: HookToolCallContext): Promise<BlockDecision | void> {
-    const tool = deps.getTool(ctx.toolName);
+    const tool = deps.getTool(ctx.nodeId, ctx.toolName);
     if (!tool?.approval?.required) return undefined;
     if (!ctx.turnId) return { block: true, reason: "approval unavailable" };
 
     const args = ctx.args as never;
-    const target = tool.approval.normalizeTarget(args);
+    const target = await tool.approval.normalizeTarget(args);
     if (deps.policies.isAllowed({ nodeId: ctx.nodeId, toolName: ctx.toolName, target })) return undefined;
 
     const pending = deps.approvals.request({

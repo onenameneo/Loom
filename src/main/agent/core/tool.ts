@@ -1,6 +1,7 @@
 import type { TSchema } from "typebox";
 
-export type ReadonlyToolExecutionMode = "sequential" | "parallel";
+export type ToolExecutionMode = "sequential" | "parallel";
+export type ReadonlyToolExecutionMode = ToolExecutionMode;
 
 export type ToolTextContent = { type: "text"; text: string };
 export type ToolImageContent = { type: "image"; data: string; mimeType: string };
@@ -25,7 +26,7 @@ export type ToolApprovalScope = "once" | "node-session" | "persistent";
 export interface ToolApprovalRequirement<TArgs = unknown> {
   required: true;
   defaultScope?: ToolApprovalScope;
-  normalizeTarget(args: TArgs): string;
+  normalizeTarget(args: TArgs): string | Promise<string>;
   preview(args: TArgs): {
     title: string;
     description?: string;
@@ -33,15 +34,19 @@ export interface ToolApprovalRequirement<TArgs = unknown> {
   };
 }
 
-export interface ReadonlyAgentTool<TArgs = unknown, TDetails = unknown> {
+export interface AgentTool<TArgs = unknown, TDetails = unknown> {
   name: string;
   label: string;
   description: string;
   parameters: TSchema;
-  readOnly: true;
+  readOnly: boolean;
   approval?: ToolApprovalRequirement<TArgs>;
-  executionMode?: ReadonlyToolExecutionMode;
+  executionMode?: ToolExecutionMode;
   execute(ctx: ToolExecutionContext<TArgs>): Promise<ToolResult<TDetails>>;
+}
+
+export interface ReadonlyAgentTool<TArgs = unknown, TDetails = unknown> extends AgentTool<TArgs, TDetails> {
+  readOnly: true;
 }
 
 export interface TruncationDetails {

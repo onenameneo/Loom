@@ -223,13 +223,20 @@
   /* 始终盖在消息之上：悬停的消息会被抬到 z-index:3，输入框必须更高，否则会被消息文字遮住 */
   z-index: 12;
 }
+.composer-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
 .chatview .composer-wrap {
-  max-width: 720px;
+  width: min(720px, 100%);
   margin: 0 auto;
 }
 .budget-line {
   max-width: 720px;
-  margin: 0 auto 6px;
+  margin: 0 auto;
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--faint);
@@ -247,8 +254,7 @@
   box-shadow: var(--shadow-float);
 }
 .chatview .composer .composer-box {
-  max-width: 720px;
-  margin: 0 auto;
+  width: 100%;
   padding: 8px 8px 8px 14px;
 }
 .chatview .composer textarea {
@@ -835,81 +841,171 @@
   color: var(--accent);
 }
 
-.approval-box {
+.approval-prompt {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  margin: 10px 0;
-  padding: 10px 12px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-left: 2px solid var(--warn);
-  border-radius: var(--r-md);
-}
-.approval-box--compact {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
-  padding: 9px 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-composer);
 }
-.approval-copy {
+.approval-prompt__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--muted);
+}
+.approval-prompt__icon {
+  width: 16px;
+  height: 16px;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--muted);
+}
+.approval-prompt__copy {
   min-width: 0;
 }
-.approval-title {
+.approval-prompt__eyebrow {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+.approval-prompt__title {
   color: var(--text);
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-weight: 600;
   line-height: 1.45;
 }
-.approval-desc,
-.approval-meta {
-  margin-top: 3px;
+.approval-prompt__desc,
+.approval-prompt__detail,
+.approval-prompt__target {
+  margin-top: 6px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 11.5px;
   line-height: 1.45;
 }
-.approval-meta {
+.approval-prompt__detail {
   font-family: var(--font-mono);
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.approval-actions {
+.approval-prompt__target {
+  font-family: var(--font-mono);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.88;
+}
+.approval-prompt__actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 8px;
+  margin-top: 2px;
 }
-.approval-actions select {
-  height: 28px;
-  min-width: 84px;
+.approval-prompt__actions button {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  font-size: 11px;
-}
-.approval-actions button {
-  width: 28px;
-  height: 28px;
-  display: inline-grid;
-  place-items: center;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
+  padding: 0 11px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
 }
-.approval-actions button:hover,
-.approval-actions button:focus-visible,
-.approval-actions select:focus-visible {
+.approval-prompt__actions button:hover,
+.approval-prompt__actions button:focus-visible {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
   outline: none;
 }
-.approval-allow svg {
-  color: var(--ok);
+.approval-prompt__allow {
+  min-width: 100px;
+  background: var(--text) !important;
+  border-color: var(--text) !important;
+  color: var(--bg) !important;
 }
-.approval-deny svg {
-  color: var(--err);
+.approval-prompt__allow svg {
+  color: currentColor;
+}
+.approval-prompt--compact {
+  gap: 7px;
+  padding: 9px 10px;
+  border-radius: var(--r-md);
+}
+.approval-prompt--compact .approval-prompt__actions {
+  gap: 6px;
+}
+.approval-prompt--compact .approval-prompt__head {
+  gap: 6px;
+}
+.approval-prompt--compact .approval-prompt__eyebrow,
+.approval-prompt--compact .approval-prompt__detail,
+.approval-prompt--compact .approval-prompt__target {
+  font-size: 10.5px;
+}
+.approval-prompt--compact .approval-prompt__title {
+  font-size: 12px;
+}
+.approval-prompt--compact .approval-prompt__target {
+  margin-top: 4px;
+}
+.approval-prompt--compact .approval-prompt__detail {
+  margin-top: 6px;
+}
+.approval-prompt--compact .approval-prompt__actions button {
+  height: 28px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+.approval-prompt--compact .approval-prompt__allow {
+  min-width: 82px;
+}
+.approval-select-content {
+  overflow: hidden;
+  min-width: 132px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-float);
+  z-index: 80;
+}
+.approval-select-content {
+  padding: 4px;
+}
+.approval-select-item {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: 12px;
+  padding: 0 9px;
+  outline: none;
+  cursor: default;
+  user-select: none;
+}
+.approval-select-item[data-highlighted] {
+  background: var(--accent-soft);
+}
+.approval-select-item[data-state="checked"] {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* 划词工具条 */
@@ -1000,6 +1096,8 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
@@ -1216,7 +1314,22 @@
   display: block;
 }
 .round-send.is-stop {
-  background: var(--muted);
+  background: var(--surface-2);
+  color: var(--muted);
+  border: 1px solid var(--border-strong);
+}
+.round-send.is-stop:hover,
+.round-send.is-stop:focus-visible {
+  color: var(--text);
+  border-color: var(--border-strong);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.round-send.is-stop svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  stroke: none;
 }
 .round-send:disabled {
   background: var(--surface-2);

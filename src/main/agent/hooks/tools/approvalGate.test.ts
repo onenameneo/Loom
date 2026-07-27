@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
 import { createApprovalBroker } from "../../app/approvalBroker";
 import { createApprovalPolicyStore } from "../../app/approvalPolicy";
 import { createApprovalGate } from "./approvalGate";
 import type { EventSinkPort } from "../../ports";
-import type { ReadonlyAgentTool } from "../../core/tool";
+import type { AgentTool, ReadonlyAgentTool } from "../../core/tool";
 
 function events() {
   const items: Array<{ nodeId: string; type: string; payload?: unknown }> = [];
@@ -23,6 +23,21 @@ const approvedTool: ReadonlyAgentTool<{ path: string }> = {
     defaultScope: "once",
     normalizeTarget: (args) => args.path,
     preview: (args) => ({ title: `Write ${args.path}`, args }),
+  },
+  execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+};
+
+const mutationTool: AgentTool<{ path: string; content: string }> = {
+  name: "project_write_file",
+  label: "Write Project File",
+  description: "Writes a Project file",
+  parameters: Type.Object({ path: Type.String(), content: Type.String() }),
+  readOnly: false,
+  approval: {
+    required: true,
+    defaultScope: "once",
+    normalizeTarget: async (args) => `root:${args.path}`,
+    preview: (args) => ({ title: `Write ${args.path}`, args: { path: args.path, contentLength: args.content.length } }),
   },
   execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
 };
@@ -55,6 +70,7 @@ describe("createApprovalGate", () => {
     });
 
     const pending = gate.onToolCall?.({ nodeId: "n1", turnId: "t1", toolName: "write_file", toolCallId: "tc", args: { path: "/tmp/a" } });
+    await vi.waitFor(() => expect(eventLog.items).toHaveLength(1));
     const emitted = eventLog.items[0].payload as any;
     approvals.decide({
       requestId: emitted.requestId,
@@ -86,6 +102,7 @@ describe("createApprovalGate", () => {
     ).resolves.toEqual({ block: true, reason: "approval unavailable" });
 
     const pending = gate.onToolCall?.({ nodeId: "n1", turnId: "t1", toolName: "write_file", toolCallId: "tc", args: { path: "/tmp/a" } });
+    await vi.waitFor(() => expect(eventLog.items).toHaveLength(1));
     const emitted = eventLog.items[0].payload as any;
     approvals.decide({
       requestId: emitted.requestId,
@@ -97,5 +114,85 @@ describe("createApprovalGate", () => {
     });
 
     await expect(pending).resolves.toEqual({ block: true, reason: "approval denied" });
+  });
+
+  it("uses node-scoped dynamic mutation tools and redacts approval previews", async () => {
+    const eventLog = events();
+    const approvals = createApprovalBroker({ events: eventLog.sink, clock: { now: () => 1 } });
+    const gate = createApprovalGate({
+      approvals,
+      policies: createApprovalPolicyStore(),
+      getTool: (nodeId, name) => (nodeId === "n1" && name === "project_write_file" ? mutationTool : undefined),
+      setAwaitingApproval: () => true,
+      setRunning: () => true,
+    });
+
+    const pending = gate.onToolCall?.({
+      nodeId: "n1",
+      turnId: "t1",
+      toolName: "project_write_file",
+      toolCallId: "tc",
+      args: { path: "a.md", content: "secret full content" },
+    });
+    await vi.waitFor(() => expect(eventLog.items).toHaveLength(1));
+    const request = eventLog.items[0].payload as any;
+    expect(request.target).toBe("root:a.md");
+    expect(JSON.stringify(request.preview)).not.toContain("secret full content");
+
+    approvals.decide({
+      requestId: request.requestId,
+      nodeId: "n1",
+      turnId: "t1",
+      toolCallId: "tc",
+      toolName: "project_write_file",
+      action: "deny",
+    });
+    await expect(pending).resolves.toEqual({ block: true, reason: "approval denied" });
+  });
+
+  it("keeps persistent approvals scoped to one normalized target", async () => {
+    const eventLog = events();
+    const approvals = createApprovalBroker({ events: eventLog.sink, clock: { now: () => 1 } });
+    const policies = createApprovalPolicyStore({
+      isPersistentAllowed: (toolName, target) => toolName === "project_write_file" && target === "root:a.md",
+      grantPersistent: () => undefined,
+    });
+    const gate = createApprovalGate({
+      approvals,
+      policies,
+      getTool: () => mutationTool,
+      setAwaitingApproval: () => true,
+      setRunning: () => true,
+    });
+
+    await expect(
+      gate.onToolCall?.({
+        nodeId: "n1",
+        turnId: "t1",
+        toolName: "project_write_file",
+        toolCallId: "tc1",
+        args: { path: "a.md", content: "x" },
+      }),
+    ).resolves.toBeUndefined();
+    expect(eventLog.items).toEqual([]);
+
+    const pending = gate.onToolCall?.({
+      nodeId: "n1",
+      turnId: "t1",
+      toolName: "project_write_file",
+      toolCallId: "tc2",
+      args: { path: "b.md", content: "x" },
+    });
+    await vi.waitFor(() => expect(eventLog.items).toHaveLength(1));
+    approvals.decide({
+      requestId: (eventLog.items[0].payload as any).requestId,
+      nodeId: "n1",
+      turnId: "t1",
+      toolCallId: "tc2",
+      toolName: "project_write_file",
+      action: "allow",
+      scope: "once",
+    });
+    await expect(pending).resolves.toBeUndefined();
   });
 });

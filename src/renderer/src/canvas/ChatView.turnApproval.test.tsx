@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ChatView from "./ChatView";
 import type { CanvasEvent } from "../env";
@@ -101,8 +102,11 @@ describe("ChatView turn and approval controls", () => {
       eventHandler?.({ nodeId: "n1", type: "turn", payload: { nodeId: "n1", turnId: "t1", operation: "send", state: "awaiting_approval" } });
     });
 
-    expect(screen.getByRole("group", { name: "工具审批" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "允许工具调用" }));
+    const approvalGroup = screen.getByRole("group", { name: "工具审批" });
+    expect(approvalGroup.closest(".composer-wrap")).toBeTruthy();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "允许工具调用" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "允许一次" }));
     expect(decideApproval).toHaveBeenCalledWith(expect.objectContaining({ requestId: "r1", action: "allow", scope: "once" }));
 
     act(() => {

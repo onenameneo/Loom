@@ -5,9 +5,9 @@ import { saveNodeLayout, saveNodeLayouts } from "../../store/layoutPersistence";
 import { ancestorChain, descendants, type Seed } from "../core/graph";
 import { buildContextPlan, isLlmMessage, roleOf, textOf } from "../core/context";
 import { budget as computeBudget, type Budget } from "../core/budget";
-import type { ReadonlyAgentTool } from "../core/tool";
+import type { AgentTool } from "../core/tool";
 import { createHookRegistry, createToolLifecycleHook } from "../hooks";
-import { createDefaultReadonlyTools, createProjectFileTools } from "../tools";
+import { createDefaultReadonlyTools, createProjectFileTools, createProjectMutationTools } from "../tools";
 import { createApprovalBroker } from "./approvalBroker";
 import { createApprovalPolicyStore } from "./approvalPolicy";
 import { createToolRegistry } from "./toolRuntime";
@@ -60,7 +60,7 @@ export interface CanvasRuntimeDeps {
   createEngine: (hooks: {
     buildContext: (nodeId: string, own: AgentMessage[]) => Message[] | Promise<Message[]>;
     getNodeInit: (nodeId: string) => NodeInit | undefined;
-    getTools: (nodeId: string) => ReadonlyAgentTool[];
+    getTools: (nodeId: string) => AgentTool[];
     dispatcher: HookDispatcher;
     getCurrentTurnId: (nodeId: string) => string | undefined;
   }) => LlmEnginePort;
@@ -180,6 +180,11 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return store.listWorkspaces().find((project) => project.id === node.projectId)?.sourceFolders ?? [];
   }
 
+  function toolsFor(nodeId: string): AgentTool[] {
+    const sourceFolders = sourceFoldersFor(nodeId);
+    return [...tools.list(), ...createProjectFileTools(sourceFolders), ...createProjectMutationTools(sourceFolders)];
+  }
+
   const tools = createToolRegistry(createDefaultReadonlyTools(clock));
 
   // Hook 扩展面：能力经 registerHook 落卡片；工具生命周期经稳定 Loom 事件输出。
@@ -196,7 +201,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     createApprovalGate({
       approvals,
       policies,
-      getTool: (name) => tools.get(name),
+      getTool: (nodeId, name) => toolsFor(nodeId).find((tool) => tool.name === name),
       setAwaitingApproval: (nodeId, turnId, approval) => queries.setAwaitingApproval(nodeId, turnId, approval),
       setRunning: (nodeId, turnId) => queries.setRunning(nodeId, turnId),
     }),
@@ -204,7 +209,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   const engine = deps.createEngine({
     buildContext,
     getNodeInit,
-    getTools: (nodeId) => [...tools.list(), ...createProjectFileTools(sourceFoldersFor(nodeId))],
+    getTools: toolsFor,
     dispatcher: hookRegistry,
     getCurrentTurnId: (nodeId) => queries.state(nodeId)?.turnId,
   });

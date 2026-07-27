@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { createAgentSession } from "./session";
 import type { EngineHandle, EventSinkPort, LlmEnginePort, NodeInit } from "../ports";
+import type { AgentTool } from "../core/tool";
 import type { NodeLayout, NodeRecord, PersistedMessage, SessionRecord, Settings, Store, Workspace } from "../../store/store";
 import { DEFAULT_SETTINGS } from "../../store/store";
 
@@ -123,6 +127,127 @@ function createHandle(messages: AgentMessage[], prompt: EngineHandle["prompt"]):
 }
 
 describe("createAgentSession turn runner integration", () => {
+  it("does not resolve local coding tools for an unlinked project", () => {
+    const store = new MemoryStore();
+    const eventLog = events();
+    let getTools: ((nodeId: string) => AgentTool[]) | undefined;
+    createAgentSession({
+      store,
+      events: eventLog.sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: (hooks) => {
+        getTools = hooks.getTools;
+        return createEngine(createHandle([], vi.fn()));
+      },
+    });
+
+    expect(getTools?.("n1").some((tool) => tool.name.startsWith("project_"))).toBe(false);
+  });
+
+  it("resolves project coding tools dynamically for the node project", () => {
+    const root = mkdtempSync(join(tmpdir(), "loom-session-tools-"));
+    writeFileSync(join(root, "file.ts"), "export {};", "utf-8");
+    const store = new MemoryStore();
+    store.workspaces[0].sourceFolders = [root];
+    const eventLog = events();
+    let getTools: ((nodeId: string) => AgentTool[]) | undefined;
+    const session = createAgentSession({
+      store,
+      events: eventLog.sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: (hooks) => {
+        getTools = hooks.getTools;
+        return createEngine(createHandle([], vi.fn()));
+      },
+    });
+
+    try {
+      expect(getTools?.("n1").map((tool) => tool.name)).toEqual(expect.arrayContaining([
+        "now", "calc", "web_fetch", "project_read_file", "project_list_files", "project_find_files", "project_grep",
+        "project_write_file", "project_edit_file",
+      ]));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("pauses project mutation tools for approval, then persists the tool result transcript", async () => {
+    const root = mkdtempSync(join(tmpdir(), "loom-session-mutation-"));
+    const store = new MemoryStore();
+    store.workspaces[0].sourceFolders = [root];
+    const eventLog = events();
+    const engineMessages: AgentMessage[] = [];
+    const session = createAgentSession({
+      store,
+      events: eventLog.sink,
+      ids: { message: () => `id-${Math.random()}` },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: (hooks) =>
+        createEngine(
+          createHandle(engineMessages, async (msg) => {
+            engineMessages.push(msg);
+            const args = { path: "loomtest.md", content: "hello Neo!" };
+            const block = await hooks.dispatcher.toolCall({
+              nodeId: "n1",
+              turnId: hooks.getCurrentTurnId("n1"),
+              toolName: "project_write_file",
+              toolCallId: "tc-write",
+              args,
+            });
+            if (block) throw new Error(block.reason ?? "blocked");
+            const tool = hooks.getTools("n1").find((candidate) => candidate.name === "project_write_file")!;
+            const result = await tool.execute({ toolCallId: "tc-write", args });
+            await hooks.dispatcher.toolResult({
+              nodeId: "n1",
+              turnId: hooks.getCurrentTurnId("n1"),
+              toolName: "project_write_file",
+              toolCallId: "tc-write",
+              args,
+              content: result.content as any,
+              details: result.details,
+              isError: false,
+            });
+            engineMessages.push({
+              role: "toolResult",
+              toolName: "project_write_file",
+              toolCallId: "tc-write",
+              content: result.content,
+              details: result.details,
+              isError: false,
+            } as unknown as AgentMessage);
+          }),
+        ),
+    });
+
+    try {
+      const run = session.send({ nodeId: "n1", text: "create file" });
+      await vi.waitFor(() => expect(eventLog.items.some((item) => item.type === "approval")).toBe(true));
+      expect(existsSync(join(root, "loomtest.md"))).toBe(false);
+      const approval = eventLog.items.find((item) => item.type === "approval")!.payload as any;
+      expect(JSON.stringify(approval.preview)).not.toContain("hello Neo!");
+      expect(session.decideApproval({
+        requestId: approval.requestId,
+        nodeId: "n1",
+        turnId: approval.turnId,
+        toolCallId: "tc-write",
+        toolName: "project_write_file",
+        action: "allow",
+        scope: "once",
+      })).toEqual({ ok: true });
+
+      await expect(run).resolves.toEqual({ ok: true });
+      expect(readFileSync(join(root, "loomtest.md"), "utf-8")).toBe("hello Neo!");
+      expect(store.listMessages("n1").map((m) => (m.content as any).role)).toEqual(["user", "toolResult"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a busy same-node send before appending another user message", async () => {
     const store = new MemoryStore();
     const eventLog = events();
