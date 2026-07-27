@@ -6,7 +6,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { createAgentSession } from "./session";
 import type { EngineHandle, EventSinkPort, LlmEnginePort, NodeInit } from "../ports";
 import type { AgentTool } from "../core/tool";
-import type { NodeLayout, NodeRecord, PersistedMessage, SessionRecord, Settings, Store, Workspace } from "../../store/store";
+import type { NodeLayout, NodeRecord, PersistedMessage, SessionRecord, Settings, Store, Project } from "../../store/store";
 import { DEFAULT_SETTINGS } from "../../store/store";
 
 function deferred<T = void>() {
@@ -21,7 +21,7 @@ function deferred<T = void>() {
 
 class MemoryStore implements Store {
   settings: Settings = { ...DEFAULT_SETTINGS };
-  workspaces: Workspace[] = [{ id: "ws", name: "ws", createdAt: 1, updatedAt: 1, pinned: false, order: 0 }];
+  projects: Project[] = [{ id: "ws", name: "ws", createdAt: 1, updatedAt: 1, pinned: false, order: 0, sourceRoots: [] }];
   sessions: SessionRecord[] = [
     { id: "sess", projectId: "ws", title: "Session", createdAt: 1, updatedAt: 1, order: 0 },
     { id: "sess2", projectId: "ws", title: "Second", createdAt: 1, updatedAt: 1, order: 1 },
@@ -32,7 +32,7 @@ class MemoryStore implements Store {
     this.nodes.set("n1", {
       id: "n1",
       sessionId: "sess",
-      workspaceId: "ws",
+      projectId: "ws",
       title: "Node",
       mountAncestors: false,
       messages: messages.map((content, seq) => ({ id: `m${seq}`, seq, role: String((content as any).role), content })),
@@ -40,7 +40,7 @@ class MemoryStore implements Store {
     this.nodes.set("n2", {
       id: "n2",
       sessionId: "sess2",
-      workspaceId: "ws",
+      projectId: "ws",
       title: "Second",
       mountAncestors: false,
       messages: [],
@@ -51,8 +51,12 @@ class MemoryStore implements Store {
   patchSettings() { return this.settings; }
   getApiKeyEnc() { return undefined; }
   setApiKeyEnc() {}
-  listWorkspaces() { return this.workspaces; }
-  createWorkspace() { return this.workspaces[0]; }
+  listProjects() { return this.projects; }
+  createProject() { return this.projects[0]; }
+  renameProject() {}
+  deleteProject() {}
+  listWorkspaces() { return this.listProjects(); }
+  createWorkspace() { return this.createProject(); }
   renameWorkspace() {}
   deleteWorkspace() {}
   setPinned() {}
@@ -64,12 +68,12 @@ class MemoryStore implements Store {
   deleteSession() {}
   listNodes(sessionId: string) { return [...this.nodes.values()].filter((n) => n.sessionId === sessionId); }
   getNode(id: string) { return this.nodes.get(id); }
-  createNode(input: { sessionId?: string; workspaceId?: string; title: string }): NodeRecord {
-    const session = (input.sessionId ? this.getSession(input.sessionId) : this.ensureDefaultSession(input.workspaceId ?? "ws")) ?? this.sessions[0];
+  createNode(input: { sessionId?: string; projectId?: string; title: string }): NodeRecord {
+    const session = (input.sessionId ? this.getSession(input.sessionId) : this.ensureDefaultSession(input.projectId ?? "ws")) ?? this.sessions[0];
     const node: NodeRecord = {
       id: `n${this.nodes.size + 1}`,
       sessionId: session.id,
-      workspaceId: session.projectId,
+      projectId: session.projectId,
       title: input.title,
       mountAncestors: false,
       messages: [],
@@ -150,7 +154,7 @@ describe("createAgentSession turn runner integration", () => {
     const root = mkdtempSync(join(tmpdir(), "loom-session-tools-"));
     writeFileSync(join(root, "file.ts"), "export {};", "utf-8");
     const store = new MemoryStore();
-    store.workspaces[0].sourceFolders = [root];
+    store.projects[0].sourceRoots = [root];
     const eventLog = events();
     let getTools: ((nodeId: string) => AgentTool[]) | undefined;
     const session = createAgentSession({
@@ -178,7 +182,7 @@ describe("createAgentSession turn runner integration", () => {
   it("pauses project mutation tools for approval, then persists the tool result transcript", async () => {
     const root = mkdtempSync(join(tmpdir(), "loom-session-mutation-"));
     const store = new MemoryStore();
-    store.workspaces[0].sourceFolders = [root];
+    store.projects[0].sourceRoots = [root];
     const eventLog = events();
     const engineMessages: AgentMessage[] = [];
     const session = createAgentSession({

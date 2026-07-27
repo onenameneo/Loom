@@ -10,7 +10,7 @@ import {
   type Settings,
   type Store,
   type StoreData,
-  type Workspace,
+  type Project,
 } from "./store";
 
 // JSON-file 实现（原子写）。仓储接口的一个后端；之后可换 better-sqlite3，
@@ -28,14 +28,14 @@ export class JsonStore implements Store {
         return {
           version: raw.version ?? SCHEMA_VERSION,
           settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}) },
-          workspaces: Array.isArray(raw.workspaces) ? raw.workspaces : [],
+          projects: Array.isArray(raw.projects) ? raw.projects : [],
           sessions: Array.isArray(raw.sessions) ? raw.sessions : [],
         };
       } catch {
         // 损坏文件不阻塞启动；退回默认（旧文件保留在磁盘上）
       }
     }
-    return { version: SCHEMA_VERSION, settings: { ...DEFAULT_SETTINGS }, workspaces: [], sessions: [] };
+    return { version: SCHEMA_VERSION, settings: { ...DEFAULT_SETTINGS }, projects: [], sessions: [] };
   }
 
   private flush() {
@@ -67,45 +67,57 @@ export class JsonStore implements Store {
     this.flush();
   }
 
-  listWorkspaces(): Workspace[] {
-    return [...this.data.workspaces].sort(
+  listProjects(): Project[] {
+    return [...this.data.projects].sort(
       (a, b) =>
         Number(b.pinned) - Number(a.pinned) || a.order - b.order || b.updatedAt - a.updatedAt,
     );
   }
-  createWorkspace(input: string | { name?: string; sourceFolders?: string[] } = "未命名项目"): Workspace {
+  createProject(input: string | { name?: string; sourceRoots?: string[]; sourceFolders?: string[] } = "未命名项目"): Project {
     const name = typeof input === "string" ? input : input.name?.trim() || "未命名项目";
-    const sourceFolders = typeof input === "string"
+    const sourceRoots = typeof input === "string"
       ? []
-      : [...new Set((input.sourceFolders ?? []).map((item) => item.trim()).filter(Boolean))];
+      : [...new Set(((input.sourceRoots ?? input.sourceFolders) ?? []).map((item) => item.trim()).filter(Boolean))];
     const now = Date.now();
-    const ws: Workspace = {
+    const ws: Project = {
       id: `ws_${now.toString(36)}_${Math.floor(now % 100000).toString(36)}`,
       name,
       createdAt: now,
       updatedAt: now,
       pinned: false,
-      order: this.data.workspaces.length,
-      sourceFolders,
+      order: this.data.projects.length,
+      sourceRoots,
     };
-    this.data.workspaces.push(ws);
+    this.data.projects.push(ws);
     this.flush();
     return ws;
   }
-  renameWorkspace(id: string, name: string): void {
-    const ws = this.data.workspaces.find((w) => w.id === id);
+  renameProject(id: string, name: string): void {
+    const ws = this.data.projects.find((w) => w.id === id);
     if (ws) {
       ws.name = name;
       ws.updatedAt = Date.now();
       this.flush();
     }
   }
-  deleteWorkspace(id: string): void {
-    this.data.workspaces = this.data.workspaces.filter((w) => w.id !== id);
+  deleteProject(id: string): void {
+    this.data.projects = this.data.projects.filter((w) => w.id !== id);
     this.flush();
   }
+  listWorkspaces(): Project[] {
+    return this.listProjects();
+  }
+  createWorkspace(input: string | { name?: string; sourceFolders?: string[]; sourceRoots?: string[] } = "未命名项目"): Project {
+    return this.createProject(input);
+  }
+  renameWorkspace(id: string, name: string): void {
+    this.renameProject(id, name);
+  }
+  deleteWorkspace(id: string): void {
+    this.deleteProject(id);
+  }
   setPinned(id: string, pinned: boolean): void {
-    const ws = this.data.workspaces.find((w) => w.id === id);
+    const ws = this.data.projects.find((w) => w.id === id);
     if (ws) {
       ws.pinned = pinned;
       ws.updatedAt = Date.now();
@@ -159,6 +171,7 @@ export class JsonStore implements Store {
   }
   createNode(_input: {
     sessionId?: string;
+    projectId?: string;
     workspaceId?: string;
     parentId?: string;
     title: string;

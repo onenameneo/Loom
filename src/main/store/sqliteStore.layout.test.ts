@@ -16,7 +16,7 @@ describe("SqliteStore node layouts", () => {
     const dir = mkdtempSync(join(tmpdir(), "loom-session-scope-"));
     dirs.push(dir);
     const store = new SqliteStore(join(dir, "loom.db"));
-    const project = store.createWorkspace("Project");
+    const project = store.createProject("Project");
     const firstSession = store.ensureDefaultSession(project.id);
     const secondSession = store.createSession(project.id, "Second");
     const first = store.createNode({ sessionId: firstSession.id, title: "First root" });
@@ -24,15 +24,59 @@ describe("SqliteStore node layouts", () => {
 
     expect(store.listNodes(firstSession.id).map((node) => node.id)).toEqual([first.id]);
     expect(store.listNodes(secondSession.id).map((node) => node.id)).toEqual([second.id]);
-    expect(first.workspaceId).toBe(project.id);
-    expect(second.workspaceId).toBe(project.id);
+    expect(first.projectId).toBe(project.id);
+    expect(second.projectId).toBe(project.id);
+    expect(first).not.toHaveProperty("workspaceId");
+    expect(second).not.toHaveProperty("workspaceId");
+  });
+
+  it("creates Projects with canonical sourceRoots", () => {
+    const dir = mkdtempSync(join(tmpdir(), "loom-project-sourceroots-"));
+    dirs.push(dir);
+    const store = new SqliteStore(join(dir, "loom.db"));
+
+    const project = store.createProject({
+      name: "Project",
+      sourceRoots: ["/repo/app", "/repo/app", " ", "/repo/tools"],
+    });
+
+    expect(project).toMatchObject({
+      name: "Project",
+      sourceRoots: ["/repo/app", "/repo/tools"],
+    });
+    expect(project).not.toHaveProperty("sourceFolders");
+  });
+
+  it("reopens canonical Projects, Sessions, Nodes, messages, and layouts without resetting them", () => {
+    const dir = mkdtempSync(join(tmpdir(), "loom-canonical-reopen-"));
+    dirs.push(dir);
+    const file = join(dir, "loom.db");
+    const firstStore = new SqliteStore(file);
+    const project = firstStore.createProject({ name: "Project", sourceRoots: ["/repo/app"] });
+    const session = firstStore.ensureDefaultSession(project.id);
+    const node = firstStore.createNode({ sessionId: session.id, title: "Root" });
+    const layout = { x: 30, y: 45, width: 380, height: 280 };
+    firstStore.appendMessages(node.id, [
+      { id: "m1", seq: 0, role: "user", content: { role: "user", content: "hello" } as any },
+    ]);
+    firstStore.updateNodeLayout(node.id, layout);
+    (firstStore as any).db.close();
+
+    const reopened = new SqliteStore(file);
+
+    expect(reopened.listProjects().map((item) => item.id)).toEqual([project.id]);
+    expect(reopened.listSessions(project.id).map((item) => item.id)).toEqual([session.id]);
+    expect(reopened.listNodes(session.id).map((item) => item.id)).toEqual([node.id]);
+    expect(reopened.getNode(node.id)).toMatchObject({ projectId: project.id, sessionId: session.id, layout });
+    expect(reopened.getNode(node.id)).not.toHaveProperty("workspaceId");
+    expect(reopened.listMessages(node.id).map((item) => item.id)).toEqual(["m1"]);
   });
 
   it("cascades nodes and messages when deleting a session", () => {
     const dir = mkdtempSync(join(tmpdir(), "loom-session-cascade-"));
     dirs.push(dir);
     const store = new SqliteStore(join(dir, "loom.db"));
-    const project = store.createWorkspace("Project");
+    const project = store.createProject("Project");
     const firstSession = store.ensureDefaultSession(project.id);
     const secondSession = store.createSession(project.id, "Second");
     const first = store.createNode({ sessionId: firstSession.id, title: "First root" });
@@ -51,8 +95,9 @@ describe("SqliteStore node layouts", () => {
     dirs.push(dir);
     const file = join(dir, "loom.db");
     const store = new SqliteStore(file);
-    const workspace = store.createWorkspace("Layout test");
-    const node = store.createNode({ workspaceId: workspace.id, title: "Root" });
+    const project = store.createProject("Layout test");
+    const session = store.ensureDefaultSession(project.id);
+    const node = store.createNode({ sessionId: session.id, title: "Root" });
     const db = new Database(file);
 
     db.prepare(
@@ -74,8 +119,9 @@ describe("SqliteStore node layouts", () => {
     const dir = mkdtempSync(join(tmpdir(), "loom-layout-write-"));
     dirs.push(dir);
     const store = new SqliteStore(join(dir, "loom.db"));
-    const workspace = store.createWorkspace("Layout write");
-    const node = store.createNode({ workspaceId: workspace.id, title: "Root" });
+    const project = store.createProject("Layout write");
+    const session = store.ensureDefaultSession(project.id);
+    const node = store.createNode({ sessionId: session.id, title: "Root" });
     const layout = { x: 30, y: 45, width: 380, height: 280 };
 
     const updated = (store as any).updateNodeLayout?.(node.id, layout);
@@ -89,9 +135,10 @@ describe("SqliteStore node layouts", () => {
     const dir = mkdtempSync(join(tmpdir(), "loom-layout-batch-"));
     dirs.push(dir);
     const store = new SqliteStore(join(dir, "loom.db"));
-    const workspace = store.createWorkspace("Layout batch");
-    const first = store.createNode({ workspaceId: workspace.id, title: "First" });
-    const second = store.createNode({ workspaceId: workspace.id, title: "Second" });
+    const project = store.createProject("Layout batch");
+    const session = store.ensureDefaultSession(project.id);
+    const first = store.createNode({ sessionId: session.id, title: "First" });
+    const second = store.createNode({ sessionId: session.id, title: "Second" });
     const firstLayout = { x: 10, y: 20, width: 360, height: 260 };
     const secondLayout = { x: 500, y: 60, width: 410, height: 300 };
 

@@ -1,7 +1,7 @@
 import { mkdirSync } from "fs";
 import { dirname, join } from "path";
 import Database from "better-sqlite3";
-import { importLegacyJsonIfEmpty, migrate } from "./migrations";
+import { migrate } from "./migrations";
 import {
   DEFAULT_SETTINGS,
   MIN_NODE_HEIGHT,
@@ -13,10 +13,10 @@ import {
   type SessionRecord,
   type Settings,
   type Store,
-  type Workspace,
+  type Project,
 } from "./store";
 
-type WorkspaceRow = {
+type ProjectRow = {
   id: string;
   name: string;
   created_at: number;
@@ -38,7 +38,7 @@ type SessionRow = {
 type NodeRow = {
   id: string;
   session_id: string;
-  workspace_id: string;
+  project_id: string;
   parent_id: string | null;
   title: string;
   seed: string | null;
@@ -75,11 +75,11 @@ function decode<T>(value: string | null | undefined, fallback: T): T {
   }
 }
 
-function toWorkspace(row: WorkspaceRow): Workspace {
+function toProject(row: ProjectRow): Project {
   const meta = decode<Record<string, unknown>>(row.meta, {});
-  const sourceFolders = Array.isArray(meta.sourceFolders)
-    ? meta.sourceFolders.filter((item): item is string => typeof item === "string" && item.length > 0)
-    : undefined;
+  const sourceRoots = Array.isArray(meta.sourceRoots)
+    ? meta.sourceRoots.filter((item): item is string => typeof item === "string" && item.length > 0)
+    : [];
   return {
     id: row.id,
     name: row.name,
@@ -87,7 +87,7 @@ function toWorkspace(row: WorkspaceRow): Workspace {
     updatedAt: row.updated_at,
     pinned: Boolean(row.pinned),
     order: row.order,
-    sourceFolders,
+    sourceRoots,
   };
 }
 
@@ -119,7 +119,6 @@ export class SqliteStore implements Store {
     mkdirSync(dirname(file), { recursive: true });
     this.db = new Database(file);
     migrate(this.db);
-    importLegacyJsonIfEmpty(this.db, dirname(file));
   }
 
   getSettings(): Settings {
@@ -176,55 +175,71 @@ export class SqliteStore implements Store {
       .run("apiKeyEnc", encode(enc));
   }
 
-  listWorkspaces(): Workspace[] {
+  listProjects(): Project[] {
     const rows = this.db
-      .prepare('SELECT id, name, created_at, updated_at, pinned, "order", meta FROM workspaces')
-      .all() as WorkspaceRow[];
+      .prepare('SELECT id, name, created_at, updated_at, pinned, "order", meta FROM projects')
+      .all() as ProjectRow[];
     return rows
-      .map(toWorkspace)
+      .map(toProject)
       .sort(
         (a, b) =>
           Number(b.pinned) - Number(a.pinned) || a.order - b.order || b.updatedAt - a.updatedAt,
       );
   }
 
-  createWorkspace(input: string | { name?: string; sourceFolders?: string[] } = "未命名项目"): Workspace {
+  createProject(input: string | { name?: string; sourceRoots?: string[]; sourceFolders?: string[] } = "未命名项目"): Project {
     const name = typeof input === "string" ? input : input.name?.trim() || "未命名项目";
-    const sourceFolders = typeof input === "string"
+    const sourceRoots = typeof input === "string"
       ? []
-      : [...new Set((input.sourceFolders ?? []).map((item) => item.trim()).filter(Boolean))];
+      : [...new Set(((input.sourceRoots ?? input.sourceFolders) ?? []).map((item) => item.trim()).filter(Boolean))];
     const now = Date.now();
-    const ws: Workspace = {
-      id: id("ws"),
+    const project: Project = {
+      id: id("proj"),
       name,
       createdAt: now,
       updatedAt: now,
       pinned: false,
       order: Number(
-        (this.db.prepare("SELECT COUNT(*) AS count FROM workspaces").get() as { count: number } | undefined)
+        (this.db.prepare("SELECT COUNT(*) AS count FROM projects").get() as { count: number } | undefined)
           ?.count ?? 0,
       ),
-      sourceFolders,
+      sourceRoots,
     };
     this.db
       .prepare(
-        'INSERT INTO workspaces(id, name, created_at, updated_at, pinned, "order", meta) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO projects(id, name, created_at, updated_at, pinned, "order", meta) VALUES (?, ?, ?, ?, ?, ?, ?)',
       )
-      .run(ws.id, ws.name, ws.createdAt, ws.updatedAt, 0, ws.order, encode({ sourceFolders }));
-    return ws;
+      .run(project.id, project.name, project.createdAt, project.updatedAt, 0, project.order, encode({ sourceRoots }));
+    return project;
+  }
+
+  renameProject(id: string, name: string): void {
+    this.db.prepare("UPDATE projects SET name = ?, updated_at = ? WHERE id = ?").run(name, Date.now(), id);
+  }
+
+  deleteProject(id: string): void {
+    this.db.prepare("DELETE FROM projects WHERE id = ?").run(id);
+  }
+
+  listWorkspaces(): Project[] {
+    return this.listProjects();
+  }
+
+  createWorkspace(input: string | { name?: string; sourceFolders?: string[]; sourceRoots?: string[] } = "未命名项目"): Project {
+    return this.createProject(input);
   }
 
   renameWorkspace(id: string, name: string): void {
-    this.db.prepare("UPDATE workspaces SET name = ?, updated_at = ? WHERE id = ?").run(name, Date.now(), id);
+    this.renameProject(id, name);
   }
 
   deleteWorkspace(id: string): void {
-    this.db.prepare("DELETE FROM workspaces WHERE id = ?").run(id);
+    this.deleteProject(id);
   }
 
   setPinned(id: string, pinned: boolean): void {
     this.db
-      .prepare("UPDATE workspaces SET pinned = ?, updated_at = ? WHERE id = ?")
+      .prepare("UPDATE projects SET pinned = ?, updated_at = ? WHERE id = ?")
       .run(pinned ? 1 : 0, Date.now(), id);
   }
 
@@ -251,7 +266,7 @@ export class SqliteStore implements Store {
   }
 
   createSession(projectId: string, title = "新会话"): SessionRecord {
-    const project = this.db.prepare("SELECT 1 FROM workspaces WHERE id = ?").get(projectId);
+    const project = this.db.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId);
     if (!project) throw new Error("Project not found.");
     const now = Date.now();
     const order = Number(
@@ -285,7 +300,7 @@ export class SqliteStore implements Store {
   listNodes(sessionId: string): NodeRecord[] {
     const rows = this.db
       .prepare(
-        "SELECT id, session_id, workspace_id, parent_id, title, seed, mount_ancestors, meta, layout_x, layout_y, layout_width, layout_height FROM nodes WHERE session_id = ? ORDER BY created_at, id",
+        "SELECT id, session_id, project_id, parent_id, title, seed, mount_ancestors, meta, layout_x, layout_y, layout_width, layout_height FROM nodes WHERE session_id = ? ORDER BY created_at, id",
       )
       .all(sessionId) as NodeRow[];
     return rows.map((row) => this.toNode(row));
@@ -293,20 +308,22 @@ export class SqliteStore implements Store {
 
   getNode(id: string): NodeRecord | undefined {
     const row = this.db
-      .prepare("SELECT id, session_id, workspace_id, parent_id, title, seed, mount_ancestors, meta, layout_x, layout_y, layout_width, layout_height FROM nodes WHERE id = ?")
+      .prepare("SELECT id, session_id, project_id, parent_id, title, seed, mount_ancestors, meta, layout_x, layout_y, layout_width, layout_height FROM nodes WHERE id = ?")
       .get(id) as NodeRow | undefined;
     return row ? this.toNode(row) : undefined;
   }
 
   createNode(input: {
     sessionId?: string;
+    projectId?: string;
     workspaceId?: string;
     parentId?: string;
     title: string;
     seed?: unknown;
     mountAncestors?: boolean;
   }): NodeRecord {
-    const sessionId = input.sessionId ?? (input.workspaceId ? this.ensureDefaultSession(input.workspaceId).id : undefined);
+    const projectId = input.projectId ?? input.workspaceId;
+    const sessionId = input.sessionId ?? (projectId ? this.ensureDefaultSession(projectId).id : undefined);
     if (!sessionId) throw new Error("Session not found.");
     const session = this.getSession(sessionId);
     if (!session) throw new Error("Session not found.");
@@ -318,7 +335,7 @@ export class SqliteStore implements Store {
     const node: NodeRecord = {
       id: id("n"),
       sessionId,
-      workspaceId: session.projectId,
+      projectId: session.projectId,
       parentId: input.parentId,
       title: input.title,
       seed: input.seed,
@@ -328,13 +345,13 @@ export class SqliteStore implements Store {
     this.db
       .prepare(
         `INSERT INTO nodes(
-          id, session_id, workspace_id, parent_id, title, seed, mount_ancestors, created_at, updated_at, meta
+          id, session_id, project_id, parent_id, title, seed, mount_ancestors, created_at, updated_at, meta
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         node.id,
         node.sessionId,
-        node.workspaceId,
+        node.projectId,
         node.parentId ?? null,
         node.title,
         node.seed === undefined ? null : encode(node.seed),
@@ -483,7 +500,7 @@ export class SqliteStore implements Store {
     return {
       id: row.id,
       sessionId: row.session_id,
-      workspaceId: row.workspace_id,
+      projectId: row.project_id,
       parentId: row.parent_id ?? undefined,
       title: row.title,
       seed: decode(row.seed, undefined),

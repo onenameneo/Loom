@@ -45,9 +45,10 @@ export interface Project {
   updatedAt: number;
   pinned: boolean;
   order: number;
-  sourceFolders?: string[];
+  sourceRoots: string[];
 }
 
+/** @deprecated Compatibility alias until renderer/main IPC callers are renamed. */
 export type Workspace = Project;
 
 export interface SessionRecord {
@@ -62,7 +63,9 @@ export interface SessionRecord {
 export interface StoreData {
   version: number;
   settings: Settings;
-  workspaces: Workspace[];
+  projects: Project[];
+  /** @deprecated Legacy JSON field; canonical stores do not import it. */
+  workspaces?: Workspace[];
   sessions?: SessionRecord[];
 }
 
@@ -104,7 +107,9 @@ export function isValidNodeLayout(value: unknown): value is NodeLayout {
 export interface NodeRecord {
   id: string;
   sessionId: string;
-  workspaceId: string;
+  projectId: string;
+  /** @deprecated Compatibility-only compile shim; store results do not include it. */
+  workspaceId?: string;
   parentId?: string;
   title: string;
   seed?: unknown;
@@ -122,9 +127,17 @@ export interface Store {
   getApiKeyEnc(): string | undefined;
   setApiKeyEnc(enc: string | undefined): void;
 
+  listProjects(): Project[];
+  createProject(input?: string | { name?: string; sourceRoots?: string[]; sourceFolders?: string[] }): Project;
+  renameProject(id: string, name: string): void;
+  deleteProject(id: string): void;
+  /** @deprecated Compatibility alias until IPC callers are renamed. */
   listWorkspaces(): Workspace[];
-  createWorkspace(input?: string | { name?: string; sourceFolders?: string[] }): Workspace;
+  /** @deprecated Compatibility alias until IPC callers are renamed. */
+  createWorkspace(input?: string | { name?: string; sourceFolders?: string[]; sourceRoots?: string[] }): Workspace;
+  /** @deprecated Compatibility alias until IPC callers are renamed. */
   renameWorkspace(id: string, name: string): void;
+  /** @deprecated Compatibility alias until IPC callers are renamed. */
   deleteWorkspace(id: string): void;
   setPinned(id: string, pinned: boolean): void;
 
@@ -139,6 +152,8 @@ export interface Store {
   getNode(id: string): NodeRecord | undefined;
   createNode(input: {
     sessionId?: string;
+    projectId?: string;
+    /** @deprecated Compatibility alias until canvas callers are renamed. */
     workspaceId?: string;
     parentId?: string;
     title: string;

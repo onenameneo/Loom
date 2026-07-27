@@ -3,12 +3,15 @@ import { describe, expect, it } from "vitest";
 import { migrate } from "./migrations";
 
 describe("database migrations", () => {
-  it("upgrades to schema v4 with sessions, node ownership, layouts, and approval policies", () => {
+  it("creates the canonical schema with projects, project-owned nodes, layouts, and approval policies", () => {
     const db = new Database(":memory:");
     migrate(db);
 
     const version = Number(db.pragma("user_version", { simple: true }));
     const columns = (db.prepare("PRAGMA table_info(nodes)").all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    );
+    const projectColumns = (db.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>).map(
       (column) => column.name,
     );
 
@@ -19,15 +22,17 @@ describe("database migrations", () => {
       (column) => column.name,
     );
 
-    expect(version).toBe(4);
+    expect(version).toBe(5);
+    expect(projectColumns).toEqual(expect.arrayContaining(["id", "name", "order", "meta"]));
     expect(columns).toEqual(
-      expect.arrayContaining(["session_id", "layout_x", "layout_y", "layout_width", "layout_height"]),
+      expect.arrayContaining(["project_id", "session_id", "layout_x", "layout_y", "layout_width", "layout_height"]),
     );
+    expect(columns).not.toContain("workspace_id");
     expect(sessionColumns).toEqual(expect.arrayContaining(["project_id", "title", "order"]));
     expect(approvalColumns).toEqual(expect.arrayContaining(["tool_name", "target", "created_at"]));
   });
 
-  it("creates one default session per legacy workspace without changing node or message identity", () => {
+  it("resets a legacy database once instead of migrating old Loom records", () => {
     const db = new Database(":memory:");
     db.exec(`
       CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT);
@@ -99,20 +104,25 @@ describe("database migrations", () => {
 
     migrate(db);
 
-    const session = db.prepare("SELECT id, project_id, title FROM sessions WHERE project_id = ?").get("ws1") as {
-      id: string;
-      project_id: string;
-      title: string;
-    };
-    const node = db.prepare("SELECT id, workspace_id, session_id FROM nodes WHERE id = ?").get("n-root") as {
-      id: string;
-      workspace_id: string;
-      session_id: string;
-    };
-    const message = db.prepare("SELECT id, node_id FROM messages WHERE id = ?").get("m-root") as { id: string; node_id: string };
+    expect(Number(db.pragma("user_version", { simple: true }))).toBe(5);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM projects").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM nodes").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM settings").get()).toEqual({ count: 0 });
 
-    expect(session).toMatchObject({ id: "sess_ws1", project_id: "ws1", title: "默认会话" });
-    expect(node).toEqual({ id: "n-root", workspace_id: "ws1", session_id: "sess_ws1" });
-    expect(message).toEqual({ id: "m-root", node_id: "n-root" });
+    db.prepare('INSERT INTO projects(id, name, created_at, updated_at, pinned, "order", meta) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      "proj1",
+      "Canonical Project",
+      20,
+      21,
+      0,
+      0,
+      "{}",
+    );
+
+    migrate(db);
+
+    expect(db.prepare("SELECT id FROM projects").all()).toEqual([{ id: "proj1" }]);
   });
 });

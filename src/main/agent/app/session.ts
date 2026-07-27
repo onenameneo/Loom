@@ -103,7 +103,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return {
       id: record.id,
       sessionId: record.sessionId,
-      projectId: record.workspaceId,
+      projectId: record.projectId,
       parentId: record.parentId,
       title: record.title,
       seed: record.seed as Seed | undefined,
@@ -174,15 +174,15 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return n ? { systemPrompt: n.systemPrompt, model: n.model, messages: n.messages } : undefined;
   }
 
-  function sourceFoldersFor(nodeId: string): string[] {
+  function sourceRootsFor(nodeId: string): string[] {
     const node = loadNode(nodeId);
     if (!node) return [];
-    return store.listWorkspaces().find((project) => project.id === node.projectId)?.sourceFolders ?? [];
+    return store.listProjects().find((project) => project.id === node.projectId)?.sourceRoots ?? [];
   }
 
   function toolsFor(nodeId: string): AgentTool[] {
-    const sourceFolders = sourceFoldersFor(nodeId);
-    return [...tools.list(), ...createProjectFileTools(sourceFolders), ...createProjectMutationTools(sourceFolders)];
+    const sourceRoots = sourceRootsFor(nodeId);
+    return [...tools.list(), ...createProjectFileTools(sourceRoots), ...createProjectMutationTools(sourceRoots)];
   }
 
   const tools = createToolRegistry(createDefaultReadonlyTools(clock));
