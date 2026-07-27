@@ -6,7 +6,7 @@ import { CreateProjectDialog } from "./dialogs";
 afterEach(cleanup);
 
 describe("CreateProjectDialog", () => {
-  it("submits a project name with an optional source folder", async () => {
+  it("submits a project name with optional source roots", async () => {
     const onSubmit = vi.fn();
     render(
       <CreateProjectDialog
@@ -17,14 +17,15 @@ describe("CreateProjectDialog", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("添加 Loom 可读取和编辑的文件夹"));
+    expect(screen.getByText("Source Roots")).toBeTruthy();
+    fireEvent.click(screen.getByText("添加 Loom 可读取和编辑的 Source Root"));
     await waitFor(() => expect(screen.getByDisplayValue("demo-project")).toBeTruthy());
 
     fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
 
     expect(onSubmit).toHaveBeenCalledWith({
       name: "demo-project",
-      sourceFolders: ["/Users/neo/code/demo-project"],
+      sourceRoots: ["/Users/neo/code/demo-project"],
     });
   });
 });

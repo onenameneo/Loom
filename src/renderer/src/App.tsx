@@ -21,7 +21,7 @@ export default function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [chatNodeId, setChatNodeId] = useState<string | null>(null);
-  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "canvas">("chat");
+  const [sessionMode, setSessionMode] = useState<"chat" | "canvas">("chat");
   const sessionUiStateRef = useRef(new Map<string, { focusNodeId: string | null; chatNodeId: string | null; mode: "chat" | "canvas" }>());
   const previousSessionIdRef = useRef<string | null>(null);
   const [treeVersion, setTreeVersion] = useState(0);
@@ -110,13 +110,13 @@ export default function App() {
   useEffect(() => {
     const previous = previousSessionIdRef.current;
     if (previous && previous !== activeSessionId) {
-      sessionUiStateRef.current.set(previous, { focusNodeId, chatNodeId, mode: workspaceMode });
+      sessionUiStateRef.current.set(previous, { focusNodeId, chatNodeId, mode: sessionMode });
     }
     if (activeSessionId && previous !== activeSessionId) {
       const saved = sessionUiStateRef.current.get(activeSessionId);
       setFocusNodeId(saved?.focusNodeId ?? null);
       setChatNodeId(saved?.chatNodeId ?? null);
-      setWorkspaceMode(saved?.mode ?? "chat");
+      setSessionMode(saved?.mode ?? "chat");
     }
     previousSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
@@ -180,7 +180,7 @@ export default function App() {
     setActivityStatus(result.status);
   }, []);
 
-  const createProject = useCallback(async (input?: { name?: string; sourceFolders?: string[] }) => {
+  const createProject = useCallback(async (input?: { name?: string; sourceRoots?: string[] }) => {
     if (!window.api) return;
     const project = await window.api.projects.create(input);
     await reloadProjects();
@@ -197,8 +197,6 @@ export default function App() {
     setChatNodeId(null);
     setActiveSurface("workspace");
   }, [activeProjectId, reloadSessions]);
-
-  const createWorkspace = createProject;
 
   // 原生菜单动作
   useEffect(() => {
@@ -233,13 +231,10 @@ export default function App() {
   }, [theme, reloadSettings]);
 
   const ctx: SurfaceCtx = {
-    workspaces: projects,
     projects,
     sessions,
-    activeWorkspaceId: activeSessionId,
     activeProjectId,
     activeSessionId,
-    createWorkspace,
     createProject,
     createSession,
     goSettings: () => setActiveSurface("settings"),
@@ -250,8 +245,8 @@ export default function App() {
     clearFocusNode: () => setFocusNodeId(null),
     chatNodeId,
     setChatNodeId,
-    workspaceMode,
-    setWorkspaceMode,
+    sessionMode,
+    setSessionMode,
     treeVersion,
     bumpTreeVersion: () => setTreeVersion((v) => v + 1),
     agentCount: agents.length,
@@ -288,9 +283,9 @@ export default function App() {
                 activeSurface={activeSurface}
                 setSurface={setActiveSurface}
                 ctx={ctx}
-                onSelectWorkspace={async (id) => {
+                onSelectSession={async (id) => {
                   setActiveSessionId(id);
-                  if (workspaceMode !== "canvas") {
+                  if (sessionMode !== "canvas") {
                     setFocusNodeId(null);
                     setChatNodeId(null);
                     return;
@@ -299,27 +294,27 @@ export default function App() {
                   const root = nodes.find((node) => !node.parentId) ?? nodes[0];
                   setFocusNodeId(root?.id ?? null);
                 }}
-                onFocusNode={(workspaceId, nodeId) => {
-                  setActiveSessionId(workspaceId);
+                onFocusNode={(sessionId, nodeId) => {
+                  setActiveSessionId(sessionId);
                   setActiveSurface("workspace");
-                  if (workspaceMode === "canvas") {
+                  if (sessionMode === "canvas") {
                     setFocusNodeId(nodeId);
                   } else {
                     setChatNodeId(nodeId);
                     setFocusNodeId(null);
                   }
                 }}
-                onCreateWorkspace={createWorkspace}
-                onRenameWorkspace={async (id, name) => {
+                onCreateProject={createProject}
+                onRenameProject={async (id, name) => {
                   await window.api.projects.rename(id, name);
                   reloadProjects();
                 }}
-                onDeleteWorkspace={async (id) => {
+                onDeleteProject={async (id) => {
                   await window.api.projects.delete(id);
                   setActiveProjectId((cur) => (cur === id ? null : cur));
                   reloadProjects();
                 }}
-                onPinWorkspace={async (id, pinned) => {
+                onPinProject={async (id, pinned) => {
                   await window.api.projects.pin(id, pinned);
                   reloadProjects();
                 }}

@@ -94,7 +94,8 @@ function toNode(
     dragHandle: ".card__head", // 只有标题栏可拖，正文/输入框正常交互
     style: { width: resolved.width, height: resolved.height },
     data: {
-      workspaceId: dto.workspaceId,
+      sessionId: dto.sessionId,
+      projectId: dto.projectId,
       parentId: dto.parentId,
       title: dto.title,
       seed: dto.seed,
@@ -127,14 +128,14 @@ function classNames(...items: Array<string | false | null | undefined>) {
 }
 
 export default function Canvas({
-  workspaceId,
+  sessionId,
   model,
   focusNodeId,
   onFocused,
   onReturnChat,
   onTreeChange,
 }: {
-  workspaceId: string;
+  sessionId: string;
   model?: string;
   focusNodeId?: string | null;
   onFocused?: () => void;
@@ -154,7 +155,7 @@ export default function Canvas({
   const treeChangeRef = useRef(onTreeChange);
   const modelRef = useRef(model);
   const layoutStore = useCanvasLayoutStore();
-  const layoutPersistence = useCanvasLayoutPersistence(workspaceId);
+  const layoutPersistence = useCanvasLayoutPersistence(sessionId);
   const resizeSessionRef = useRef(new ResizeSession());
   treeChangeRef.current = onTreeChange;
   modelRef.current = model;
@@ -302,9 +303,9 @@ export default function Canvas({
         return next;
       });
       for (const id of ids) titleRef.current.delete(id);
-      layoutStore.remove(workspaceId, ids);
+      layoutStore.remove(sessionId, ids);
     },
-    [layoutStore, setNodes, setEdges, workspaceId],
+    [layoutStore, setNodes, setEdges, sessionId],
   );
 
   const focusNode = useCallback(
@@ -383,7 +384,7 @@ export default function Canvas({
               : node,
           ),
         );
-        layoutStore.enqueue(workspaceId, cancelled.nodeId, cancelled.layout);
+        layoutStore.enqueue(sessionId, cancelled.nodeId, cancelled.layout);
       }
       setInteraction({ kind: "idle" });
     };
@@ -392,7 +393,7 @@ export default function Canvas({
       window.removeEventListener("blur", cancelResize);
       cancelResize();
     };
-  }, [layoutStore, setNodes, workspaceId]);
+  }, [layoutStore, setNodes, sessionId]);
 
   const actions = useCallback(
     () => ({
@@ -421,7 +422,7 @@ export default function Canvas({
           nodeId: id,
           layout: params,
           apply: applyResizeLayout,
-          enqueue: (nodeId, layout) => layoutStore.enqueue(workspaceId, nodeId, layout),
+          enqueue: (nodeId, layout) => layoutStore.enqueue(sessionId, nodeId, layout),
         });
         if (!next) {
           const recovered = resizeSessionRef.current.recover(token, id);
@@ -456,7 +457,7 @@ export default function Canvas({
       },
       onReturnChat: (id: string) => onReturnChat?.(id),
     }),
-    [applyResizeLayout, layoutStore, onReturnChat, removeIds, setNodes, workspaceId],
+    [applyResizeLayout, layoutStore, onReturnChat, removeIds, setNodes, sessionId],
   );
 
   // 载入（或初始化）本会话的节点树
@@ -466,10 +467,10 @@ export default function Canvas({
       let dtos: CanvasNodeDto[] = [];
       if (window.api) {
         // 原子「打开」：主进程串行处理，避免 StrictMode 双挂载建出两个根。
-        dtos = await window.api.canvas.open(workspaceId);
+        dtos = await window.api.canvas.open(sessionId);
       } else {
         // 浏览器预览：本地起一条主线，画布仍可渲染
-        dtos = [{ id: "root", sessionId: workspaceId, projectId: "project_demo", workspaceId, title: "主线", mountAncestors: false, messages: [] }];
+        dtos = [{ id: "root", sessionId, projectId: "project_demo", title: "主线", mountAncestors: false, messages: [] }];
       }
       if (!alive) return;
       const pos = layout(dtos);
@@ -483,7 +484,7 @@ export default function Canvas({
             modelRef.current,
             false,
             nodeActions,
-            layoutStore.getDirty(workspaceId, d.id),
+            layoutStore.getDirty(sessionId, d.id),
           ),
         ),
       );
@@ -492,7 +493,7 @@ export default function Canvas({
     return () => {
       alive = false;
     };
-  }, [workspaceId, setNodes, setEdges, actions, layoutStore]);
+  }, [sessionId, setNodes, setEdges, actions, layoutStore]);
 
   // 进入画布时的取景：把主节点（root）或指定聚焦节点以 1:1(100%) 居中，
   // 而不是缩放到能装下整棵树——多节点时那样每张卡片都太小。首帧瞬时定位（不动画），
@@ -534,7 +535,7 @@ export default function Canvas({
       const seed = { text: seedText, from, parent: sourceId };
       let id: string;
       if (window.api) {
-        const dto = await window.api.canvas.create({ sessionId: workspaceId, parentId: sourceId, seed });
+        const dto = await window.api.canvas.create({ sessionId, parentId: sourceId, seed });
         id = dto.id;
       } else {
         id = `local_${Math.round(performance.now())}`;
@@ -566,7 +567,7 @@ export default function Canvas({
           // 出现在来源节点的右侧，必要时做轻量避让，避免压到已有分支。
           position: { x: initialLayout.x, y: initialLayout.y },
           data: {
-            workspaceId,
+            sessionId,
             parentId: sourceId,
             title: "新分支",
             seed,
@@ -580,20 +581,19 @@ export default function Canvas({
         };
         return nds.concat(newNode);
       });
-      layoutStore.enqueue(workspaceId, id, initialLayout);
+      layoutStore.enqueue(sessionId, id, initialLayout);
       const label = seedText.length > 14 ? `${seedText.slice(0, 14)}…` : seedText;
       setEdges((eds) => eds.concat({ id: `e-${sourceId}-${id}`, source: sourceId, target: id, label }));
       treeChangeRef.current?.();
     },
-    [workspaceId, model, nodes, setNodes, setEdges, actions, layoutStore],
+    [sessionId, model, nodes, setNodes, setEdges, actions, layoutStore],
   );
 
   const tidyLayout = useCallback(() => {
     const dtos = nodes.map((node) => ({
       id: node.id,
-      sessionId: String((node.data as any)?.workspaceId ?? workspaceId),
+      sessionId: String((node.data as any)?.sessionId ?? sessionId),
       projectId: String((node.data as any)?.projectId ?? "project"),
-      workspaceId: String((node.data as any)?.workspaceId ?? workspaceId),
       parentId: (node.data as any)?.parentId,
       title: String((node.data as any)?.title ?? ""),
       seed: (node.data as any)?.seed,
@@ -606,12 +606,12 @@ export default function Canvas({
     setNodes((nds) => {
       const tidied = applyTidyPositions(nds, pos);
       layoutStore.enqueueMany(
-        workspaceId,
+        sessionId,
         tidied.map((node) => ({ id: node.id, layout: readNodeLayout(node) })),
       );
       return tidied;
     });
-  }, [nodes, setNodes, workspaceId, layoutStore]);
+  }, [nodes, setNodes, sessionId, layoutStore]);
 
   const titlebarCallbacksRef = useRef({ onFit: () => {}, onTidy: () => {} });
   titlebarCallbacksRef.current.onFit = () => {
@@ -680,7 +680,7 @@ export default function Canvas({
           setInteraction({ kind: "dragging", nodeId: node.id });
         }}
         onNodeDragStop={(_, node) => {
-          layoutStore.enqueue(workspaceId, node.id, readNodeLayout(node));
+          layoutStore.enqueue(sessionId, node.id, readNodeLayout(node));
           setInteraction({ kind: "idle" });
         }}
         onInit={(instance) => {

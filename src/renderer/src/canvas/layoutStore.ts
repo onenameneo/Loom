@@ -17,7 +17,7 @@ export type LayoutPersistenceState = Readonly<{
   error: LayoutPersistenceError | null;
 }>;
 
-type WorkspaceQueue = {
+type SessionLayoutQueue = {
   revision: number;
   dirty: Map<string, DirtyLayout>;
   inFlight: boolean;
@@ -25,13 +25,13 @@ type WorkspaceQueue = {
 };
 
 export class CanvasLayoutStore {
-  private workspaces = new Map<string, WorkspaceQueue>();
+  private sessions = new Map<string, SessionLayoutQueue>();
   private listeners = new Map<string, Set<() => void>>();
 
   constructor(private api: LayoutApi) {}
 
-  private queue(workspaceId: string): WorkspaceQueue {
-    let queue = this.workspaces.get(workspaceId);
+  private queue(sessionId: string): SessionLayoutQueue {
+    let queue = this.sessions.get(sessionId);
     if (!queue) {
       queue = {
         revision: 0,
@@ -39,78 +39,78 @@ export class CanvasLayoutStore {
         inFlight: false,
         persistence: { status: "idle", error: null },
       };
-      this.workspaces.set(workspaceId, queue);
+      this.sessions.set(sessionId, queue);
     }
     return queue;
   }
 
-  enqueue(workspaceId: string, nodeId: string, layout: NodeLayout): void {
-    const queue = this.queue(workspaceId);
+  enqueue(sessionId: string, nodeId: string, layout: NodeLayout): void {
+    const queue = this.queue(sessionId);
     queue.revision += 1;
     queue.dirty.set(nodeId, { revision: queue.revision, layout });
-    void this.flush(workspaceId);
+    void this.flush(sessionId);
   }
 
   enqueueMany(
-    workspaceId: string,
+    sessionId: string,
     items: Array<{ id: string; layout: NodeLayout }>,
   ): void {
-    const queue = this.queue(workspaceId);
+    const queue = this.queue(sessionId);
     for (const item of items) {
       queue.revision += 1;
       queue.dirty.set(item.id, { revision: queue.revision, layout: item.layout });
     }
-    void this.flush(workspaceId);
+    void this.flush(sessionId);
   }
 
-  getDirty(workspaceId: string, nodeId: string): NodeLayout | undefined {
-    return this.workspaces.get(workspaceId)?.dirty.get(nodeId)?.layout;
+  getDirty(sessionId: string, nodeId: string): NodeLayout | undefined {
+    return this.sessions.get(sessionId)?.dirty.get(nodeId)?.layout;
   }
 
-  getPersistenceState(workspaceId: string): LayoutPersistenceState {
-    return this.queue(workspaceId).persistence;
+  getPersistenceState(sessionId: string): LayoutPersistenceState {
+    return this.queue(sessionId).persistence;
   }
 
-  subscribe(workspaceId: string, listener: () => void): () => void {
-    let listeners = this.listeners.get(workspaceId);
+  subscribe(sessionId: string, listener: () => void): () => void {
+    let listeners = this.listeners.get(sessionId);
     if (!listeners) {
       listeners = new Set();
-      this.listeners.set(workspaceId, listeners);
+      this.listeners.set(sessionId, listeners);
     }
     listeners.add(listener);
     return () => {
       listeners?.delete(listener);
-      if (listeners?.size === 0) this.listeners.delete(workspaceId);
+      if (listeners?.size === 0) this.listeners.delete(sessionId);
     };
   }
 
-  private setPersistenceState(workspaceId: string, next: LayoutPersistenceState): void {
-    const queue = this.queue(workspaceId);
+  private setPersistenceState(sessionId: string, next: LayoutPersistenceState): void {
+    const queue = this.queue(sessionId);
     if (queue.persistence.status === next.status && queue.persistence.error === next.error) return;
     queue.persistence = next;
-    for (const listener of this.listeners.get(workspaceId) ?? []) listener();
+    for (const listener of this.listeners.get(sessionId) ?? []) listener();
   }
 
-  remove(workspaceId: string, nodeIds: string[]): void {
-    const queue = this.workspaces.get(workspaceId);
+  remove(sessionId: string, nodeIds: string[]): void {
+    const queue = this.sessions.get(sessionId);
     if (!queue) return;
     for (const id of nodeIds) queue.dirty.delete(id);
     if (queue.dirty.size === 0 && !queue.inFlight) {
-      this.setPersistenceState(workspaceId, { status: "idle", error: null });
+      this.setPersistenceState(sessionId, { status: "idle", error: null });
     }
   }
 
-  retry(workspaceId: string): Promise<void> {
-    return this.flush(workspaceId);
+  retry(sessionId: string): Promise<void> {
+    return this.flush(sessionId);
   }
 
-  private async flush(workspaceId: string): Promise<void> {
-    const queue = this.queue(workspaceId);
+  private async flush(sessionId: string): Promise<void> {
+    const queue = this.queue(sessionId);
     if (queue.inFlight || queue.dirty.size === 0) return;
     const snapshot = new Map(queue.dirty);
     const items = [...snapshot].map(([id, value]) => ({ id, layout: value.layout }));
     queue.inFlight = true;
-    this.setPersistenceState(workspaceId, {
+    this.setPersistenceState(sessionId, {
       status: "saving",
       error: queue.persistence.error,
     });
@@ -123,7 +123,7 @@ export class CanvasLayoutStore {
     queue.inFlight = false;
     if (!result.ok) {
       this.setPersistenceState(
-        workspaceId,
+        sessionId,
         queue.dirty.size > 0
           ? { status: "error", error: result.reason ?? "storage" }
           : { status: "idle", error: null },
@@ -141,9 +141,9 @@ export class CanvasLayoutStore {
     }
 
     if (queue.dirty.size > 0) {
-      await this.flush(workspaceId);
+      await this.flush(sessionId);
       return;
     }
-    this.setPersistenceState(workspaceId, { status: "idle", error: null });
+    this.setPersistenceState(sessionId, { status: "idle", error: null });
   }
 }

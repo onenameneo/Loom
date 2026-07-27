@@ -34,18 +34,18 @@ export type CanvasLayoutPersistence = LayoutPersistenceState & {
   retry: () => Promise<void>;
 };
 
-export function useCanvasLayoutPersistence(workspaceId: string): CanvasLayoutPersistence {
+export function useCanvasLayoutPersistence(sessionId: string): CanvasLayoutPersistence {
   const store = useCanvasLayoutStore();
   const subscribe = useCallback(
-    (listener: () => void) => store.subscribe(workspaceId, listener),
-    [store, workspaceId],
+    (listener: () => void) => store.subscribe(sessionId, listener),
+    [store, sessionId],
   );
   const getSnapshot = useCallback(
-    () => store.getPersistenceState(workspaceId),
-    [store, workspaceId],
+    () => store.getPersistenceState(sessionId),
+    [store, sessionId],
   );
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  const retry = useCallback(() => store.retry(workspaceId), [store, workspaceId]);
+  const retry = useCallback(() => store.retry(sessionId), [store, sessionId]);
 
   return useMemo(() => ({ ...state, retry }), [retry, state]);
 }

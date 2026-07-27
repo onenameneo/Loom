@@ -26,13 +26,10 @@ beforeEach(() => {
 
 function surfaceCtx(): SurfaceCtx {
   return {
-    workspaces: [],
     projects: [],
     sessions: [],
-    activeWorkspaceId: null,
     activeProjectId: null,
     activeSessionId: null,
-    createWorkspace: vi.fn(),
     createProject: vi.fn(),
     createSession: vi.fn(),
     goSettings: vi.fn(),
@@ -40,8 +37,8 @@ function surfaceCtx(): SurfaceCtx {
     reloadSettings: vi.fn(),
     theme: "light",
     setChatNodeId: vi.fn(),
-    workspaceMode: "chat",
-    setWorkspaceMode: vi.fn(),
+    sessionMode: "chat",
+    setSessionMode: vi.fn(),
     treeVersion: 0,
     bumpTreeVersion: vi.fn(),
     agentCount: 0,
@@ -149,8 +146,8 @@ describe("surface titlebar ownership", () => {
   it("does not use the compatibility hook for Workspace", async () => {
     render(
       <Workspace
-        workspaceId="workspace-1"
-        workspaceName="workspace"
+        sessionId="session-1"
+        sessionName="workspace"
         noKey={false}
         goSettings={vi.fn()}
       />,

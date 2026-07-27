@@ -9,8 +9,8 @@ import ChatView from "./ChatView";
 //   · 划词岔出第一个分支，或手动「展开画布」→ 切成 React Flow 画布（Canvas）。
 // 两个视图共用 window.api.canvas；root 节点消息主进程有镜像，切换不丢历史。
 export default function Workspace({
-  workspaceId,
-  workspaceName,
+  sessionId,
+  sessionName,
   model,
   noKey,
   goSettings,
@@ -21,8 +21,8 @@ export default function Workspace({
   onModeChange,
   onTreeChange,
 }: {
-  workspaceId: string;
-  workspaceName: string;
+  sessionId: string;
+  sessionName: string;
   model?: string;
   noKey: boolean;
   goSettings: () => void;
@@ -39,16 +39,16 @@ export default function Workspace({
 
   const reload = useCallback(async () => {
     let dtos: CanvasNodeDto[];
-    if (window.api) dtos = await window.api.canvas.open(workspaceId);
-    else dtos = [{ id: "root", sessionId: workspaceId, projectId: "project_demo", workspaceId, title: "主线", mountAncestors: false, messages: [] }];
+    if (window.api) dtos = await window.api.canvas.open(sessionId);
+    else dtos = [{ id: "root", sessionId, projectId: "project_demo", title: "主线", mountAncestors: false, messages: [] }];
     setNodeList(dtos);
     setNodeCount(dtos.length);
-  }, [workspaceId]);
+  }, [sessionId]);
 
   useEffect(() => {
     setViewMode("auto");
     reload();
-  }, [workspaceId, reload]);
+  }, [sessionId, reload]);
 
   const isCanvas = viewMode === "canvas" || (viewMode === "auto" && nodeCount > 1);
   const root = nodeList.find((d) => !d.parentId) ?? nodeList[0] ?? null;
@@ -60,10 +60,10 @@ export default function Workspace({
 
   const titlebarContext = useMemo(
     () => ({
-      title: workspaceName,
+      title: sessionName,
       mode: isCanvas ? ("画布" as const) : ("对话" as const),
     }),
-    [isCanvas, workspaceName],
+    [isCanvas, sessionName],
   );
   useTitlebarContext(titlebarContext);
 
@@ -82,7 +82,7 @@ export default function Workspace({
       if (!chatNode) return;
       if (window.api) {
         await window.api.canvas.create({
-          sessionId: workspaceId,
+          sessionId: sessionId,
           parentId: chatNode.id,
           seed: { text: seedText, from: chatNode.title || "主线", parent: chatNode.id },
         });
@@ -90,7 +90,7 @@ export default function Workspace({
       setViewMode("canvas"); // 切到画布；Canvas 会自行 open 载入 root+新分支
       onTreeChange?.();
     },
-    [chatNode, workspaceId, onTreeChange],
+    [chatNode, sessionId, onTreeChange],
   );
 
   return (
@@ -98,7 +98,7 @@ export default function Workspace({
       {isCanvas || !chatNode ? (
         <div className="canvas-wrap">
           <Canvas
-            workspaceId={workspaceId}
+            sessionId={sessionId}
             model={model}
             focusNodeId={focusNodeId}
             onFocused={onFocusedNode}

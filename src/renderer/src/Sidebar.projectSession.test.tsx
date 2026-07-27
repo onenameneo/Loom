@@ -11,13 +11,10 @@ afterEach(() => {
 
 function ctx(): SurfaceCtx {
   return {
-    workspaces: [{ id: "project-1", name: "Project One", createdAt: 1, updatedAt: 1, pinned: false, order: 0, sourceFolders: ["/Users/neo/code/project-one"] }],
-    projects: [{ id: "project-1", name: "Project One", createdAt: 1, updatedAt: 1, pinned: false, order: 0, sourceFolders: ["/Users/neo/code/project-one"] }],
+    projects: [{ id: "project-1", name: "Project One", createdAt: 1, updatedAt: 1, pinned: false, order: 0, sourceRoots: ["/Users/neo/code/project-one"] }],
     sessions: [{ id: "session-1", projectId: "project-1", title: "Session One", createdAt: 1, updatedAt: 1, order: 0 }],
-    activeWorkspaceId: "session-1",
     activeProjectId: "project-1",
     activeSessionId: "session-1",
-    createWorkspace: vi.fn(),
     createProject: vi.fn(),
     createSession: vi.fn(),
     goSettings: vi.fn(),
@@ -28,8 +25,8 @@ function ctx(): SurfaceCtx {
     clearFocusNode: vi.fn(),
     chatNodeId: null,
     setChatNodeId: vi.fn(),
-    workspaceMode: "chat",
-    setWorkspaceMode: vi.fn(),
+    sessionMode: "chat",
+    setSessionMode: vi.fn(),
     treeVersion: 0,
     bumpTreeVersion: vi.fn(),
     agentCount: 0,
@@ -57,7 +54,6 @@ describe("Sidebar project session navigation", () => {
             id: "node-root",
             sessionId: "session-1",
             projectId: "project-1",
-            workspaceId: "session-1",
             title: "Root",
             mountAncestors: false,
             messages: [],
@@ -71,12 +67,12 @@ describe("Sidebar project session navigation", () => {
         activeSurface="workspace"
         setSurface={vi.fn()}
         ctx={ctx()}
-        onSelectWorkspace={onSelectSession}
+        onSelectSession={onSelectSession}
         onFocusNode={onFocusNode}
-        onCreateWorkspace={vi.fn()}
-        onRenameWorkspace={vi.fn()}
-        onDeleteWorkspace={vi.fn()}
-        onPinWorkspace={vi.fn()}
+        onCreateProject={vi.fn()}
+        onRenameProject={vi.fn()}
+        onDeleteProject={vi.fn()}
+        onPinProject={vi.fn()}
         onSelectProject={onSelectProject}
         onCreateSession={vi.fn()}
         onRenameSession={vi.fn()}
@@ -97,5 +93,74 @@ describe("Sidebar project session navigation", () => {
     await waitFor(() => expect(screen.getByText("主线")).toBeTruthy());
     fireEvent.click(screen.getByText("主线"));
     expect(onFocusNode).toHaveBeenCalledWith("session-1", "node-root");
+  });
+
+  it("supports project create, select, rename, delete, and pin with canonical terminology", async () => {
+    const onSelectProject = vi.fn();
+    const onCreateProject = vi.fn();
+    const onRenameProject = vi.fn();
+    const onDeleteProject = vi.fn();
+    const onPinProject = vi.fn();
+    window.api = {
+      platform: "darwin",
+      canvas: {
+        list: vi.fn(async () => []),
+      },
+      projects: {
+        pickSourceFolder: vi.fn(async () => ({ canceled: false, path: "/Users/neo/code/project-one" })),
+      },
+    } as unknown as Window["api"];
+
+    const baseCtx = ctx();
+    render(
+      <Sidebar
+        activeSurface="workspace"
+        setSurface={vi.fn()}
+        ctx={{
+          ...baseCtx,
+          projects: [
+            { id: "project-pinned", name: "Pinned Project", createdAt: 1, updatedAt: 1, pinned: true, order: 1, sourceRoots: [] },
+            { id: "project-1", name: "Project One", createdAt: 1, updatedAt: 1, pinned: false, order: 0, sourceRoots: ["/Users/neo/code/project-one"] },
+          ],
+        }}
+        onSelectSession={vi.fn()}
+        onFocusNode={vi.fn()}
+        onCreateProject={onCreateProject}
+        onRenameProject={onRenameProject}
+        onDeleteProject={onDeleteProject}
+        onPinProject={onPinProject}
+        onSelectProject={onSelectProject}
+        onCreateSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onDeleteSession={vi.fn()}
+        theme="light"
+        toggleTheme={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText("新建项目"));
+    fireEvent.click(await screen.findByText("添加 Loom 可读取和编辑的 Source Root"));
+    expect(await screen.findByRole("dialog", { name: "创建项目" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+    expect(onCreateProject).toHaveBeenCalledWith({
+      name: "project-one",
+      sourceRoots: ["/Users/neo/code/project-one"],
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "创建项目" })).toBeNull());
+
+    fireEvent.click(screen.getByText("Project One"));
+    expect(onSelectProject).toHaveBeenCalledWith("project-1");
+
+    fireEvent.click(screen.getAllByLabelText("置顶")[0]);
+    expect(onPinProject).toHaveBeenCalledWith("project-1", true);
+
+    fireEvent.click(screen.getAllByLabelText("重命名")[1]);
+    fireEvent.change(screen.getByDisplayValue("Project One"), { target: { value: "Renamed Project" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(onRenameProject).toHaveBeenCalledWith("project-1", "Renamed Project");
+
+    fireEvent.click(screen.getAllByLabelText("删除")[1]);
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    expect(onDeleteProject).toHaveBeenCalledWith("project-1");
   });
 });

@@ -50,8 +50,8 @@ describe("global titlebar", () => {
       <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
         <AppTitlebar {...titlebarProps} />
         <Workspace
-          workspaceId="workspace-1"
-          workspaceName="first workspace"
+          sessionId="session-1"
+          sessionName="first workspace"
           noKey={false}
           goSettings={() => {}}
         />
@@ -65,8 +65,8 @@ describe("global titlebar", () => {
       <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
         <AppTitlebar {...titlebarProps} />
         <Workspace
-          workspaceId="workspace-1"
-          workspaceName="renamed workspace"
+          sessionId="session-1"
+          sessionName="renamed workspace"
           noKey={false}
           goSettings={() => {}}
         />

@@ -21,21 +21,17 @@ import type {
   ProjectMeta,
   SettingsPayload,
   SessionMeta,
-  WorkspaceMeta,
 } from "./env";
 import { IconEye, IconPlus, IconSettings, IconWorkspace } from "./icons";
 import Workspace from "./canvas/Workspace";
 import { useTitlebarActions, useTitlebarContext } from "./titlebar/Titlebar";
 
 export interface SurfaceCtx {
-  workspaces: WorkspaceMeta[];
   projects: ProjectMeta[];
   sessions: SessionMeta[];
-  activeWorkspaceId: string | null;
   activeProjectId: string | null;
   activeSessionId: string | null;
-  createWorkspace: (input?: { name?: string; sourceFolders?: string[] }) => void | Promise<void>;
-  createProject: (input?: { name?: string; sourceFolders?: string[] }) => void | Promise<void>;
+  createProject: (input?: { name?: string; sourceRoots?: string[] }) => void | Promise<void>;
   createSession: () => void;
   goSettings: () => void;
   settings: SettingsPayload | null;
@@ -45,8 +41,8 @@ export interface SurfaceCtx {
   clearFocusNode?: () => void;
   chatNodeId?: string | null;
   setChatNodeId: (nodeId: string | null) => void;
-  workspaceMode: "chat" | "canvas";
-  setWorkspaceMode: (mode: "chat" | "canvas") => void;
+  sessionMode: "chat" | "canvas";
+  setSessionMode: (mode: "chat" | "canvas") => void;
   treeVersion: number;
   bumpTreeVersion: () => void;
   agentCount: number;
@@ -98,8 +94,8 @@ function WorkspacePanel({ ctx }: { ctx: SurfaceCtx }) {
   return (
     <Workspace
       key={session.id}
-      workspaceId={session.id}
-      workspaceName={session.title}
+      sessionId={session.id}
+      sessionName={session.title}
       model={ctx.settings?.resolvedModel}
       noKey={Boolean(noKey)}
       goSettings={ctx.goSettings}
@@ -107,7 +103,7 @@ function WorkspacePanel({ ctx }: { ctx: SurfaceCtx }) {
       chatNodeId={ctx.chatNodeId}
       onFocusedNode={ctx.clearFocusNode}
       onChatNodeChange={ctx.setChatNodeId}
-      onModeChange={ctx.setWorkspaceMode}
+      onModeChange={ctx.setSessionMode}
       onTreeChange={ctx.bumpTreeVersion}
     />
   );

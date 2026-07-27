@@ -74,7 +74,7 @@ function PreviousActions() {
 }
 
 function Surface({ canvas }: { canvas: boolean }) {
-  return canvas ? <Canvas workspaceId="workspace-1" /> : <div>对话 surface</div>;
+  return canvas ? <Canvas sessionId="session-1" /> : <div>对话 surface</div>;
 }
 
 afterEach(cleanup);
@@ -91,7 +91,7 @@ describe("Canvas titlebar integration", () => {
   it("disables React Flow modifier and drag multi-selection paths", async () => {
     render(
       <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
-        <Canvas workspaceId="workspace-1" />
+        <Canvas sessionId="session-1" />
       </TitlebarProvider>,
     );
 
@@ -105,7 +105,7 @@ describe("Canvas titlebar integration", () => {
     layoutPersistence.current = { status: "error", error: "storage", retry: vi.fn() };
     const view = render(
       <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
-        <Canvas workspaceId="workspace-1" />
+        <Canvas sessionId="session-1" />
       </TitlebarProvider>,
     );
 
@@ -118,7 +118,7 @@ describe("Canvas titlebar integration", () => {
     layoutPersistence.current = { status: "idle", error: null, retry: vi.fn() };
     view.rerender(
       <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
-        <Canvas workspaceId="workspace-1" />
+        <Canvas sessionId="session-1" />
       </TitlebarProvider>,
     );
     await waitFor(() =>
@@ -185,7 +185,7 @@ describe("Canvas titlebar integration", () => {
     function TransientCanvas() {
       const [mounted, setMounted] = useState(true);
       useEffect(() => setMounted(false), []);
-      return mounted ? <Canvas workspaceId="workspace-1" /> : null;
+      return mounted ? <Canvas sessionId="session-1" /> : null;
     }
 
     render(

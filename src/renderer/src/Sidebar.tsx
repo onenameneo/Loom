@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { Bot, ChevronDown, ChevronRight, Pencil, Pin, Terminal, Trash2 } from "lucide-react";
-import type { ActivityTool, AgentProc, CanvasNodeDto, ProjectMeta, SessionMeta, SettingsPayload, WorkspaceMeta } from "./env";
+import type { ActivityTool, AgentProc, CanvasNodeDto, ProjectMeta, SessionMeta, SettingsPayload } from "./env";
 import { IconMoon, IconPlus, IconSun } from "./icons";
 import {
   agentTitle,
@@ -37,12 +37,12 @@ export default function Sidebar({
   activeSurface,
   setSurface,
   ctx,
-  onSelectWorkspace,
+  onSelectSession,
   onFocusNode,
-  onCreateWorkspace,
-  onRenameWorkspace,
-  onDeleteWorkspace,
-  onPinWorkspace,
+  onCreateProject,
+  onRenameProject,
+  onDeleteProject,
+  onPinProject,
   onSelectProject,
   onCreateSession,
   onRenameSession,
@@ -53,12 +53,12 @@ export default function Sidebar({
   activeSurface: string;
   setSurface: (id: string) => void;
   ctx: SurfaceCtx;
-  onSelectWorkspace: (id: string) => void | Promise<void>;
-  onFocusNode: (workspaceId: string, nodeId: string) => void;
-  onCreateWorkspace: (input?: { name?: string; sourceFolders?: string[] }) => void | Promise<void>;
-  onRenameWorkspace: (id: string, name: string) => void;
-  onDeleteWorkspace: (id: string) => void;
-  onPinWorkspace: (id: string, pinned: boolean) => void;
+  onSelectSession: (id: string) => void | Promise<void>;
+  onFocusNode: (sessionId: string, nodeId: string) => void;
+  onCreateProject: (input?: { name?: string; sourceRoots?: string[] }) => void | Promise<void>;
+  onRenameProject: (id: string, name: string) => void;
+  onDeleteProject: (id: string) => void;
+  onPinProject: (id: string, pinned: boolean) => void;
   onSelectProject?: (id: string) => void;
   onCreateSession?: () => void;
   onRenameSession?: (id: string, title: string) => void;
@@ -217,13 +217,13 @@ export default function Sidebar({
           <div className="sb-label">
             项目
             <Tip label="新建项目">
-              <button className="sb-add" onClick={() => setCreatingProject(true)}>
+              <button className="sb-add" aria-label="新建项目" onClick={() => setCreatingProject(true)}>
                 <IconPlus />
               </button>
             </Tip>
           </div>
           {ctx.projects.length === 0 && <div className="sb-hint">（还没有，点 + 新建）</div>}
-          {ctx.projects.map((w: WorkspaceMeta) => {
+          {ctx.projects.map((w: ProjectMeta) => {
             return (
               <Fragment key={w.id}>
                 <div
@@ -235,14 +235,15 @@ export default function Sidebar({
                   <span className={`sq ${w.pinned ? "pinned" : ""}`} />
                   <span className="ws-name">
                     {w.name}
-                    {w.sourceFolders?.[0] && <small>{w.sourceFolders[0]}</small>}
+                    {w.sourceRoots?.[0] && <small>{w.sourceRoots[0]}</small>}
                   </span>
                   <span className="ws-actions">
                     <Tip label={w.pinned ? "取消置顶" : "置顶"}>
                       <button
+                        aria-label={w.pinned ? "取消置顶" : "置顶"}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onPinWorkspace(w.id, !w.pinned);
+                          onPinProject(w.id, !w.pinned);
                         }}
                       >
                         <Pin size={13} fill={w.pinned ? "currentColor" : "none"} />
@@ -250,6 +251,7 @@ export default function Sidebar({
                     </Tip>
                     <Tip label="重命名">
                       <button
+                        aria-label="重命名"
                         onClick={(e) => {
                           e.stopPropagation();
                           setRenaming(w);
@@ -260,6 +262,7 @@ export default function Sidebar({
                     </Tip>
                     <Tip label="删除">
                       <button
+                        aria-label="删除"
                         onClick={(e) => {
                           e.stopPropagation();
                           setDeleting(w);
@@ -278,7 +281,7 @@ export default function Sidebar({
               <div className="sb-label">
                 会话
                 <Tip label="新建会话 (⌘N)">
-                  <button className="sb-add" onClick={onCreateSession}>
+                  <button className="sb-add" aria-label="新建会话" onClick={onCreateSession}>
                     <IconPlus />
                   </button>
                 </Tip>
@@ -287,12 +290,12 @@ export default function Sidebar({
               {ctx.sessions.map((session) => {
                 const isExp = expanded.has(session.id);
                 const rows = isExp ? outlineRows(outlines[session.id] ?? []) : [];
-                const activeNodeId = ctx.workspaceMode === "canvas" ? ctx.focusNodeId : ctx.chatNodeId;
+                const activeNodeId = ctx.sessionMode === "canvas" ? ctx.focusNodeId : ctx.chatNodeId;
                 return (
                   <Fragment key={session.id}>
                     <div
                       className={`sb-ws ${ctx.activeSessionId === session.id ? "active" : ""}`}
-                      onClick={() => onSelectWorkspace(session.id)}
+                      onClick={() => onSelectSession(session.id)}
                       onDoubleClick={() => setRenamingSession(session)}
                     >
                       <button
@@ -310,6 +313,7 @@ export default function Sidebar({
                       <span className="ws-actions">
                         <Tip label="重命名">
                           <button
+                            aria-label="重命名"
                             onClick={(e) => {
                               e.stopPropagation();
                               setRenamingSession(session);
@@ -320,6 +324,7 @@ export default function Sidebar({
                         </Tip>
                         <Tip label="删除">
                           <button
+                            aria-label="删除"
                             onClick={(e) => {
                               e.stopPropagation();
                               setDeletingSession(session);
@@ -368,7 +373,7 @@ export default function Sidebar({
         onOpenChange={(o) => !o && setRenaming(null)}
         title="重命名项目"
         initial={renaming?.name ?? ""}
-        onSubmit={(name) => renaming && onRenameWorkspace(renaming.id, name)}
+        onSubmit={(name) => renaming && onRenameProject(renaming.id, name)}
       />
       <RenameDialog
         open={!!renamingSession}
@@ -386,7 +391,7 @@ export default function Sidebar({
           const result = await picker();
           return result.canceled ? undefined : result.path;
         }}
-        onSubmit={onCreateWorkspace}
+        onSubmit={onCreateProject}
       />
       <ConfirmDialog
         open={!!deleting}
@@ -394,7 +399,7 @@ export default function Sidebar({
         title={`删除项目「${deleting?.name ?? ""}」？`}
         description="此操作不可撤销。"
         onConfirm={() => {
-          if (deleting) onDeleteWorkspace(deleting.id);
+          if (deleting) onDeleteProject(deleting.id);
           setDeleting(null);
         }}
       />

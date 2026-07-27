@@ -123,8 +123,8 @@ export function ChatThreadNode(props: any) {
   }, [id]);
 
   const reloadNode = useCallback(async () => {
-    if (!window.api || !data.workspaceId) return;
-    const list = await window.api.canvas.list(data.workspaceId);
+    if (!window.api || !data.sessionId) return;
+    const list = await window.api.canvas.list(data.sessionId);
     const next = list.find((n) => n.id === id);
     if (next) {
       setMsgs(toMsgs(next.messages));
@@ -132,7 +132,7 @@ export function ChatThreadNode(props: any) {
       setPersona(next.systemPrompt ?? "");
       setNodeModel(next.model);
     }
-  }, [data.workspaceId, id, toMsgs]);
+  }, [data.sessionId, id, toMsgs]);
 
   const upsertToolMessage = useCallback((payload: Parameters<typeof upsertToolTimelineMessage<Msg>>[1]) => {
     setMsgs((current) => upsertToolTimelineMessage(current, payload, (toolCall) => ({

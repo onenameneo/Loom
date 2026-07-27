@@ -77,7 +77,8 @@ async function renderCanvas() {
         open: vi.fn(async () => [
           {
             id: "n1",
-            workspaceId: "workspace-1",
+            sessionId: "session-1",
+            projectId: "project-1",
             title: "Main",
             mountAncestors: false,
             messages: [],
@@ -88,7 +89,7 @@ async function renderCanvas() {
   });
   const view = render(
     <TitlebarProvider defaultDescriptor={{ title: "Canvas" }}>
-      <Canvas workspaceId="workspace-1" />
+      <Canvas sessionId="session-1" />
     </TitlebarProvider>,
   );
   await waitFor(() => expect(screen.getByTestId("displayed-node")).toBeTruthy());
@@ -157,7 +158,7 @@ describe("Canvas resize lifecycle", () => {
       expect(screen.getByTestId("flow").dataset.panOnDrag).toBe("true");
     });
     expect(layoutStore.enqueue).toHaveBeenCalledOnce();
-    expect(layoutStore.enqueue).toHaveBeenCalledWith("workspace-1", "n1", moved);
+    expect(layoutStore.enqueue).toHaveBeenCalledWith("session-1", "n1", moved);
   });
 
   it("does not let a start-only baseline revert or enqueue after a later node drag", async () => {
@@ -191,7 +192,7 @@ describe("Canvas resize lifecycle", () => {
     act(() => harness.props.onNodeDragStop(null, harness.props.nodes[0]));
 
     expect(layoutStore.enqueue).toHaveBeenCalledOnce();
-    expect(layoutStore.enqueue).toHaveBeenCalledWith("workspace-1", "n1", dragged);
+    expect(layoutStore.enqueue).toHaveBeenCalledWith("session-1", "n1", dragged);
 
     act(() => window.dispatchEvent(new Event("blur")));
 
@@ -201,6 +202,6 @@ describe("Canvas resize lifecycle", () => {
     });
     view.unmount();
     expect(layoutStore.enqueue).toHaveBeenCalledOnce();
-    expect(layoutStore.enqueue).not.toHaveBeenCalledWith("workspace-1", "n1", initial);
+    expect(layoutStore.enqueue).not.toHaveBeenCalledWith("session-1", "n1", initial);
   });
 });

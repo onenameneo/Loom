@@ -30,7 +30,6 @@ export interface CanvasNodeDto {
   id: string;
   sessionId: string;
   projectId: string;
-  workspaceId: string;
   parentId?: string;
   title: string;
   seed?: NodeSeed;
@@ -239,9 +238,8 @@ export interface ProjectMeta {
   updatedAt: number;
   pinned: boolean;
   order: number;
-  sourceFolders?: string[];
+  sourceRoots?: string[];
 }
-export type WorkspaceMeta = ProjectMeta;
 
 export interface SessionMeta {
   id: string;
@@ -320,16 +318,9 @@ declare global {
         list: () => Promise<AcpSessionDto[]>;
         onEvent: (cb: (e: AcpEvent) => void) => () => void;
       };
-      workspaces: {
-        list: () => Promise<WorkspaceMeta[]>;
-        create: (name?: string) => Promise<WorkspaceMeta>;
-        rename: (id: string, name: string) => Promise<{ ok: boolean }>;
-        delete: (id: string) => Promise<{ ok: boolean }>;
-        pin: (id: string, pinned: boolean) => Promise<{ ok: boolean }>;
-      };
       projects: {
         list: () => Promise<ProjectMeta[]>;
-        create: (input?: string | { name?: string; sourceFolders?: string[] }) => Promise<ProjectMeta>;
+        create: (input?: string | { name?: string; sourceRoots?: string[] }) => Promise<ProjectMeta>;
         rename: (id: string, name: string) => Promise<{ ok: boolean }>;
         delete: (id: string) => Promise<{ ok: boolean }>;
         pin: (id: string, pinned: boolean) => Promise<{ ok: boolean }>;
