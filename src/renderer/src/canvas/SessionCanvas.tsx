@@ -8,7 +8,7 @@ import ChatView from "./ChatView";
 //   · 只有主线（无分支）→ 居中聊天视图（ChatView）。
 //   · 划词岔出第一个分支，或手动「展开画布」→ 切成 React Flow 画布（Canvas）。
 // 两个视图共用 window.api.canvas；root 节点消息主进程有镜像，切换不丢历史。
-export default function Workspace({
+export default function SessionCanvas({
   sessionId,
   sessionName,
   model,

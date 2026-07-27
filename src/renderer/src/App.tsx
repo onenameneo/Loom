@@ -14,7 +14,7 @@ import {
 } from "./surfaces";
 
 export default function App() {
-  const [activeSurface, setActiveSurface] = useState("workspace");
+  const [activeSurface, setActiveSurface] = useState("project");
   const [projects, setProjects] = useState<ProjectMeta[]>([]);
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -185,7 +185,7 @@ export default function App() {
     const project = await window.api.projects.create(input);
     await reloadProjects();
     setActiveProjectId(project.id);
-    setActiveSurface("workspace");
+    setActiveSurface("project");
   }, [reloadProjects]);
 
   const createSession = useCallback(async () => {
@@ -195,17 +195,17 @@ export default function App() {
     setActiveSessionId(session.id);
     setFocusNodeId(null);
     setChatNodeId(null);
-    setActiveSurface("workspace");
+    setActiveSurface("project");
   }, [activeProjectId, reloadSessions]);
 
   // 原生菜单动作
   useEffect(() => {
     if (!window.api) return;
     return window.api.onMenu((action) => {
-      if (action === "new-project" || action === "new-workspace") createProject();
+      if (action === "new-project") createProject();
       else if (action === "new-session") createSession();
       else if (action === "settings") setActiveSurface("settings");
-      else if (action === "surface:workspace") setActiveSurface("workspace");
+      else if (action === "surface:project") setActiveSurface("project");
       else if (action === "surface:observatory") setActiveSurface("observatory");
       else if (action === "toggle-sidebar") shellController.requestToggle("menu");
     });
@@ -296,7 +296,7 @@ export default function App() {
                 }}
                 onFocusNode={(sessionId, nodeId) => {
                   setActiveSessionId(sessionId);
-                  setActiveSurface("workspace");
+                  setActiveSurface("project");
                   if (sessionMode === "canvas") {
                     setFocusNodeId(nodeId);
                   } else {

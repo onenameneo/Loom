@@ -10,7 +10,7 @@ import {
   useTitlebarActions,
   useTitlebarContext,
 } from "./Titlebar";
-import Workspace from "../canvas/Workspace";
+import SessionCanvas from "../canvas/SessionCanvas";
 
 vi.mock("../canvas/Canvas", () => ({ default: () => <div>canvas</div> }));
 vi.mock("../canvas/ChatView", async () => {
@@ -49,7 +49,7 @@ describe("global titlebar", () => {
     const view = render(
       <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
         <AppTitlebar {...titlebarProps} />
-        <Workspace
+        <SessionCanvas
           sessionId="session-1"
           sessionName="first workspace"
           noKey={false}
@@ -64,7 +64,7 @@ describe("global titlebar", () => {
     view.rerender(
       <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
         <AppTitlebar {...titlebarProps} />
-        <Workspace
+        <SessionCanvas
           sessionId="session-1"
           sessionName="renamed workspace"
           noKey={false}

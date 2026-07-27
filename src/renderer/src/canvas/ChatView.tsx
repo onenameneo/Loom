@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import type { ApprovalRequestPayload, NodeBudget, NodeMsg, TurnCanvasEventPayload } from "../env";
-import { IconSplit, IconWorkspace } from "../icons";
+import { IconSplit, IconProject } from "../icons";
 import { Message } from "../message/Message";
 import { Composer, type ComposerImage } from "../composer/Composer";
 import { useTitlebarActions } from "../titlebar/Titlebar";
@@ -82,7 +82,7 @@ export default function ChatView({
           aria-label="展开画布"
           title="展开画布"
         >
-          <IconWorkspace size={15} />
+          <IconProject size={15} />
         </button>
         {noKey && (
           <button className="chip-warn" type="button" onClick={openSettings}>

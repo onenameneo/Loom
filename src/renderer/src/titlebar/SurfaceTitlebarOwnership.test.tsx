@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ChatView from "../canvas/ChatView";
-import Workspace from "../canvas/Workspace";
+import SessionCanvas from "../canvas/SessionCanvas";
 import type { NodeMsg } from "../env";
 import type { SurfaceCtx } from "../surfaces";
 import { MonitorPanel, SettingsPanel } from "../surfaces";
@@ -145,7 +145,7 @@ describe("surface titlebar ownership", () => {
 
   it("does not use the compatibility hook for Workspace", async () => {
     render(
-      <Workspace
+      <SessionCanvas
         sessionId="session-1"
         sessionName="workspace"
         noKey={false}

@@ -324,7 +324,7 @@ declare global {
         rename: (id: string, name: string) => Promise<{ ok: boolean }>;
         delete: (id: string) => Promise<{ ok: boolean }>;
         pin: (id: string, pinned: boolean) => Promise<{ ok: boolean }>;
-        pickSourceFolder: () => Promise<{ canceled: boolean; path?: string }>;
+        pickSourceRoot: () => Promise<{ canceled: boolean; path?: string }>;
       };
       sessions: {
         list: (projectId: string) => Promise<SessionMeta[]>;

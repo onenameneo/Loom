@@ -25,7 +25,7 @@ const mk = (Icon: React.ComponentType<LucideProps>) => (p: LucideProps) => (
   <Icon strokeWidth={1.75} {...p} />
 );
 
-export const IconWorkspace = mk(Workflow); // 项目（包含多个 Session）
+export const IconProject = mk(Workflow); // 项目（包含多个 Session）
 export const IconEye = mk(Radar); // 观察哨（监控）
 export const IconSettings = mk(Settings);
 export const IconSun = mk(Sun);

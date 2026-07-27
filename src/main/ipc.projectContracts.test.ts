@@ -34,4 +34,11 @@ describe("main/preload project IPC contracts", () => {
     expect(mainSource).not.toContain("store.renameWorkspace");
     expect(mainSource).not.toContain("store.deleteWorkspace");
   });
+
+  it("creates one default Session and root Node when creating a Project", () => {
+    const mainSource = readSource("src/main/index.ts");
+
+    expect(mainSource).toMatch(/const session = store\.ensureDefaultSession\(project\.id\)/);
+    expect(mainSource).toContain('store.createNode({ sessionId: session.id, title: "主线", mountAncestors: false })');
+  });
 });

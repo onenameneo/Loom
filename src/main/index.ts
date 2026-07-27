@@ -74,7 +74,8 @@ function registerIpc() {
   // ---- projects / sessions ----
   const createProject = (input?: string | { name?: string; sourceRoots?: string[] }) => {
     const project = store.createProject(input);
-    store.ensureDefaultSession(project.id);
+    const session = store.ensureDefaultSession(project.id);
+    store.createNode({ sessionId: session.id, title: "主线", mountAncestors: false });
     return project;
   };
   ipcMain.handle("project:list", () => store.listProjects());
@@ -91,7 +92,7 @@ function registerIpc() {
     store.setPinned(id, pinned);
     return { ok: true };
   });
-  ipcMain.handle("project:pickSourceFolder", async () => {
+  ipcMain.handle("project:pickSourceRoot", async () => {
     const options: Electron.OpenDialogOptions = {
       properties: ["openDirectory", "createDirectory"],
       title: "选择项目文件夹",
@@ -145,7 +146,7 @@ function buildMenu() {
       submenu: [
         { label: "切换侧栏", accelerator: "CmdOrCtrl+\\", click: menuAction("toggle-sidebar") },
         { type: "separator" as const },
-        { label: "项目", accelerator: "CmdOrCtrl+1", click: menuAction("surface:workspace") },
+        { label: "项目", accelerator: "CmdOrCtrl+1", click: menuAction("surface:project") },
         { label: "工作站", accelerator: "CmdOrCtrl+2", click: menuAction("surface:observatory") },
         { type: "separator" as const },
         { role: "toggleDevTools" as const },

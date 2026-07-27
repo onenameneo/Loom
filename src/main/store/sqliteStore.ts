@@ -187,11 +187,11 @@ export class SqliteStore implements Store {
       );
   }
 
-  createProject(input: string | { name?: string; sourceRoots?: string[]; sourceFolders?: string[] } = "未命名项目"): Project {
+  createProject(input: string | { name?: string; sourceRoots?: string[] } = "未命名项目"): Project {
     const name = typeof input === "string" ? input : input.name?.trim() || "未命名项目";
     const sourceRoots = typeof input === "string"
       ? []
-      : [...new Set(((input.sourceRoots ?? input.sourceFolders) ?? []).map((item) => item.trim()).filter(Boolean))];
+      : [...new Set((input.sourceRoots ?? []).map((item) => item.trim()).filter(Boolean))];
     const now = Date.now();
     const project: Project = {
       id: id("proj"),
@@ -219,22 +219,6 @@ export class SqliteStore implements Store {
 
   deleteProject(id: string): void {
     this.db.prepare("DELETE FROM projects WHERE id = ?").run(id);
-  }
-
-  listWorkspaces(): Project[] {
-    return this.listProjects();
-  }
-
-  createWorkspace(input: string | { name?: string; sourceFolders?: string[]; sourceRoots?: string[] } = "未命名项目"): Project {
-    return this.createProject(input);
-  }
-
-  renameWorkspace(id: string, name: string): void {
-    this.renameProject(id, name);
-  }
-
-  deleteWorkspace(id: string): void {
-    this.deleteProject(id);
   }
 
   setPinned(id: string, pinned: boolean): void {
@@ -316,14 +300,12 @@ export class SqliteStore implements Store {
   createNode(input: {
     sessionId?: string;
     projectId?: string;
-    workspaceId?: string;
     parentId?: string;
     title: string;
     seed?: unknown;
     mountAncestors?: boolean;
   }): NodeRecord {
-    const projectId = input.projectId ?? input.workspaceId;
-    const sessionId = input.sessionId ?? (projectId ? this.ensureDefaultSession(projectId).id : undefined);
+    const sessionId = input.sessionId ?? (input.projectId ? this.ensureDefaultSession(input.projectId).id : undefined);
     if (!sessionId) throw new Error("Session not found.");
     const session = this.getSession(sessionId);
     if (!session) throw new Error("Session not found.");

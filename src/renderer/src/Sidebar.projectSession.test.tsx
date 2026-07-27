@@ -64,7 +64,7 @@ describe("Sidebar project session navigation", () => {
 
     render(
       <Sidebar
-        activeSurface="workspace"
+        activeSurface="project"
         setSurface={vi.fn()}
         ctx={ctx()}
         onSelectSession={onSelectSession}
@@ -107,14 +107,14 @@ describe("Sidebar project session navigation", () => {
         list: vi.fn(async () => []),
       },
       projects: {
-        pickSourceFolder: vi.fn(async () => ({ canceled: false, path: "/Users/neo/code/project-one" })),
+        pickSourceRoot: vi.fn(async () => ({ canceled: false, path: "/Users/neo/code/project-one" })),
       },
     } as unknown as Window["api"];
 
     const baseCtx = ctx();
     render(
       <Sidebar
-        activeSurface="workspace"
+        activeSurface="project"
         setSurface={vi.fn()}
         ctx={{
           ...baseCtx,

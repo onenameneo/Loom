@@ -148,8 +148,8 @@ const api = {
     delete: (id: string): Promise<any> => ipcRenderer.invoke("project:delete", id),
     pin: (id: string, pinned: boolean): Promise<any> =>
       ipcRenderer.invoke("project:pin", { id, pinned }),
-    pickSourceFolder: (): Promise<{ canceled: boolean; path?: string }> =>
-      ipcRenderer.invoke("project:pickSourceFolder"),
+    pickSourceRoot: (): Promise<{ canceled: boolean; path?: string }> =>
+      ipcRenderer.invoke("project:pickSourceRoot"),
   },
   sessions: {
     list: (projectId: string): Promise<any[]> => ipcRenderer.invoke("session:list", projectId),

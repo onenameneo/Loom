@@ -24,11 +24,7 @@ export class JsonStore implements Store {
 
   private normalizeProject(raw: any): Project | undefined {
     if (!raw || typeof raw !== "object" || typeof raw.id !== "string") return undefined;
-    const sourceRoots: unknown[] = Array.isArray(raw.sourceRoots)
-      ? raw.sourceRoots
-      : Array.isArray(raw.sourceFolders)
-        ? raw.sourceFolders
-        : [];
+    const sourceRoots: unknown[] = Array.isArray(raw.sourceRoots) ? raw.sourceRoots : [];
     return {
       id: raw.id,
       name: typeof raw.name === "string" ? raw.name : "未命名项目",
@@ -100,11 +96,11 @@ export class JsonStore implements Store {
         Number(b.pinned) - Number(a.pinned) || a.order - b.order || b.updatedAt - a.updatedAt,
     );
   }
-  createProject(input: string | { name?: string; sourceRoots?: string[]; sourceFolders?: string[] } = "未命名项目"): Project {
+  createProject(input: string | { name?: string; sourceRoots?: string[] } = "未命名项目"): Project {
     const name = typeof input === "string" ? input : input.name?.trim() || "未命名项目";
     const sourceRoots = typeof input === "string"
       ? []
-      : [...new Set(((input.sourceRoots ?? input.sourceFolders) ?? []).map((item) => item.trim()).filter(Boolean))];
+      : [...new Set((input.sourceRoots ?? []).map((item) => item.trim()).filter(Boolean))];
     const now = Date.now();
     const project: Project = {
       id: this.id("project"),
@@ -131,18 +127,6 @@ export class JsonStore implements Store {
     this.data.projects = this.data.projects.filter((w) => w.id !== id);
     this.data.sessions = (this.data.sessions ?? []).filter((session) => session.projectId !== id);
     this.flush();
-  }
-  listWorkspaces(): Project[] {
-    return this.listProjects();
-  }
-  createWorkspace(input: string | { name?: string; sourceFolders?: string[]; sourceRoots?: string[] } = "未命名项目"): Project {
-    return this.createProject(input);
-  }
-  renameWorkspace(id: string, name: string): void {
-    this.renameProject(id, name);
-  }
-  deleteWorkspace(id: string): void {
-    this.deleteProject(id);
   }
   setPinned(id: string, pinned: boolean): void {
     const project = this.data.projects.find((w) => w.id === id);
@@ -200,7 +184,6 @@ export class JsonStore implements Store {
   createNode(_input: {
     sessionId?: string;
     projectId?: string;
-    workspaceId?: string;
     parentId?: string;
     title: string;
     seed?: unknown;

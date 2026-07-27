@@ -22,8 +22,8 @@ import type {
   SettingsPayload,
   SessionMeta,
 } from "./env";
-import { IconEye, IconPlus, IconSettings, IconWorkspace } from "./icons";
-import Workspace from "./canvas/Workspace";
+import { IconEye, IconPlus, IconSettings, IconProject } from "./icons";
+import SessionCanvas from "./canvas/SessionCanvas";
 import { useTitlebarActions, useTitlebarContext } from "./titlebar/Titlebar";
 
 export interface SurfaceCtx {
@@ -65,7 +65,7 @@ export interface Surface {
 }
 
 // ---- 会话主面（对话/画布合一；本阶段单节点聊天）----
-function WorkspacePanel({ ctx }: { ctx: SurfaceCtx }) {
+function ProjectPanel({ ctx }: { ctx: SurfaceCtx }) {
   const project = ctx.projects.find((p) => p.id === ctx.activeProjectId);
   const session = ctx.sessions.find((s) => s.id === ctx.activeSessionId);
   const noKey = ctx.settings && !ctx.settings.hasKey;
@@ -92,7 +92,7 @@ function WorkspacePanel({ ctx }: { ctx: SurfaceCtx }) {
     );
   }
   return (
-    <Workspace
+    <SessionCanvas
       key={session.id}
       sessionId={session.id}
       sessionName={session.title}
@@ -644,7 +644,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
 }
 
 export const SURFACES: Surface[] = [
-  { id: "workspace", label: "项目", icon: IconWorkspace, Panel: WorkspacePanel },
+  { id: "project", label: "项目", icon: IconProject, Panel: ProjectPanel },
   {
     id: "observatory",
     label: "工作站",

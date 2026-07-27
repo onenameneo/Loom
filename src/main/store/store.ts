@@ -48,9 +48,6 @@ export interface Project {
   sourceRoots: string[];
 }
 
-/** @deprecated Compatibility alias until renderer/main IPC callers are renamed. */
-export type Workspace = Project;
-
 export interface SessionRecord {
   id: string;
   projectId: string;
@@ -64,8 +61,6 @@ export interface StoreData {
   version: number;
   settings: Settings;
   projects: Project[];
-  /** @deprecated Legacy JSON field; canonical stores do not import it. */
-  workspaces?: Workspace[];
   sessions?: SessionRecord[];
 }
 
@@ -108,8 +103,6 @@ export interface NodeRecord {
   id: string;
   sessionId: string;
   projectId: string;
-  /** @deprecated Compatibility-only compile shim; store results do not include it. */
-  workspaceId?: string;
   parentId?: string;
   title: string;
   seed?: unknown;
@@ -128,17 +121,9 @@ export interface Store {
   setApiKeyEnc(enc: string | undefined): void;
 
   listProjects(): Project[];
-  createProject(input?: string | { name?: string; sourceRoots?: string[]; sourceFolders?: string[] }): Project;
+  createProject(input?: string | { name?: string; sourceRoots?: string[] }): Project;
   renameProject(id: string, name: string): void;
   deleteProject(id: string): void;
-  /** @deprecated Compatibility alias until IPC callers are renamed. */
-  listWorkspaces(): Workspace[];
-  /** @deprecated Compatibility alias until IPC callers are renamed. */
-  createWorkspace(input?: string | { name?: string; sourceFolders?: string[]; sourceRoots?: string[] }): Workspace;
-  /** @deprecated Compatibility alias until IPC callers are renamed. */
-  renameWorkspace(id: string, name: string): void;
-  /** @deprecated Compatibility alias until IPC callers are renamed. */
-  deleteWorkspace(id: string): void;
   setPinned(id: string, pinned: boolean): void;
 
   listSessions(projectId: string): SessionRecord[];
@@ -153,8 +138,6 @@ export interface Store {
   createNode(input: {
     sessionId?: string;
     projectId?: string;
-    /** @deprecated Compatibility alias until canvas callers are renamed. */
-    workspaceId?: string;
     parentId?: string;
     title: string;
     seed?: unknown;

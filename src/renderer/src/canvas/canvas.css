@@ -1027,7 +1027,7 @@
 .seltb button {
   width: 100%;
   display: grid;
-  grid-template-rows: auto auto;
+  grid-template: auto auto / minmax(0, 1fr);
   gap: 3px;
   background: var(--surface);
   color: var(--text);

@@ -432,7 +432,7 @@ body {
   color: var(--faint);
 }
 
-.sb-ws {
+.sb-project {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -442,7 +442,7 @@ body {
   font-size: 12.5px;
   cursor: pointer;
 }
-.sb-ws-chev {
+.sb-project-chev {
   flex: none;
   width: 15px;
   height: 15px;
@@ -457,39 +457,39 @@ body {
   color: var(--faint);
   cursor: pointer;
 }
-.sb-ws-chev:hover {
+.sb-project-chev:hover {
   color: var(--text);
   background: color-mix(in srgb, var(--text) 8%, transparent);
 }
-.sb-ws-chev svg {
+.sb-project-chev svg {
   display: block;
 }
-.sb-ws:hover {
+.sb-project:hover {
   background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text);
 }
-.sb-ws.active {
+.sb-project.active {
   background: color-mix(in srgb, var(--text) 9%, transparent);
   color: var(--text);
 }
-.sb-ws .sq {
+.sb-project .sq {
   width: 7px;
   height: 7px;
   border-radius: 2px;
   flex: none;
   background: var(--border-strong);
 }
-.sb-ws .sq.pinned {
+.sb-project .sq.pinned {
   background: var(--accent);
 }
-.sb-ws .ws-name {
+.sb-project .project-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sb-ws .ws-name small {
+.sb-project .project-name small {
   display: block;
   margin-top: 2px;
   overflow: hidden;
@@ -500,14 +500,14 @@ body {
   font-size: 10px;
   font-weight: 450;
 }
-.sb-ws .ws-actions {
+.sb-project .project-actions {
   display: none;
   gap: 2px;
 }
-.sb-ws:hover .ws-actions {
+.sb-project:hover .project-actions {
   display: flex;
 }
-.ws-actions button {
+.project-actions button {
   border: none;
   background: transparent;
   color: var(--faint);
@@ -515,7 +515,7 @@ body {
   font-size: 11px;
   padding: 0 2px;
 }
-.ws-actions button:hover {
+.project-actions button:hover {
   color: var(--text);
 }
 
@@ -1636,7 +1636,7 @@ button.activity-session-card {
 .tip-arrow {
   fill: var(--text);
 }
-.ws-actions button svg {
+.project-actions button svg {
   display: block;
 }
 /* 分支大纲 = 纯缩进嵌套（无竖线，靠缩进 + 圆点表达层级，贴 DESIGN.md 克制） */

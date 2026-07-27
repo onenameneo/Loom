@@ -22,15 +22,15 @@ import { ConfirmDialog, CreateProjectDialog, RenameDialog, Tip } from "./ui/dial
 function outlineRows(nodes: CanvasNodeDto[]): Array<{ node: CanvasNodeDto; depth: number }> {
   const byParent = new Map<string | undefined, CanvasNodeDto[]>();
   for (const node of nodes) byParent.set(node.parentId, [...(byParent.get(node.parentId) ?? []), node]);
-  const rows: Array<{ node: CanvasNodeDto; depth: number }> = [];
+  const outline: Array<{ node: CanvasNodeDto; depth: number }> = [];
   const walk = (parentId: string | undefined, depth: number) => {
     for (const node of byParent.get(parentId) ?? []) {
-      rows.push({ node, depth });
+      outline.push({ node, depth });
       walk(node.id, depth + 1);
     }
   };
   walk(undefined, 0);
-  return rows;
+  return outline;
 }
 
 export default function Sidebar({
@@ -85,7 +85,7 @@ export default function Sidebar({
 
   // 为所有「已展开」的 Session 拉取各自的节点（树变化时 treeVersion 触发重取）
   useEffect(() => {
-    if (!window.api || activeSurface !== "workspace") return;
+    if (!window.api || activeSurface !== "project") return;
     let alive = true;
     const sessionIds = new Set(ctx.sessions.map((session) => session.id));
     const ids = [...expanded].filter((id) => sessionIds.has(id));
@@ -212,7 +212,7 @@ export default function Sidebar({
         );
       })}
 
-      {activeSurface === "workspace" && (
+      {activeSurface === "project" && (
         <>
           <div className="sb-label">
             项目
@@ -227,17 +227,17 @@ export default function Sidebar({
             return (
               <Fragment key={w.id}>
                 <div
-                  className={`sb-ws ${ctx.activeProjectId === w.id ? "active" : ""}`}
+                  className={`sb-project ${ctx.activeProjectId === w.id ? "active" : ""}`}
                   onClick={() => onSelectProject?.(w.id)}
                   onDoubleClick={() => setRenaming(w)}
                 >
-                  <span className="sb-ws-chev" />
+                  <span className="sb-project-chev" />
                   <span className={`sq ${w.pinned ? "pinned" : ""}`} />
-                  <span className="ws-name">
+                  <span className="project-name">
                     {w.name}
                     {w.sourceRoots?.[0] && <small>{w.sourceRoots[0]}</small>}
                   </span>
-                  <span className="ws-actions">
+                  <span className="project-actions">
                     <Tip label={w.pinned ? "取消置顶" : "置顶"}>
                       <button
                         aria-label={w.pinned ? "取消置顶" : "置顶"}
@@ -294,12 +294,12 @@ export default function Sidebar({
                 return (
                   <Fragment key={session.id}>
                     <div
-                      className={`sb-ws ${ctx.activeSessionId === session.id ? "active" : ""}`}
+                      className={`sb-project ${ctx.activeSessionId === session.id ? "active" : ""}`}
                       onClick={() => onSelectSession(session.id)}
                       onDoubleClick={() => setRenamingSession(session)}
                     >
                       <button
-                        className="sb-ws-chev"
+                        className="sb-project-chev"
                         title={isExp ? "收起" : "展开分支"}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -309,8 +309,8 @@ export default function Sidebar({
                         {isExp ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                       </button>
                       <span className="sq" />
-                      <span className="ws-name">{session.title}</span>
-                      <span className="ws-actions">
+                      <span className="project-name">{session.title}</span>
+                      <span className="project-actions">
                         <Tip label="重命名">
                           <button
                             aria-label="重命名"
@@ -386,7 +386,7 @@ export default function Sidebar({
         open={creatingProject}
         onOpenChange={setCreatingProject}
         onPickFolder={async () => {
-          const picker = window.api?.projects?.pickSourceFolder ?? window.api?.acp?.pickDir;
+          const picker = window.api?.projects?.pickSourceRoot ?? window.api?.acp?.pickDir;
           if (!picker) throw new Error("当前窗口未暴露目录选择器，请重启应用后再试。");
           const result = await picker();
           return result.canceled ? undefined : result.path;
