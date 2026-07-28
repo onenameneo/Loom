@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CanvasNodeDto } from "../env";
+import type { CanvasNodeDto, ModelSelection } from "../env";
 import { useTitlebarContext } from "../titlebar/Titlebar";
 import Canvas from "./Canvas";
 import ChatView from "./ChatView";
@@ -23,7 +23,7 @@ export default function SessionCanvas({
 }: {
   sessionId: string;
   sessionName: string;
-  model?: string;
+  model?: ModelSelection;
   noKey: boolean;
   goSettings: () => void;
   focusNodeId?: string | null;

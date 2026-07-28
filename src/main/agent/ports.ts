@@ -1,6 +1,7 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent, Usage } from "@earendil-works/pi-ai";
 import type { Store } from "../store/store";
+import type { StoredModelSelection } from "../modelConfig/modelRef";
 
 // ---------------------------------------------------------------------------
 // ③ 端口（契约）：由内圈（②应用编排）声明、外圈（④适配器）实现。
@@ -14,7 +15,7 @@ import type { Store } from "../store/store";
 /** 引擎按创建时机需要的节点初值（系统提示 / 模型 / 初始转写）。 */
 export interface NodeInit {
   systemPrompt?: string;
-  model?: string;
+  model?: StoredModelSelection;
   messages: AgentMessage[];
 }
 
@@ -88,7 +89,7 @@ export interface LlmEnginePort {
   /** 失效所有引擎（设置变更后按新配置重建）。 */
   invalidateAll(): void;
   /** 可选模型列表（provider 注册表）。 */
-  listModels(): Promise<Array<{ id: string; name: string }>>;
+  listModels(): Promise<Array<{ id: string; name: string; providerId?: string; modelId?: string; available?: boolean; availability?: string; capabilities?: unknown }>>;
 }
 
 /** 事件汇：把引擎/编排事件推给 renderer。 */

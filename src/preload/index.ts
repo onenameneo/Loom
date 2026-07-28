@@ -82,7 +82,7 @@ const api = {
       ipcRenderer.invoke("node:updateLayouts", items),
     setMount: (nodeId: string, on: boolean): Promise<{ ok: boolean; budget: any }> =>
       ipcRenderer.invoke("node:setMount", { nodeId, on }),
-    setModel: (nodeId: string, model: string): Promise<{ ok: boolean }> =>
+    setModel: (nodeId: string, model: string | { providerId: string; modelId: string }): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("node:setModel", { nodeId, model }),
     models: (): Promise<{ id: string; name: string }[]> => ipcRenderer.invoke("node:models"),
     budget: (nodeId: string): Promise<{ withoutAncestors: number; withAncestors: number; estimated: boolean }> =>
@@ -99,8 +99,13 @@ const api = {
   settings: {
     get: (): Promise<any> => ipcRenderer.invoke("settings:get"),
     set: (patch: any): Promise<any> => ipcRenderer.invoke("settings:set", patch),
-    setKey: (plain: string): Promise<{ ok: boolean; encrypted: boolean }> =>
-      ipcRenderer.invoke("settings:setKey", plain),
+    setGlobalModel: (model: { providerId: string; modelId: string }): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke("settings:setGlobalModel", model),
+    addProviderModel: (input: any): Promise<{ ok: boolean }> => ipcRenderer.invoke("settings:addProviderModel", input),
+    deleteProviderModel: (model: { providerId: string; modelId: string }): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke("settings:deleteProviderModel", model),
+    openModelsJson: (): Promise<{ ok: boolean; path: string; error?: string }> =>
+      ipcRenderer.invoke("settings:openModelsJson"),
   },
   monitor: {
     list: (): Promise<AgentProc[]> => ipcRenderer.invoke("monitor:list"),

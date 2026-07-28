@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Handle, NodeResizeControl, Position, type ResizeParams } from "@xyflow/react";
 import { Check, ChevronDown, MessageSquareText, Pencil, Trash2 } from "lucide-react";
-import type { ApprovalRequestPayload, NodeBudget, NodeMsg, TurnCanvasEventPayload } from "../env";
+import type { ApprovalRequestPayload, ModelSelection, NodeBudget, NodeMsg, TurnCanvasEventPayload } from "../env";
 import { Composer, type ComposerImage } from "../composer/Composer";
 import { IconArrowUpRight, IconChevronRight, IconSplit } from "../icons";
 import { Message } from "../message/Message";
@@ -15,6 +15,17 @@ type Role = "user" | "assistant" | "error" | "tool";
 type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; toolCall?: ToolCallView };
 type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number };
 type RectLike = Pick<DOMRect, "left" | "top" | "bottom" | "width" | "height">;
+
+function formatModelSelection(model?: ModelSelection) {
+  if (!model) return undefined;
+  return typeof model === "string" ? model : `${model.providerId}/${model.modelId}`;
+}
+
+function parseModelSelection(value: string): ModelSelection {
+  const [providerId, ...rest] = value.trim().split("/");
+  const modelId = rest.join("/");
+  return providerId && modelId ? { providerId, modelId } : value.trim();
+}
 
 export function selectionToolbarFromRects({
   text,
@@ -91,7 +102,7 @@ export function ChatThreadNode(props: any) {
   const [editingTitle, setEditingTitle] = useState(false);
   const [personaOpen, setPersonaOpen] = useState(false);
   const [persona, setPersona] = useState(String(data.systemPrompt ?? ""));
-  const [nodeModel, setNodeModel] = useState<string | undefined>(data.model);
+  const [nodeModel, setNodeModel] = useState<string | undefined>(formatModelSelection(data.model));
   const [colorOpen, setColorOpen] = useState(false);
   const colorRef = useRef<HTMLDivElement>(null);
   const resizeTokenRef = useRef<number | null>(null);
@@ -105,7 +116,7 @@ export function ChatThreadNode(props: any) {
     setMsgs(toMsgs(data.messages ?? []));
     setTitle(String(data.title ?? ""));
     setPersona(String(data.systemPrompt ?? ""));
-    setNodeModel(data.model);
+    setNodeModel(formatModelSelection(data.model));
   }, [data.messages, data.title, data.systemPrompt, data.model, toMsgs]);
 
   useEffect(() => {
@@ -130,7 +141,7 @@ export function ChatThreadNode(props: any) {
       setMsgs(toMsgs(next.messages));
       setTitle(next.title);
       setPersona(next.systemPrompt ?? "");
-      setNodeModel(next.model);
+      setNodeModel(formatModelSelection(next.model));
     }
   }, [data.sessionId, id, toMsgs]);
 
@@ -355,7 +366,7 @@ export function ChatThreadNode(props: any) {
   async function setModel(model: string) {
     const next = model.trim();
     if (!next || !window.api) return;
-    const r = await window.api.canvas.setModel(id, next);
+    const r = await window.api.canvas.setModel(id, parseModelSelection(next));
     if (r.ok) {
       setNodeModel(next);
       data.onTreeChange?.();

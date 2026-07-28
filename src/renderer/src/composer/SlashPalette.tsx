@@ -40,7 +40,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
   const models = modelMode ? modelOptions : [];
   const modelNeedle = parsed.arg.trim().toLowerCase();
   const modelItems = models.filter((m) => !modelNeedle || m.id.toLowerCase().includes(modelNeedle) || m.name.toLowerCase().includes(modelNeedle));
-  const count = modelMode ? Math.max(modelItems.length, modelNeedle ? 1 : 0) : filtered.length;
+  const count = modelMode ? modelItems.length : filtered.length;
   const ModelIcon = modelCommand?.icon;
 
   useEffect(() => {
@@ -58,7 +58,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
   }
 
   function executeModel(index: number) {
-    const model = modelItems[index]?.id ?? parsed.arg.trim();
+    const model = modelItems[index]?.id;
     if (!model || !modelCommand) return;
     modelCommand.run(ctx, model);
     setValue("");
@@ -113,22 +113,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
               <small>{model.name}</small>
             </button>
           ))}
-          {modelNeedle && (
-            <button
-              id={`${listId}-${modelItems.length}`}
-              type="button"
-              role="option"
-              aria-selected={active === modelItems.length}
-              className={`cmd-row ${active === modelItems.length ? "is-active" : ""}`}
-              onMouseDown={(event) => event.preventDefault()}
-              onMouseEnter={() => setActive(modelItems.length)}
-              onClick={() => executeModel(modelItems.length)}
-            >
-              {ModelIcon && <ModelIcon size={15} />}
-              <span>{parsed.arg.trim()}</span>
-              <small>自定义模型</small>
-            </button>
-          )}
+          {modelItems.length === 0 && <div className="cmd-row muted">没有匹配的已添加模型</div>}
         </>
       ) : filtered.length ? (
         filtered.map((cmd, index) => {

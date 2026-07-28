@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import type { ApprovalRequestPayload, NodeBudget, NodeMsg, TurnCanvasEventPayload } from "../env";
+import type { ApprovalRequestPayload, ModelSelection, NodeBudget, NodeMsg, TurnCanvasEventPayload } from "../env";
 import { IconSplit, IconProject } from "../icons";
 import { Message } from "../message/Message";
 import { Composer, type ComposerImage } from "../composer/Composer";
@@ -12,6 +12,17 @@ import { ApprovalPrompt, type ApprovalState } from "./ApprovalPrompt";
 
 type Role = "user" | "assistant" | "error" | "tool";
 type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; toolCall?: ToolCallView };
+
+function formatModelSelection(model?: ModelSelection) {
+  if (!model) return undefined;
+  return typeof model === "string" ? model : `${model.providerId}/${model.modelId}`;
+}
+
+function parseModelSelection(value: string): ModelSelection {
+  const [providerId, ...rest] = value.trim().split("/");
+  const modelId = rest.join("/");
+  return providerId && modelId ? { providerId, modelId } : value.trim();
+}
 
 // 对话优先视图：单条主线摊开成经典居中聊天（「聊天 = 只有一个节点的画布」）。
 // 走同一套 window.api.canvas；在回复里划词 → 岔出第一个分支 → 上层切成画布视图。
@@ -30,7 +41,7 @@ export default function ChatView({
   initialMessages: NodeMsg[];
   initialMount: boolean;
   systemPrompt?: string;
-  model?: string;
+  model?: ModelSelection;
   onBranch: (seedText: string) => void;
   onExpandCanvas: () => void;
   noKey: boolean;
@@ -59,7 +70,7 @@ export default function ChatView({
   const [mount, setMount] = useState(initialMount);
   const [personaOpen, setPersonaOpen] = useState(false);
   const [persona, setPersona] = useState(systemPrompt ?? "");
-  const [nodeModel, setNodeModel] = useState<string | undefined>(model);
+  const [nodeModel, setNodeModel] = useState<string | undefined>(formatModelSelection(model));
   const [budget, setBudget] = useState<NodeBudget | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -123,7 +134,7 @@ export default function ChatView({
     setInput(localStorage.getItem(`loom:draft:${nodeId}`) ?? "");
     setMount(initialMount);
     setPersona(systemPrompt ?? "");
-    setNodeModel(model);
+    setNodeModel(formatModelSelection(model));
     refreshBudget();
   }, [initialMount, model, nodeId, refreshBudget, systemPrompt]);
 
@@ -307,7 +318,7 @@ export default function ChatView({
   async function setModel(modelId: string) {
     const next = modelId.trim();
     if (!next || !window.api) return;
-    const r = await window.api.canvas.setModel(nodeId, next);
+    const r = await window.api.canvas.setModel(nodeId, parseModelSelection(next));
     if (r.ok) setNodeModel(next);
   }
 

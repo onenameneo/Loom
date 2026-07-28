@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { StoredModelSelection } from "../modelConfig/modelRef";
 
 // 持久化仓储契约。组件/服务只依赖这个接口；实现可从 JSON-file 换到 SQLite，
 // 无需改上层。见 openspec/changes/app-shell/design.md D2/D6。
@@ -107,7 +108,7 @@ export interface NodeRecord {
   title: string;
   seed?: unknown;
   systemPrompt?: string;
-  model?: string;
+  model?: StoredModelSelection;
   color?: string;
   layout?: NodeLayout;
   mountAncestors: boolean;
@@ -145,7 +146,7 @@ export interface Store {
   }): NodeRecord;
   updateNode(
     id: string,
-    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: string; color: string }>,
+    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: StoredModelSelection; color: string }>,
   ): void;
   updateNodeLayout(id: string, layout: NodeLayout): boolean;
   updateNodeLayouts(items: Array<{ id: string; layout: NodeLayout }>): string[];

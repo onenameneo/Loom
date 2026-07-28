@@ -26,6 +26,7 @@ export interface NodeSeed {
   from: string;
   parent: string;
 }
+export type ModelSelection = string | { providerId: string; modelId: string };
 export interface CanvasNodeDto {
   id: string;
   sessionId: string;
@@ -35,7 +36,7 @@ export interface CanvasNodeDto {
   seed?: NodeSeed;
   mountAncestors: boolean;
   systemPrompt?: string;
-  model?: string;
+  model?: ModelSelection;
   color?: string;
   layout?: { x: number; y: number; width: number; height: number };
   messages: NodeMsg[];
@@ -254,11 +255,69 @@ export interface SettingsPayload {
   access: { provider: string; baseUrl: string; model: string };
   appearance: { theme: "light" | "dark" | "system"; density: "comfortable" | "compact" };
   monitor: { notify: boolean };
+  modelRegistry?: ModelRegistryPayload;
+  globalDefaultModel?: { providerId: string; modelId: string };
   sources: { baseUrl: string; model: string; key: string };
   hasKey: boolean;
+  legacyKeyPresent?: boolean;
   keyStorage: "local";
   resolvedModel: string;
   resolvedTheme: "light" | "dark";
+}
+
+export interface ModelListItem {
+  id: string;
+  name: string;
+  providerId?: string;
+  modelId?: string;
+  available?: boolean;
+  availability?: string;
+  capabilities?: unknown;
+}
+
+export interface ModelRegistryPayload {
+  providers: Array<{
+    id: string;
+    name: string;
+    baseUrl?: string;
+    source: string;
+    availability: string;
+    diagnostics: Array<{ code: string; message: string; field?: string }>;
+    hasAuthentication: boolean;
+    hasPlaintextSecret: boolean;
+    models: Array<{
+      id: string;
+      providerId: string;
+      name: string;
+      api: string;
+      source: string;
+      availability: string;
+      available: boolean;
+      diagnostics: Array<{ code: string; message: string; field?: string }>;
+      capabilities: {
+        reasoning: boolean;
+        images: boolean;
+        contextWindow: number;
+        maxOutputTokens: number;
+        compatibility?: unknown;
+      };
+    }>;
+  }>;
+}
+
+export interface AddProviderModelPayload {
+  providerId: string;
+  providerName?: string;
+  baseUrl: string;
+  apiKey?: string;
+  modelId: string;
+  modelName?: string;
+  api: string;
+  contextWindow: number;
+  maxTokens: number;
+  reasoning: boolean;
+  images: boolean;
+  modelFromProvider?: boolean;
 }
 
 declare global {
@@ -284,8 +343,8 @@ declare global {
           items: Array<{ id: string; layout: { x: number; y: number; width: number; height: number } }>,
         ) => Promise<{ ok: boolean; updatedIds: string[]; reason?: "invalid" | "storage" }>;
         setMount: (nodeId: string, on: boolean) => Promise<{ ok: boolean; budget: NodeBudget }>;
-        setModel: (nodeId: string, model: string) => Promise<{ ok: boolean }>;
-        models: () => Promise<{ id: string; name: string }[]>;
+        setModel: (nodeId: string, model: string | { providerId: string; modelId: string }) => Promise<{ ok: boolean }>;
+        models: () => Promise<ModelListItem[]>;
         budget: (nodeId: string) => Promise<NodeBudget>;
         reset: (nodeId: string) => Promise<{ ok: boolean }>;
         decideApproval: (decision: ApprovalDecisionPayload) => Promise<{ ok: boolean; reason?: string }>;
@@ -294,7 +353,10 @@ declare global {
       settings: {
         get: () => Promise<SettingsPayload>;
         set: (patch: any) => Promise<{ ok: boolean; appearance: any }>;
-        setKey: (plain: string) => Promise<{ ok: boolean; encrypted: boolean }>;
+        setGlobalModel: (model: { providerId: string; modelId: string }) => Promise<{ ok: boolean }>;
+        addProviderModel: (input: AddProviderModelPayload) => Promise<{ ok: boolean }>;
+        deleteProviderModel: (model: { providerId: string; modelId: string }) => Promise<{ ok: boolean }>;
+        openModelsJson: () => Promise<{ ok: boolean; path: string; error?: string }>;
       };
       monitor: {
         list: () => Promise<AgentProc[]>;

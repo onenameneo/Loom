@@ -12,6 +12,7 @@ import {
   type StoreData,
   type Project,
 } from "./store";
+import type { StoredModelSelection } from "../modelConfig/modelRef";
 
 // JSON-file 实现（原子写）。仓储接口的一个后端；之后可换 better-sqlite3，
 // 上层不变。数据落在 app.getPath('userData')/canvas-data.json。
@@ -193,7 +194,7 @@ export class JsonStore implements Store {
   }
   updateNode(
     _id: string,
-    _patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: string; color: string }>,
+    _patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: StoredModelSelection; color: string }>,
   ): void {}
   updateNodeLayout(_id: string, _layout: NodeLayout): boolean {
     return false;

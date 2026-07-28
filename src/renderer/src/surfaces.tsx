@@ -533,18 +533,32 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
 }
 
 // ---- 设置主面 ----
-const SRC_ZH: Record<string, string> = {
-  settings: "设置",
-  env: "环境变量",
-  default: "默认",
-  none: "未设置",
-};
+function defaultApiForProvider(providerId: string) {
+  if (providerId.includes("anthropic")) return "anthropic-messages";
+  if (providerId.includes("google")) return "google-generative-ai";
+  if (providerId.includes("mistral")) return "mistral-conversations";
+  return "openai-completions";
+}
+
+type RendererProvider = NonNullable<SettingsPayload["modelRegistry"]>["providers"][number];
+type RendererModel = RendererProvider["models"][number];
 
 export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const s = ctx.settings;
+  const [selectedModel, setSelectedModel] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [editingModel, setEditingModel] = useState<{ providerId: string; modelId: string } | null>(null);
+  const [providerId, setProviderId] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
-  const [model, setModel] = useState("");
-  const [keyInput, setKeyInput] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [modelId, setModelId] = useState("");
+  const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
+  const [modelName, setModelName] = useState("");
+  const [api, setApi] = useState("openai-completions");
+  const [contextWindow, setContextWindow] = useState("131072");
+  const [maxTokens, setMaxTokens] = useState("8192");
+  const [reasoning, setReasoning] = useState(false);
+  const [images, setImages] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
   const [monitorNotify, setMonitorNotify] = useState(true);
   const [saved, setSaved] = useState(false);
@@ -553,8 +567,9 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
 
   useEffect(() => {
     if (!s) return;
-    setBaseUrl(s.access.baseUrl);
-    setModel(s.access.model);
+    setSelectedModel(
+      s.globalDefaultModel ? `${s.globalDefaultModel.providerId}/${s.globalDefaultModel.modelId}` : "",
+    );
     setTheme(s.appearance.theme);
     setMonitorNotify(s.monitor.notify);
   }, [s]);
@@ -562,53 +577,376 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   if (!s) return <div className="surface-empty">加载中…</div>;
 
   async function save() {
+    const [providerId, modelId] = selectedModel.split("/");
+    if (providerId && modelId) await window.api.settings.setGlobalModel({ providerId, modelId });
     await window.api.settings.set({
-      access: { provider: "anthropic", baseUrl, model },
       appearance: { theme },
       monitor: { notify: monitorNotify },
     });
     await window.api.monitor.setNotify(monitorNotify);
-    if (keyInput.trim()) {
-      await window.api.settings.setKey(keyInput.trim());
-      setKeyInput("");
-    }
     setSaved(true);
     ctx.reloadSettings();
     setTimeout(() => setSaved(false), 1500);
   }
 
+  function resetAddForm() {
+    setEditingModel(null);
+    setProviderId("");
+    setBaseUrl("");
+    setApiKey("");
+    setModelId("");
+    setSelectedModelIds([]);
+    setModelName("");
+    setApi("openai-completions");
+    setContextWindow("131072");
+    setMaxTokens("8192");
+    setReasoning(false);
+    setImages(false);
+  }
+
+  function applyModelDefaults(model: RendererModel | undefined, fallbackProviderId: string) {
+    setModelId(model?.id ?? "");
+    setSelectedModelIds(model ? [model.id] : []);
+    setModelName(model?.name ?? "");
+    setApi(model?.api ?? defaultApiForProvider(fallbackProviderId));
+    setContextWindow(String(model?.capabilities.contextWindow ?? 131072));
+    setMaxTokens(String(model?.capabilities.maxOutputTokens ?? 8192));
+    setReasoning(Boolean(model?.capabilities.reasoning));
+    setImages(Boolean(model?.capabilities.images));
+  }
+
+  function openAddForm() {
+    const firstProvider = providerOptions[0];
+    const firstModel = firstProvider?.models[0];
+    setEditingModel(null);
+    setProviderId(firstProvider?.id ?? "");
+    setBaseUrl(firstProvider?.baseUrl ?? "");
+    applyModelDefaults(firstModel, firstProvider?.id ?? "");
+    setAddOpen(true);
+  }
+
+  function editProviderModel(provider: RendererProvider, model: RendererModel) {
+    setEditingModel({ providerId: provider.id, modelId: model.id });
+    setProviderId(provider.id);
+    setBaseUrl(provider.baseUrl ?? "");
+    applyModelDefaults(model, provider.id);
+    setApiKey("");
+    setAddOpen(true);
+  }
+
+  function selectProvider(nextProviderId: string) {
+    const nextProvider = providerOptions.find((provider) => provider.id === nextProviderId);
+    setProviderId(nextProviderId);
+    setBaseUrl(nextProvider?.baseUrl ?? "");
+    applyModelDefaults(nextProvider?.models[0], nextProviderId);
+  }
+
+  function setRegistryModelSelection(nextModelIds: string[]) {
+    const selectedProviderConfig = providerOptions.find((provider) => provider.id === providerId);
+    const selectedModelConfig = selectedProviderConfig?.models.find((model) => model.id === nextModelIds[0]);
+    applyModelDefaults(selectedModelConfig, providerId);
+    setSelectedModelIds(nextModelIds);
+    setModelId(nextModelIds[0] ?? "");
+  }
+
+  function toggleRegistryModel(nextModelId: string) {
+    setRegistryModelSelection(
+      selectedModelIds.includes(nextModelId)
+        ? selectedModelIds.filter((item) => item !== nextModelId)
+        : [...selectedModelIds, nextModelId],
+    );
+  }
+
+  async function addProviderModel() {
+    const cleanProviderId = providerId.trim();
+    const cleanModelId = modelId.trim();
+    const cleanBaseUrl = baseUrl.trim();
+    if (!cleanProviderId || !cleanBaseUrl) return;
+    const selectedProviderConfig = providerOptions.find((provider) => provider.id === cleanProviderId);
+    const providerModels = selectedProviderConfig?.models ?? [];
+    if (providerModels.length > 0) {
+      const selectedModels = providerModels.filter((model) => selectedModelIds.includes(model.id));
+      if (selectedModels.length === 0) return;
+      for (const selectedModelConfig of selectedModels) {
+        await window.api.settings.addProviderModel({
+          providerId: cleanProviderId,
+          providerName: selectedProviderConfig?.name,
+          baseUrl: cleanBaseUrl,
+          apiKey: apiKey.trim() || undefined,
+          modelId: selectedModelConfig.id,
+          modelName: selectedModelConfig.name,
+          api: selectedModelConfig.api,
+          contextWindow: selectedModelConfig.capabilities.contextWindow,
+          maxTokens: selectedModelConfig.capabilities.maxOutputTokens,
+          reasoning: selectedModelConfig.capabilities.reasoning,
+          images: selectedModelConfig.capabilities.images,
+          modelFromProvider: selectedModelConfig.source === "builtin",
+        });
+      }
+      setAddOpen(false);
+      resetAddForm();
+      ctx.reloadSettings();
+      return;
+    }
+    if (!cleanModelId) return;
+    await window.api.settings.addProviderModel({
+      providerId: cleanProviderId,
+      providerName: selectedProviderConfig?.name,
+      baseUrl: cleanBaseUrl,
+      apiKey: apiKey.trim() || undefined,
+      modelId: cleanModelId,
+      modelName: modelName.trim() || cleanModelId,
+      api,
+      contextWindow: Number(contextWindow) || 0,
+      maxTokens: Number(maxTokens) || 0,
+      reasoning,
+      images,
+      modelFromProvider: false,
+    });
+    setAddOpen(false);
+    resetAddForm();
+    ctx.reloadSettings();
+  }
+
+  async function deleteProviderModel(providerId: string, modelId: string) {
+    await window.api.settings.deleteProviderModel({ providerId, modelId });
+    ctx.reloadSettings();
+  }
+
+  const providers = s.modelRegistry?.providers ?? [];
+  const providerOptions = providers;
+  const configuredProviders = providers
+    .map((provider) => ({ ...provider, models: provider.models.filter((model) => model.source !== "builtin") }))
+    .filter((provider) => provider.models.length > 0);
+  const hasPlaintextSecret = providers.some((provider) => provider.hasPlaintextSecret);
+  const availableModels = configuredProviders.flatMap((provider) => provider.models.filter((model) => model.available));
+  const selectedProviderOption = providerOptions.find((provider) => provider.id === providerId);
+  const providerModelOptions = selectedProviderOption?.models ?? [];
+  const selectedModelOption = providerModelOptions.find((model) => model.id === modelId);
+  const useRegistryModel = providerModelOptions.length > 0;
+  const selectedRegistryModels = providerModelOptions.filter((model) => selectedModelIds.includes(model.id));
+  const canSaveModel = providerOptions.length > 0 && Boolean(providerId.trim()) && Boolean(baseUrl.trim()) && (useRegistryModel ? selectedModelIds.length > 0 : Boolean(modelId.trim()));
+
   return (
-    <div className="surface-fill">
+    <div className="surface-fill settings-surface">
       <div className="settings">
-      <section>
-        <h3>接入</h3>
-        <label className="field">
-          <span>Base URL <em className="src">来源：{SRC_ZH[s.sources.baseUrl]}</em></span>
-          <input
-            placeholder="留空用官方 / env（如 https://your-proxy/anthropic）"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-          />
-        </label>
-        <label className="field">
-          <span>模型 <em className="src">来源：{SRC_ZH[s.sources.model]} · 当前生效 {s.resolvedModel}</em></span>
-          <input
-            placeholder="留空用 env / 默认（如 claude-sonnet-4-5 / mimo-v2.5）"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-          />
-        </label>
-        <label className="field">
-          <span>API Key <em className="src">来源：{SRC_ZH[s.sources.key]}{s.hasKey ? " · 已配置" : ""}</em></span>
-          <input
-            type="password"
-            placeholder={s.hasKey ? "已保存（留空则不改）" : "sk-ant-…"}
-            value={keyInput}
-            onChange={(e) => setKeyInput(e.target.value)}
-          />
-        </label>
-        <div className="warn-note">key 保存在本机应用数据中，不使用系统钥匙串。</div>
+      <section className="model-config">
+        <div className="model-config__head">
+          <div>
+            <h3>模型配置</h3>
+            <p>管理已连接 Provider 的模型，并设置全局默认模型。</p>
+          </div>
+          <button className="btn primary" type="button" onClick={openAddForm}>添加模型</button>
+        </div>
+
+        <div className="model-config__block">
+          <div className="model-config__label">已添加模型</div>
+          <div className="connection-list">
+            {configuredProviders.map((provider) => {
+              const configuredModels = provider.models;
+              return (
+                <div key={provider.id} className="connection-row">
+                  <div className="connection-main">
+                    <div className="connection-title-row">
+                      <div>
+                        <div className="connection-name">{provider.name}</div>
+                        <div className="connection-meta">
+                          {provider.id} · {provider.source} · {provider.baseUrl || "默认 Base URL"}
+                        </div>
+                      </div>
+                      <span className={`status-pill ${provider.availability}`}>{provider.availability === "available" ? "已连接" : provider.availability}</span>
+                    </div>
+                    <div className="model-chip-row">
+                      {configuredModels.map((model) => (
+                        <span key={model.id} className={`model-chip ${model.available ? "" : "empty"}`}>
+                          <span>{model.name}</span>
+                          <button type="button" onClick={() => editProviderModel(provider, model)}>编辑</button>
+                          <button type="button" onClick={() => deleteProviderModel(provider.id, model.id)}>删除</button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {configuredProviders.length === 0 && (
+              <div className="empty-state">
+                <div className="empty-state__title">还没有已添加的模型</div>
+                <div className="empty-state__body">点击“添加模型”从 Provider 注册表选择一个 Provider，然后填写模型和凭证。</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="model-config__block">
+          <label className="field">
+            <span>默认模型 <em className="src">{availableModels.length} 个已配置模型</em></span>
+            <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} disabled={availableModels.length === 0}>
+              <option value="">{availableModels.length === 0 ? "暂无可用模型" : "自动选择第一个可用模型"}</option>
+              {configuredProviders.map((provider) => {
+                const configuredModels = provider.models.filter((item) => item.available);
+                if (configuredModels.length === 0) return null;
+                return (
+                  <optgroup key={provider.id} label={provider.name}>
+                    {configuredModels.map((item) => (
+                      <option key={`${provider.id}/${item.id}`} value={`${provider.id}/${item.id}`}>
+                        {item.name} · {item.capabilities.contextWindow.toLocaleString()} ctx · {item.capabilities.maxOutputTokens.toLocaleString()} out
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+            </select>
+          </label>
+          {availableModels.length === 0 && <div className="ok-note">配置成功的模型才会出现在默认模型列表里。</div>}
+        </div>
+        {s.legacyKeyPresent && <div className="warn-note">检测到旧版应用数据库中仍有 API key。Loom 不再使用或迁移它，请把凭证写入 models.json。</div>}
+        {hasPlaintextSecret && <div className="warn-note">models.json 包含明文凭证；不要提交或同步到不可信位置。</div>}
       </section>
+
+      {addOpen && (
+        <div className="settings-modal" role="dialog" aria-modal="true" aria-label="添加模型配置">
+          <div className="settings-modal__panel">
+            <div className="settings-modal__head">
+              <h3>{editingModel ? "编辑模型" : "添加模型"}</h3>
+              <button className="btn" type="button" onClick={() => setAddOpen(false)}>取消</button>
+            </div>
+            {providerOptions.length === 0 && (
+              <div className="empty-state compact">
+                <div className="empty-state__title">没有可配置的 Provider。</div>
+                <div className="empty-state__body">Provider 注册表为空，暂时无法添加模型。</div>
+              </div>
+            )}
+            <div className="settings-grid">
+              <label className="field">
+                <span>Provider</span>
+                <select value={providerId} onChange={(e) => selectProvider(e.target.value)} disabled={providerOptions.length === 0 || Boolean(editingModel)}>
+                  {providerOptions.map((provider) => (
+                    <option key={provider.id} value={provider.id}>
+                      {provider.name} · {provider.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Base URL</span>
+                <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" />
+              </label>
+              {useRegistryModel ? (
+                <>
+                  {editingModel ? (
+                    <div className="field model-static">
+                      <span>Model</span>
+                      <div className="model-static__value">
+                        <strong>{selectedModelOption?.name ?? modelId}</strong>
+                        <em>{selectedModelOption?.id ?? modelId}</em>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="field settings-grid__wide">
+                      <span>
+                        Model <em className="src">{selectedModelIds.length}/{providerModelOptions.length} 已选</em>
+                      </span>
+                      <div className="model-picker" role="group" aria-label="Model">
+                        {providerModelOptions.length > 1 && (
+                          <div className="model-picker__toolbar">
+                            <button type="button" onClick={() => setRegistryModelSelection(providerModelOptions.map((model) => model.id))}>全选</button>
+                            <button type="button" onClick={() => setRegistryModelSelection([])}>清空</button>
+                          </div>
+                        )}
+                        <div className="model-picker__list">
+                          {providerModelOptions.map((model) => {
+                            const checked = selectedModelIds.includes(model.id);
+                            return (
+                              <label key={model.id} className={`model-option ${checked ? "selected" : ""}`}>
+                                <input type="checkbox" checked={checked} onChange={() => toggleRegistryModel(model.id)} />
+                                <span className="model-option__main">
+                                  <strong>{model.name}</strong>
+                                  <em>{model.id}</em>
+                                </span>
+                                <span className="model-option__tags">
+                                  <span>{model.api}</span>
+                                  <span>{model.capabilities.contextWindow.toLocaleString()} ctx</span>
+                                  <span>{model.capabilities.maxOutputTokens.toLocaleString()} out</span>
+                                  {model.capabilities.reasoning && <span>reasoning</span>}
+                                  {model.capabilities.images && <span>image</span>}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div className="model-summary settings-grid__wide">
+                    {selectedRegistryModels.length === 1 ? (
+                      <>
+                        <span>{selectedRegistryModels[0].api}</span>
+                        <span>{selectedRegistryModels[0].capabilities.contextWindow.toLocaleString()} ctx</span>
+                        <span>{selectedRegistryModels[0].capabilities.maxOutputTokens.toLocaleString()} out</span>
+                        {selectedRegistryModels[0].capabilities.reasoning && <span>reasoning</span>}
+                        {selectedRegistryModels[0].capabilities.images && <span>image</span>}
+                      </>
+                    ) : selectedRegistryModels.length > 1 ? (
+                      <span>将添加 {selectedRegistryModels.length} 个模型，共用同一个 Base URL 和 API key。</span>
+                    ) : (
+                      <span>至少选择一个模型。</span>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <label className="field">
+                    <span>API type</span>
+                    <select value={api} onChange={(e) => setApi(e.target.value)}>
+                      <option value="openai-completions">openai-completions</option>
+                      <option value="openai-responses">openai-responses</option>
+                      <option value="anthropic-messages">anthropic-messages</option>
+                      <option value="google-generative-ai">google-generative-ai</option>
+                      <option value="mistral-conversations">mistral-conversations</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Model</span>
+                    <input value={modelId} onChange={(e) => setModelId(e.target.value)} placeholder="gpt-5.2 / claude-sonnet-4-5 / llama" disabled={Boolean(editingModel)} />
+                  </label>
+                  <label className="field">
+                    <span>Model name</span>
+                    <input value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="可选显示名" />
+                  </label>
+                  <label className="field">
+                    <span>Context window</span>
+                    <input inputMode="numeric" value={contextWindow} onChange={(e) => setContextWindow(e.target.value)} />
+                  </label>
+                  <label className="field">
+                    <span>Max output</span>
+                    <input inputMode="numeric" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} />
+                  </label>
+                </>
+              )}
+              <label className="field settings-grid__wide">
+                <span>API key</span>
+                <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="$OPENAI_API_KEY 或字面 key" />
+              </label>
+            </div>
+            {!useRegistryModel && (
+              <div className="settings-checks">
+                <label className="check-field">
+                  <input type="checkbox" checked={reasoning} onChange={(e) => setReasoning(e.target.checked)} />
+                  <span>支持推理</span>
+                </label>
+                <label className="check-field">
+                  <input type="checkbox" checked={images} onChange={(e) => setImages(e.target.checked)} />
+                  <span>支持图片输入</span>
+                </label>
+              </div>
+            )}
+            <div className="settings-foot">
+              <button className="btn primary" type="button" onClick={addProviderModel} disabled={!canSaveModel}>保存模型</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section>
         <h3>外观</h3>

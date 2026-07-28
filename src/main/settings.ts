@@ -23,13 +23,8 @@ export function keyStorageKind(): "local" {
   return "local";
 }
 
-export function saveApiKey(store: Store, plain: string): { encrypted: boolean } {
-  if (!plain) {
-    store.setApiKeyEnc(undefined);
-    return { encrypted: false };
-  }
-  store.setApiKeyEnc(`${LOCAL_KEY_PREFIX}${Buffer.from(plain, "utf-8").toString("base64")}`);
-  return { encrypted: false };
+export function saveApiKey(_store: Store, _plain: string): { encrypted: boolean; persisted: boolean; reason: "file-config-required" } {
+  return { encrypted: false, persisted: false, reason: "file-config-required" };
 }
 
 export function readApiKey(store: Store): string {
@@ -51,16 +46,15 @@ export function resolveModelConfig(store: Store): ResolvedModel {
   const a = store.getSettings().access;
   const model = a.model || process.env.MODEL_ID || DEFAULT_MODEL;
   const baseUrl = a.baseUrl || process.env.ANTHROPIC_BASE_URL || "";
-  const apiKey = readApiKey(store) || process.env.ANTHROPIC_API_KEY || "";
+  const apiKey = process.env.ANTHROPIC_API_KEY || "";
   return { provider: a.provider || "anthropic", baseUrl, model, apiKey };
 }
 
 export function accessSources(store: Store): AccessSource {
   const a = store.getSettings().access;
-  const hasStoredKey = Boolean(store.getApiKeyEnc());
   return {
     baseUrl: a.baseUrl ? "settings" : process.env.ANTHROPIC_BASE_URL ? "env" : "default",
     model: a.model ? "settings" : process.env.MODEL_ID ? "env" : "default",
-    key: hasStoredKey ? "settings" : process.env.ANTHROPIC_API_KEY ? "env" : "none",
+    key: process.env.ANTHROPIC_API_KEY ? "env" : "none",
   };
 }

@@ -1,4 +1,5 @@
 import "dotenv/config"; // 先加载 .env（ANTHROPIC_API_KEY / MODEL_ID / BASE_URL）
+import { existsSync, writeFileSync } from "fs";
 import { join } from "path";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from "electron";
 import { dbPath, SqliteStore } from "./store/sqliteStore";
@@ -13,6 +14,10 @@ import {
   resolveModelConfig,
   saveApiKey,
 } from "./settings";
+import { addProviderModelConfig, deleteProviderModelConfig, ensureLoomAgentDefaults, writeGlobalDefaultModel } from "./modelConfig/files";
+import { modelsJsonPath } from "./modelConfig/paths";
+import { ModelRegistry } from "./modelConfig/registry";
+import { loadScopedModelSettings } from "./modelConfig/scopes";
 import { platformWindowOptions } from "./windowOptions";
 
 // ---------------------------------------------------------------------------
@@ -46,14 +51,19 @@ function invalidateAgent() {
 
 function registerIpc() {
   // ---- settings ----
-  ipcMain.handle("settings:get", () => {
+  ipcMain.handle("settings:get", async () => {
     const s = store.getSettings();
+    const registry = await ModelRegistry.load();
+    const scoped = loadScopedModelSettings({ homeDir: app.getPath("home") });
     return {
       access: s.access,
       appearance: s.appearance,
       monitor: s.monitor,
+      modelRegistry: registry.toRendererDTO(),
+      globalDefaultModel: scoped.globalSettings.defaults?.model,
       sources: accessSources(store),
-      hasKey: Boolean(store.getApiKeyEnc()) || Boolean(process.env.ANTHROPIC_API_KEY),
+      hasKey: Boolean(process.env.ANTHROPIC_API_KEY),
+      legacyKeyPresent: Boolean(store.getApiKeyEnc()),
       keyStorage: keyStorageKind(),
       resolvedModel: resolveModelConfig(store).model,
       resolvedTheme: resolvedTheme(),
@@ -69,6 +79,28 @@ function registerIpc() {
     const r = saveApiKey(store, plain ?? "");
     invalidateAgent();
     return { ok: true, encrypted: r.encrypted };
+  });
+  ipcMain.handle("settings:openModelsJson", async () => {
+    const result = ensureLoomAgentDefaults({ homeDir: app.getPath("home"), legacyApiKeyPresent: Boolean(store.getApiKeyEnc()) });
+    const filePath = modelsJsonPath(app.getPath("home"));
+    if (!existsSync(filePath)) writeFileSync(filePath, '{\n  "providers": {}\n}\n', "utf-8");
+    const error = await shell.openPath(filePath);
+    return { ok: !error, path: filePath, error: error || undefined, diagnostics: result.diagnostics };
+  });
+  ipcMain.handle("settings:setGlobalModel", (_e, model: { providerId: string; modelId: string }) => {
+    writeGlobalDefaultModel(app.getPath("home"), model);
+    invalidateAgent();
+    return { ok: true };
+  });
+  ipcMain.handle("settings:addProviderModel", (_e, input) => {
+    addProviderModelConfig(app.getPath("home"), input);
+    invalidateAgent();
+    return { ok: true };
+  });
+  ipcMain.handle("settings:deleteProviderModel", (_e, model: { providerId: string; modelId: string }) => {
+    deleteProviderModelConfig(app.getPath("home"), model);
+    invalidateAgent();
+    return { ok: true };
   });
 
   // ---- projects / sessions ----
@@ -196,6 +228,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   store = new SqliteStore(dbPath(app.getPath("userData")));
+  ensureLoomAgentDefaults({ homeDir: app.getPath("home"), legacyApiKeyPresent: Boolean(store.getApiKeyEnc()) });
   applyThemeSource();
   canvas = registerCanvas({ getWin: () => win, store });
   monitor = registerMonitor({ getWin: () => win, store });

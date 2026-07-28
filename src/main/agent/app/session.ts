@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { NodeLayout, NodeRecord, PersistedMessage } from "../../store/store";
+import type { StoredModelSelection } from "../../modelConfig/modelRef";
 import { saveNodeLayout, saveNodeLayouts } from "../../store/layoutPersistence";
 import { ancestorChain, descendants, type Seed } from "../core/graph";
 import { buildContextPlan, isLlmMessage, roleOf, textOf } from "../core/context";
@@ -41,7 +42,7 @@ export interface CanvasNode {
   title: string;
   seed?: Seed;
   systemPrompt?: string;
-  model?: string;
+  model?: StoredModelSelection;
   color?: string;
   layout?: NodeLayout;
   mountAncestors: boolean;
@@ -519,11 +520,11 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return engine.listModels();
   }
 
-  function setModel(arg: { nodeId: string; model: string }) {
+  function setModel(arg: { nodeId: string; model: StoredModelSelection }) {
     const node = loadNode(arg.nodeId);
-    const model = arg.model.trim();
+    const model = typeof arg.model === "string" ? arg.model.trim() : arg.model;
     store.updateNode(arg.nodeId, { model });
-    if (node) node.model = model || undefined;
+    if (node) node.model = typeof model === "string" ? model || undefined : model;
     queries.invalidate(arg.nodeId);
     approvals.cancelByNode(arg.nodeId, "model changed");
     policies.clearNodeSession(arg.nodeId);

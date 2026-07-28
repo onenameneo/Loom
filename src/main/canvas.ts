@@ -7,6 +7,7 @@ import { createIds, systemClock } from "./agent/adapters/runtime";
 import { createCanvasRuntime } from "./agent/app/session";
 import type { Seed } from "./agent/core/graph";
 import type { ApprovalDecision } from "./agent/ports";
+import type { StoredModelSelection } from "./modelConfig/modelRef";
 
 // ---------------------------------------------------------------------------
 // 画布引擎接线（主进程）：组装洋葱四圈 + 把 node:* IPC 绑定到 ② runtime。
@@ -32,7 +33,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     events,
     ids,
     clock,
-    getApiKey: () => resolveModelConfig(store).apiKey,
+    getApiKey: () => "registry-managed",
     // 注入 pi 引擎工厂：session 只认端口，pi 收敛在适配器。
     createEngine: (hooks) =>
       createPiEngine({
@@ -41,6 +42,11 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
         buildContext: hooks.buildContext,
         getNodeInit: hooks.getNodeInit,
         getTools: hooks.getTools,
+        getProjectRoot: (nodeId) => {
+          const node = store.getNode(nodeId);
+          if (!node) return undefined;
+          return store.listProjects().find((project) => project.id === node.projectId)?.sourceRoots[0];
+        },
         dispatcher: hooks.dispatcher,
         getCurrentTurnId: hooks.getCurrentTurnId,
       }),
@@ -69,7 +75,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   ipcMain.handle("node:setMount", (_e, arg: { nodeId: string; on: boolean }) => runtime.setMount(arg));
   ipcMain.handle("node:budget", (_e, nodeId: string) => runtime.budget(nodeId));
   ipcMain.handle("node:models", () => runtime.models());
-  ipcMain.handle("node:setModel", (_e, arg: { nodeId: string; model: string }) => runtime.setModel(arg));
+  ipcMain.handle("node:setModel", (_e, arg: { nodeId: string; model: StoredModelSelection }) => runtime.setModel(arg));
   ipcMain.handle("node:reset", (_e, nodeId: string) => runtime.reset(nodeId));
   ipcMain.handle("approval:decide", (_e, decision: ApprovalDecision) => runtime.decideApproval(decision));
 

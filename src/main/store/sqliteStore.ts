@@ -15,6 +15,7 @@ import {
   type Store,
   type Project,
 } from "./store";
+import { parseStoredModelRef, type StoredModelSelection } from "../modelConfig/modelRef";
 
 type ProjectRow = {
   id: string;
@@ -347,7 +348,7 @@ export class SqliteStore implements Store {
 
   updateNode(
     id: string,
-    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: string; color: string }>,
+    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: StoredModelSelection; color: string }>,
   ): void {
     const current = this.getNode(id);
     if (!current) return;
@@ -361,8 +362,9 @@ export class SqliteStore implements Store {
       else delete meta.systemPrompt;
     }
     if (Object.prototype.hasOwnProperty.call(patch, "model")) {
-      const model = patch.model?.trim() ?? "";
-      if (model) meta.model = model;
+      const parsed = parseStoredModelRef(patch.model);
+      if (parsed.kind === "ref") meta.model = parsed.ref;
+      else if (parsed.kind === "legacy") meta.model = parsed.legacyModel;
       else delete meta.model;
     }
     if (Object.prototype.hasOwnProperty.call(patch, "color")) {
@@ -477,7 +479,8 @@ export class SqliteStore implements Store {
   private toNode(row: NodeRow): NodeRecord {
     const meta = decode<Record<string, unknown>>(row.meta, {});
     const systemPrompt = typeof meta.systemPrompt === "string" ? meta.systemPrompt : undefined;
-    const model = typeof meta.model === "string" ? meta.model : undefined;
+    const parsedModel = parseStoredModelRef(meta.model);
+    const model = parsedModel.kind === "ref" ? parsedModel.ref : parsedModel.kind === "legacy" ? parsedModel.legacyModel : undefined;
     const color = typeof meta.color === "string" ? meta.color : undefined;
     return {
       id: row.id,

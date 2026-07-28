@@ -13,7 +13,7 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { CanvasNodeDto } from "../env";
+import type { CanvasNodeDto, ModelSelection } from "../env";
 import { useTitlebarActions } from "../titlebar/Titlebar";
 import { CanvasTitlebarActions, CanvasZoomControls } from "./CanvasControls";
 import { useCanvasLayoutPersistence, useCanvasLayoutStore } from "./CanvasLayoutContext";
@@ -77,7 +77,7 @@ function layout(dtos: CanvasNodeDto[]): Record<string, { x: number; y: number }>
 function toNode(
   dto: CanvasNodeDto,
   pos: { x: number; y: number },
-  fallbackModel?: string,
+  fallbackModel?: ModelSelection,
   fresh = false,
   actions?: Record<string, unknown>,
   dirtyLayout?: { x: number; y: number; width: number; height: number },
@@ -136,7 +136,7 @@ export default function Canvas({
   onTreeChange,
 }: {
   sessionId: string;
-  model?: string;
+  model?: ModelSelection;
   focusNodeId?: string | null;
   onFocused?: () => void;
   onReturnChat?: (nodeId: string) => void;
