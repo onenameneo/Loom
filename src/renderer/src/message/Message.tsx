@@ -1,10 +1,10 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Copy, Pencil, RefreshCcw } from "lucide-react";
+import { BookOpen, Check, Copy, Pencil, RefreshCcw } from "lucide-react";
 import { CodeBlock } from "./CodeBlock";
 
-export type MsgRole = "user" | "assistant" | "error" | "tool";
+export type MsgRole = "user" | "assistant" | "error" | "tool" | "skill";
 export type Density = "compact" | "comfortable";
 
 // react-markdown 组件覆盖：围栏代码块 → CodeBlock（高亮/复制），行内 code → token 化，
@@ -115,6 +115,8 @@ export function Message({
             <button className="primary" onClick={submitEdit}>重发</button>
           </div>
         </div>
+      ) : role === "skill" ? (
+        <span className="m__plain m__skill"><BookOpen size={13} /> {text}</span>
       ) : role === "assistant" ? (
         <div className="m__md">
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>

@@ -91,10 +91,19 @@ export function buildContextPlan(
   ownMessages: AgentMessage[],
   ancestors: CanvasNodeModel[],
   now = 0,
+  tailContext: Message[] = [],
 ): Message[] {
   const out: Message[] = [];
   if (node.mountAncestors) out.push(...ancestorMessages(ancestors, now));
   if (node.seed) out.push(seedMessage(node.seed, now));
-  out.push(...ownMessages.filter(isLlmMessage));
+  const ownLlmMessages = ownMessages.filter(isLlmMessage);
+  if (tailContext.length > 0 && ownLlmMessages.length > 0 && roleOf(ownLlmMessages[ownLlmMessages.length - 1] as AgentMessage) === "user") {
+    out.push(...ownLlmMessages.slice(0, -1));
+    out.push(...tailContext);
+    out.push(ownLlmMessages[ownLlmMessages.length - 1]!);
+  } else {
+    out.push(...ownLlmMessages);
+    if (ownLlmMessages.length === 0) out.push(...tailContext);
+  }
   return out;
 }

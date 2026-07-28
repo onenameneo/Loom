@@ -47,6 +47,7 @@ export default function App() {
         access: { provider: "anthropic", baseUrl: "", model: "" },
         appearance: { theme: "light", density: "comfortable" },
         monitor: { notify: true },
+        skills: { globalSources: [] },
         sources: { baseUrl: "default", model: "default", key: "none" },
         hasKey: false,
         keyStorage: "local",

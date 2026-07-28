@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Handle, NodeResizeControl, Position, type ResizeParams } from "@xyflow/react";
 import { Check, ChevronDown, MessageSquareText, Pencil, Trash2 } from "lucide-react";
-import type { ApprovalRequestPayload, ModelSelection, NodeBudget, NodeMsg, TurnCanvasEventPayload } from "../env";
+import type { ApprovalRequestPayload, ModelSelection, NodeBudget, NodeMsg, SkillEffectiveDto, TurnCanvasEventPayload } from "../env";
 import { Composer, type ComposerImage } from "../composer/Composer";
 import { IconArrowUpRight, IconChevronRight, IconSplit } from "../icons";
 import { Message } from "../message/Message";
@@ -11,8 +11,8 @@ import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimeline
 import { useComposerHeightVar } from "./useComposerHeightVar";
 import { ApprovalPrompt, type ApprovalState } from "./ApprovalPrompt";
 
-type Role = "user" | "assistant" | "error" | "tool";
-type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; toolCall?: ToolCallView };
+type Role = "user" | "assistant" | "error" | "tool" | "skill";
+type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
 type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number };
 type RectLike = Pick<DOMRect, "left" | "top" | "bottom" | "width" | "height">;
 
@@ -85,7 +85,7 @@ export function ChatThreadNode(props: any) {
   const idRef = useRef(1);
 
   const toMsgs = useCallback((items: NodeMsg[] = []) => (
-    items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, toolCall: m.toolCall }))
+    items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, toolCall: m.toolCall, skillEvent: m.skillEvent }))
   ), []);
 
   const [msgs, setMsgs] = useState<Msg[]>(() => toMsgs(data.messages ?? []));
@@ -103,6 +103,8 @@ export function ChatThreadNode(props: any) {
   const [personaOpen, setPersonaOpen] = useState(false);
   const [persona, setPersona] = useState(String(data.systemPrompt ?? ""));
   const [nodeModel, setNodeModel] = useState<string | undefined>(formatModelSelection(data.model));
+  const [draftSkills, setDraftSkills] = useState<SkillEffectiveDto[]>([]);
+  const [skillCount, setSkillCount] = useState<number>(Array.isArray(data.skills) ? data.skills.length : 0);
   const [colorOpen, setColorOpen] = useState(false);
   const colorRef = useRef<HTMLDivElement>(null);
   const resizeTokenRef = useRef<number | null>(null);
@@ -117,7 +119,8 @@ export function ChatThreadNode(props: any) {
     setTitle(String(data.title ?? ""));
     setPersona(String(data.systemPrompt ?? ""));
     setNodeModel(formatModelSelection(data.model));
-  }, [data.messages, data.title, data.systemPrompt, data.model, toMsgs]);
+    setSkillCount(Array.isArray(data.skills) ? data.skills.length : 0);
+  }, [data.messages, data.title, data.systemPrompt, data.model, data.skills, toMsgs]);
 
   useEffect(() => {
     if (!colorOpen) return;
@@ -142,6 +145,7 @@ export function ChatThreadNode(props: any) {
       setTitle(next.title);
       setPersona(next.systemPrompt ?? "");
       setNodeModel(formatModelSelection(next.model));
+      setSkillCount(next.skills?.length ?? 0);
     }
   }, [data.sessionId, id, toMsgs]);
 
@@ -287,10 +291,11 @@ export function ChatThreadNode(props: any) {
     if (r?.budget) setBudget(r.budget);
   }
 
-  function submit(text: string, images: ComposerImage[] = []) {
+  function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = []) {
     if (busy || (!text && images.length === 0)) return;
     setMsgs((m) => [...m, { id: idRef.current++, role: "user", text, images }]);
     setInput("");
+    setDraftSkills([]);
     localStorage.removeItem(`loom:draft:${id}`);
     if (!window.api) {
       setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: "浏览器预览：在 Electron 中运行（pnpm dev）以对话。" }]);
@@ -298,7 +303,7 @@ export function ChatThreadNode(props: any) {
     }
     setBusy(true);
     setThinking(true);
-    window.api.canvas.send(id, text, images);
+    window.api.canvas.send(id, text, images, skillIds);
   }
 
   async function stop() {
@@ -371,6 +376,28 @@ export function ChatThreadNode(props: any) {
       setNodeModel(next);
       data.onTreeChange?.();
     }
+  }
+
+  async function enableSkill(skillId: string) {
+    if (!window.api) return;
+    const result = await window.api.canvas.skills(id);
+    const skill = result.catalog.activeSkills.find((item) => item.id === skillId);
+    if (!skill) return;
+    setDraftSkills((current) => current.some((item) => item.id === skill.id)
+      ? current
+      : [...current, {
+          id: skill.id,
+          name: skill.name,
+          description: skill.description,
+          sourceScope: skill.scope,
+          sourcePath: skill.rootPath,
+          hash: skill.hash,
+          diagnostics: skill.diagnostics,
+        }]);
+  }
+
+  function disableDraftSkill(skillId: string) {
+    setDraftSkills((current) => current.filter((skill) => skill.id !== skillId));
   }
 
   function metaFor(m: Msg): string | undefined {
@@ -521,6 +548,7 @@ export function ChatThreadNode(props: any) {
               {budget?.estimated ? "~" : ""}
               {tokenLabel} tok
             </span>
+            {skillCount > 0 && <span className="tokens" title="当前分支生效 Skills">skills {skillCount}</span>}
           </div>
         </div>
         <button
@@ -656,6 +684,7 @@ export function ChatThreadNode(props: any) {
               onDecision={decideApproval}
             />
           ) : undefined}
+          activeSkills={draftSkills}
           mount={mount}
           canRegenerate={msgs.some((m) => m.role === "user") && !busy}
           onSubmit={submit}
@@ -665,6 +694,8 @@ export function ChatThreadNode(props: any) {
           onClearNode={clearNode}
           onRegenerate={regenerate}
           onSetModel={setModel}
+          onEnableSkill={enableSkill}
+          onDisableSkill={disableDraftSkill}
         />
       </div>
 

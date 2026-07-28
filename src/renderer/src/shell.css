@@ -1523,6 +1523,16 @@ button.activity-session-card {
   gap: var(--s2);
   margin-bottom: var(--s3);
 }
+.settings-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+}
+.settings-inline input {
+  flex: 1;
+  min-width: 0;
+}
 .connection-row {
   display: flex;
   align-items: center;

@@ -19,6 +19,7 @@ import { modelsJsonPath } from "./modelConfig/paths";
 import { ModelRegistry } from "./modelConfig/registry";
 import { loadScopedModelSettings } from "./modelConfig/scopes";
 import { platformWindowOptions } from "./windowOptions";
+import { addGlobalSkillSource, buildSkillCatalog, openSkillSource, removeGlobalSkillSource } from "./agent/skills";
 
 // ---------------------------------------------------------------------------
 // 主进程：持久化(store) + 设置 + 会话 + 画布引擎(pi 多节点)。
@@ -59,6 +60,7 @@ function registerIpc() {
       access: s.access,
       appearance: s.appearance,
       monitor: s.monitor,
+      skills: s.skills,
       modelRegistry: registry.toRendererDTO(),
       globalDefaultModel: scoped.globalSettings.defaults?.model,
       sources: accessSources(store),
@@ -102,6 +104,25 @@ function registerIpc() {
     invalidateAgent();
     return { ok: true };
   });
+  ipcMain.handle("settings:skills", (_e, projectId?: string) => {
+    return buildSkillCatalog({
+      settings: store.getSettings(),
+      projects: store.listProjects(),
+      projectId,
+      homeDir: app.getPath("home"),
+    });
+  });
+  ipcMain.handle("settings:addSkillSource", (_e, path: string) => {
+    const result = addGlobalSkillSource(store, path);
+    invalidateAgent();
+    return result;
+  });
+  ipcMain.handle("settings:removeSkillSource", (_e, path: string) => {
+    const result = removeGlobalSkillSource(store, path);
+    invalidateAgent();
+    return result;
+  });
+  ipcMain.handle("settings:openSkillSource", async (_e, path: string) => openSkillSource(path));
 
   // ---- projects / sessions ----
   const createProject = (input?: string | { name?: string; sourceRoots?: string[] }) => {

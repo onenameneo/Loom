@@ -64,8 +64,8 @@ const api = {
     open: (sessionId: string): Promise<any[]> => ipcRenderer.invoke("node:open", sessionId),
     create: (arg: { sessionId: string; parentId?: string; seed?: any; title?: string }): Promise<any> =>
       ipcRenderer.invoke("node:create", arg),
-    send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[]): Promise<{ ok: boolean }> =>
-      ipcRenderer.invoke("node:send", { nodeId, text, images }),
+    send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[]): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke("node:send", { nodeId, text, images, skillIds }),
     abort: (nodeId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("node:abort", nodeId),
     regenerate: (nodeId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("node:regenerate", nodeId),
     editResend: (arg: { nodeId: string; seq: number; text: string }): Promise<{ ok: boolean }> =>
@@ -88,6 +88,11 @@ const api = {
     budget: (nodeId: string): Promise<{ withoutAncestors: number; withAncestors: number; estimated: boolean }> =>
       ipcRenderer.invoke("node:budget", nodeId),
     reset: (nodeId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("node:reset", nodeId),
+    skills: (nodeId: string): Promise<any> => ipcRenderer.invoke("node:skills", nodeId),
+    enableSkill: (nodeId: string, skillId: string): Promise<any> =>
+      ipcRenderer.invoke("node:enableSkill", { nodeId, skillId }),
+    disableSkill: (nodeId: string, skillId: string): Promise<any> =>
+      ipcRenderer.invoke("node:disableSkill", { nodeId, skillId }),
     decideApproval: (decision: ApprovalDecision): Promise<{ ok: boolean; reason?: string }> =>
       ipcRenderer.invoke("approval:decide", decision),
     onEvent: (cb: (e: CanvasEvent) => void) => {
@@ -106,6 +111,10 @@ const api = {
       ipcRenderer.invoke("settings:deleteProviderModel", model),
     openModelsJson: (): Promise<{ ok: boolean; path: string; error?: string }> =>
       ipcRenderer.invoke("settings:openModelsJson"),
+    skills: (projectId?: string): Promise<any> => ipcRenderer.invoke("settings:skills", projectId),
+    addSkillSource: (path: string): Promise<any> => ipcRenderer.invoke("settings:addSkillSource", path),
+    removeSkillSource: (path: string): Promise<any> => ipcRenderer.invoke("settings:removeSkillSource", path),
+    openSkillSource: (path: string): Promise<any> => ipcRenderer.invoke("settings:openSkillSource", path),
   },
   monitor: {
     list: (): Promise<AgentProc[]> => ipcRenderer.invoke("monitor:list"),

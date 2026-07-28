@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useState } from "react";
+import type { SkillCatalogItemDto } from "../env";
 import type { CmdCtx, Command } from "./commands";
 import { visibleCommands } from "./commands";
 
@@ -36,16 +37,33 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
     return !needle || cmd.id.startsWith(needle) || cmd.label.toLowerCase().includes(needle);
   });
   const modelCommand = actionCommands.find((cmd) => cmd.id === "model");
+  const skillCommand = actionCommands.find((cmd) => cmd.id === "skill");
   const modelMode = Boolean(modelCommand && parsed.name === "model" && parsed.hasSpace);
+  const skillMode = Boolean(skillCommand && parsed.name === "skill" && parsed.hasSpace);
+  const [skills, setSkills] = useState<SkillCatalogItemDto[]>([]);
   const models = modelMode ? modelOptions : [];
   const modelNeedle = parsed.arg.trim().toLowerCase();
   const modelItems = models.filter((m) => !modelNeedle || m.id.toLowerCase().includes(modelNeedle) || m.name.toLowerCase().includes(modelNeedle));
-  const count = modelMode ? modelItems.length : filtered.length;
+  const skillNeedle = parsed.arg.trim().toLowerCase();
+  const skillItems = skillMode ? skills.filter((s) => !skillNeedle || s.id.includes(skillNeedle) || s.name.toLowerCase().includes(skillNeedle) || s.description.toLowerCase().includes(skillNeedle)) : [];
+  const count = modelMode ? modelItems.length : skillMode ? skillItems.length : filtered.length;
   const ModelIcon = modelCommand?.icon;
+  const SkillIcon = skillCommand?.icon;
 
   useEffect(() => {
     setActive(0);
   }, [value]);
+
+  useEffect(() => {
+    if (!skillMode || !window.api) return;
+    let cancelled = false;
+    window.api.canvas.skills(ctx.nodeId).then((result) => {
+      if (!cancelled) setSkills(result.catalog.activeSkills);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ctx.nodeId, skillMode]);
 
   function executeCommand(cmd: Command) {
     if (cmd.arg === "text" && !parsed.hasSpace) {
@@ -65,6 +83,14 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
     onClose?.();
   }
 
+  function executeSkill(index: number) {
+    const skill = skillItems[index]?.id;
+    if (!skill || !skillCommand) return;
+    skillCommand.run(ctx, skill);
+    setValue("");
+    onClose?.();
+  }
+
   function onKeyDown(event: { key: string; preventDefault: () => void }) {
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -75,6 +101,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
     } else if (event.key === "Enter") {
       event.preventDefault();
       if (modelMode) executeModel(active);
+      else if (skillMode) executeSkill(active);
       else if (filtered[active]) executeCommand(filtered[active]);
     } else if (event.key === "Escape") {
       event.preventDefault();
@@ -114,6 +141,27 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
             </button>
           ))}
           {modelItems.length === 0 && <div className="cmd-row muted">没有匹配的已添加模型</div>}
+        </>
+      ) : skillMode ? (
+        <>
+          {skillItems.map((skill, index) => (
+            <button
+              key={`${skill.sourceId}:${skill.id}`}
+              id={`${listId}-${index}`}
+              type="button"
+              role="option"
+              aria-selected={index === active}
+              className={`cmd-row ${index === active ? "is-active" : ""}`}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setActive(index)}
+              onClick={() => executeSkill(index)}
+            >
+              {SkillIcon && <SkillIcon size={15} />}
+              <span>{skill.name}</span>
+              <small>{skill.scope} · {skill.hash}</small>
+            </button>
+          ))}
+          {skillItems.length === 0 && <div className="cmd-row muted">没有匹配的 Skill</div>}
         </>
       ) : filtered.length ? (
         filtered.map((cmd, index) => {

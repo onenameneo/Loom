@@ -43,7 +43,7 @@ export class JsonStore implements Store {
         const raw = JSON.parse(readFileSync(this.file, "utf-8"));
         return {
           version: raw.version ?? SCHEMA_VERSION,
-          settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}) },
+          settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}), skills: { ...DEFAULT_SETTINGS.skills, ...(raw.settings?.skills ?? {}) } },
           projects: (Array.isArray(raw.projects) ? raw.projects : [])
             .map((project: any) => this.normalizeProject(project))
             .filter((project: Project | undefined): project is Project => Boolean(project)),
@@ -79,6 +79,7 @@ export class JsonStore implements Store {
       appearance: { ...this.data.settings.appearance, ...(patch.appearance ?? {}) },
       monitor: { ...this.data.settings.monitor, ...(patch.monitor ?? {}) },
       activity: { ...this.data.settings.activity, ...(patch.activity ?? {}) },
+      skills: { ...this.data.settings.skills, ...(patch.skills ?? {}) },
     };
     this.flush();
     return this.data.settings;

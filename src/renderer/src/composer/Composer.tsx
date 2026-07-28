@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Square, X } from "lucide-react";
+import { BookOpen, Square, X } from "lucide-react";
+import type { SkillEffectiveDto } from "../env";
 import { IconSend } from "../icons";
 import type { CmdCtx } from "./commands";
 import { CommandMenu } from "./CommandMenu";
@@ -16,6 +17,7 @@ export function Composer({
   mount,
   canRegenerate,
   budgetLine,
+  activeSkills,
   topAccessory,
   onSubmit,
   onStop,
@@ -24,6 +26,8 @@ export function Composer({
   onClearNode,
   onRegenerate,
   onSetModel,
+  onEnableSkill,
+  onDisableSkill,
 }: {
   nodeId: string;
   value: string;
@@ -33,14 +37,17 @@ export function Composer({
   mount: boolean;
   canRegenerate: boolean;
   budgetLine?: string;
+  activeSkills?: SkillEffectiveDto[];
   topAccessory?: ReactNode;
-  onSubmit: (text: string, images: ComposerImage[]) => void;
+  onSubmit: (text: string, images: ComposerImage[], skillIds: string[]) => void;
   onStop: () => void;
   onToggleMount: (on: boolean) => void;
   onOpenPersona: () => void;
   onClearNode: () => void;
   onRegenerate: () => void;
   onSetModel: (model: string) => void;
+  onEnableSkill?: (skillId: string) => void;
+  onDisableSkill?: (skillId: string) => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -83,9 +90,10 @@ export function Composer({
       clearNode: onClearNode,
       regenerate: onRegenerate,
       setModel: onSetModel,
+      enableSkill: onEnableSkill,
       getState: () => ({ mount, canRegenerate }),
     }),
-    [attachImage, canRegenerate, insertText, mount, nodeId, onClearNode, onOpenPersona, onRegenerate, onSetModel, onToggleMount],
+    [attachImage, canRegenerate, insertText, mount, nodeId, onClearNode, onEnableSkill, onOpenPersona, onRegenerate, onSetModel, onToggleMount],
   );
 
   useEffect(() => {
@@ -121,7 +129,7 @@ export function Composer({
   function submit() {
     const text = value.trim();
     if (busy || (!text && images.length === 0)) return;
-    onSubmit(text, images);
+    onSubmit(text, images, (activeSkills ?? []).map((skill) => skill.id));
     setImages([]);
     setSlashOpen(false);
   }
@@ -141,6 +149,27 @@ export function Composer({
           modelOptions={modelOptions}
           onClose={() => setSlashOpen(false)}
         />
+        {activeSkills && activeSkills.length > 0 && (
+          <div className="composer-skills" aria-label="已启用 Skills">
+            {activeSkills.map((skill) => (
+              <span className="composer-skill" key={`${skill.sourcePath}:${skill.id}`} title={`${skill.name} · ${skill.hash}`}>
+                <BookOpen size={13} />
+                {skill.name}
+                {onDisableSkill && (
+                  <button
+                    type="button"
+                    className="composer-skill__remove"
+                    aria-label={`停用 Skill ${skill.name}`}
+                    title="停用 Skill"
+                    onClick={() => onDisableSkill(skill.id)}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
         {images.length > 0 && (
           <div className="composer-images">
             {images.map((image, index) => (

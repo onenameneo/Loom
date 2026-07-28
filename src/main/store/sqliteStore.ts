@@ -130,6 +130,7 @@ export class SqliteStore implements Store {
       appearance: decode(values.get("appearance"), DEFAULT_SETTINGS.appearance),
       monitor: decode(values.get("monitor"), DEFAULT_SETTINGS.monitor),
       activity: decode(values.get("activity"), DEFAULT_SETTINGS.activity),
+      skills: decode(values.get("skills"), DEFAULT_SETTINGS.skills),
       apiKeyEnc: decode<string | undefined>(values.get("apiKeyEnc"), undefined),
     };
   }
@@ -142,6 +143,7 @@ export class SqliteStore implements Store {
       appearance: { ...current.appearance, ...(patch.appearance ?? {}) },
       monitor: { ...current.monitor, ...(patch.monitor ?? {}) },
       activity: { ...current.activity, ...(patch.activity ?? {}) },
+      skills: { ...current.skills, ...(patch.skills ?? {}) },
     };
     const stmt = this.db.prepare(`
       INSERT INTO settings(key, value) VALUES (?, ?)
@@ -152,6 +154,7 @@ export class SqliteStore implements Store {
       stmt.run("appearance", encode(next.appearance));
       stmt.run("monitor", encode(next.monitor));
       stmt.run("activity", encode(next.activity));
+      stmt.run("skills", encode(next.skills));
     });
     tx();
     return next;

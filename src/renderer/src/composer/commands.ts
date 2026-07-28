@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Code2, Cpu, Eraser, Image, Paperclip, RefreshCw, Settings, Workflow } from "lucide-react";
+import { BookOpen, Code2, Cpu, Eraser, Image, Paperclip, RefreshCw, Settings, Workflow } from "lucide-react";
 
 export type CmdState = {
   mount: boolean;
@@ -16,6 +16,7 @@ export type CmdCtx = {
   clearNode: () => void;
   regenerate: () => void;
   setModel: (id: string) => void;
+  enableSkill?: (id: string) => void;
   getState: () => CmdState;
 };
 
@@ -67,6 +68,18 @@ export const commands: Command[] = [
     run: (ctx, arg) => {
       const model = arg?.trim();
       if (model) ctx.setModel(model);
+    },
+  },
+  {
+    id: "skill",
+    label: "/skill",
+    icon: BookOpen,
+    group: "action",
+    hint: "/skill <技能名>",
+    arg: "text",
+    run: (ctx, arg) => {
+      const skill = arg?.trim();
+      if (skill) ctx.enableSkill?.(skill);
     },
   },
   {

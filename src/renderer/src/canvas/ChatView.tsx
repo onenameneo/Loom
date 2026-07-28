@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import type { ApprovalRequestPayload, ModelSelection, NodeBudget, NodeMsg, TurnCanvasEventPayload } from "../env";
+import type { ApprovalRequestPayload, ModelSelection, NodeBudget, NodeMsg, SkillEffectiveDto, TurnCanvasEventPayload } from "../env";
 import { IconSplit, IconProject } from "../icons";
 import { Message } from "../message/Message";
 import { Composer, type ComposerImage } from "../composer/Composer";
@@ -10,8 +10,8 @@ import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimeline
 import { useComposerHeightVar } from "./useComposerHeightVar";
 import { ApprovalPrompt, type ApprovalState } from "./ApprovalPrompt";
 
-type Role = "user" | "assistant" | "error" | "tool";
-type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; toolCall?: ToolCallView };
+type Role = "user" | "assistant" | "error" | "tool" | "skill";
+type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
 
 function formatModelSelection(model?: ModelSelection) {
   if (!model) return undefined;
@@ -60,8 +60,10 @@ export default function ChatView({
     usage: m.usage,
     meta: m.meta,
     toolCall: m.toolCall,
+    skillEvent: m.skillEvent,
   }));
   const [msgs, setMsgs] = useState<Msg[]>(seed);
+  const [draftSkills, setDraftSkills] = useState<SkillEffectiveDto[]>([]);
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [turn, setTurn] = useState<TurnCanvasEventPayload | null>(null);
@@ -107,7 +109,7 @@ export default function ChatView({
   useTitlebarActions(titlebarActions);
 
   const reloadFromInitial = useCallback((items: NodeMsg[]) => {
-    setMsgs(items.map((m) => ({ id: idRef.current++, role: m.role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, toolCall: m.toolCall })));
+    setMsgs(items.map((m) => ({ id: idRef.current++, role: m.role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, toolCall: m.toolCall, skillEvent: m.skillEvent })));
   }, []);
 
   const upsertToolMessage = useCallback((payload: Parameters<typeof upsertToolTimelineMessage<Msg>>[1]) => {
@@ -241,10 +243,11 @@ export default function ChatView({
   const streaming = busy && msgs[msgs.length - 1]?.role === "assistant";
   const awaitingApproval = turn?.state === "awaiting_approval" && approval;
 
-  function submit(text: string, images: ComposerImage[] = []) {
+  function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = []) {
     if (busy || (!text && images.length === 0)) return;
     setMsgs((m) => [...m, { id: idRef.current++, role: "user", text, images }]);
     setInput("");
+    setDraftSkills([]);
     localStorage.removeItem(`loom:draft:${nodeId}`);
     if (!window.api) {
       setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: "浏览器预览：在 Electron 中运行（pnpm dev）以对话。" }]);
@@ -252,7 +255,7 @@ export default function ChatView({
     }
     setBusy(true);
     setThinking(true);
-    window.api.canvas.send(nodeId, text, images);
+    window.api.canvas.send(nodeId, text, images, skillIds);
   }
 
   async function stop() {
@@ -320,6 +323,28 @@ export default function ChatView({
     if (!next || !window.api) return;
     const r = await window.api.canvas.setModel(nodeId, parseModelSelection(next));
     if (r.ok) setNodeModel(next);
+  }
+
+  async function enableSkill(skillId: string) {
+    if (!window.api) return;
+    const result = await window.api.canvas.skills(nodeId);
+    const skill = result.catalog.activeSkills.find((item) => item.id === skillId);
+    if (!skill) return;
+    setDraftSkills((current) => current.some((item) => item.id === skill.id)
+      ? current
+      : [...current, {
+          id: skill.id,
+          name: skill.name,
+          description: skill.description,
+          sourceScope: skill.scope,
+          sourcePath: skill.rootPath,
+          hash: skill.hash,
+          diagnostics: skill.diagnostics,
+        }]);
+  }
+
+  function disableDraftSkill(skillId: string) {
+    setDraftSkills((current) => current.filter((skill) => skill.id !== skillId));
   }
 
   function metaFor(m: Msg): string | undefined {
@@ -425,6 +450,7 @@ export default function ChatView({
               onDecision={decideApproval}
             />
           ) : undefined}
+          activeSkills={draftSkills}
           mount={mount}
           canRegenerate={msgs.some((m) => m.role === "user") && !busy}
           budgetLine={`将发送 ~${(mount ? budget?.withAncestors : budget?.withoutAncestors) ?? 0} tokens`}
@@ -435,6 +461,8 @@ export default function ChatView({
           onClearNode={clearNode}
           onRegenerate={regenerate}
           onSetModel={setModel}
+          onEnableSkill={enableSkill}
+          onDisableSkill={disableDraftSkill}
         />
       </div>
     </div>

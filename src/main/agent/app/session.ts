@@ -15,6 +15,17 @@ import { createToolRegistry } from "./toolRuntime";
 import { createTurnRunner } from "./turnRunner";
 import { createNodeQueryEngine } from "./nodeQueryEngine";
 import { createApprovalGate } from "../hooks/tools/approvalGate";
+import {
+  buildSkillCatalog,
+  compileSkillContext,
+  createSkillEvent,
+  createSkillListTool,
+  createSkillReadTool,
+  detectSkillProviderCapabilities,
+  replaySkillEvents,
+  skillSnapshot,
+  type SkillCatalog,
+} from "../skills";
 import type {
   AgentHook,
   ClockPort,
@@ -68,7 +79,7 @@ export interface CanvasRuntimeDeps {
 }
 
 interface CanvasMessageDto {
-  role: "user" | "assistant" | "tool";
+  role: "user" | "assistant" | "tool" | "skill";
   text: string;
   images?: { data: string; mimeType: string }[];
   seq: number;
@@ -85,6 +96,14 @@ interface CanvasMessageDto {
     startedAt: number;
     updatedAt: number;
   };
+  skillEvent?: {
+    eventId: string;
+    action: "skill-enabled" | "skill-disabled";
+    skillId: string;
+    name: string;
+    sourcePath: string;
+    hash: string;
+  };
 }
 
 const NO_KEY_ERROR = "未配置 API key（去设置填写，或设置 ANTHROPIC_API_KEY）。";
@@ -92,6 +111,7 @@ const NO_KEY_ERROR = "未配置 API key（去设置填写，或设置 ANTHROPIC_
 export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   const { store, events, ids, clock, getApiKey } = deps;
   const nodes = new Map<string, CanvasNode>();
+  const pendingPromptSkillIds = new Map<string, string[]>();
   let activeSessionId: string | undefined;
 
   // ---- 图缓存 & 映射 --------------------------------------------------------
@@ -156,6 +176,41 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return ancestorChain(nodeId, loadNode);
   }
 
+  function catalogFor(nodeId: string): SkillCatalog {
+    const node = loadNode(nodeId);
+    return buildSkillCatalog({
+      settings: store.getSettings(),
+      projects: store.listProjects(),
+      projectId: node?.projectId,
+    });
+  }
+
+  function effectiveSkillsFor(nodeId: string) {
+    const node = loadNode(nodeId);
+    if (!node) return replaySkillEvents([], catalogFor(nodeId));
+    return replaySkillEvents([...ancestorsOf(nodeId), node], catalogFor(nodeId));
+  }
+
+  function requestSkillsFor(nodeId: string) {
+    const effective = effectiveSkillsFor(nodeId);
+    const selectedIds = pendingPromptSkillIds.get(nodeId) ?? [];
+    if (selectedIds.length === 0) return effective;
+    const catalog = catalogFor(nodeId);
+    const selected = selectedIds
+      .map((id) => catalog.activeSkills.find((skill) => skill.id === id))
+      .filter((skill): skill is NonNullable<typeof skill> => Boolean(skill));
+    const byId = new Map(effective.skills.map((skill) => [skill.id, skill]));
+    for (const skill of selected) {
+      byId.set(skill.id, {
+        ...skillSnapshot(skill),
+        enabledEventId: `prompt:${skill.id}:${skill.hash}`,
+        diagnostics: skill.diagnostics,
+        current: skill,
+      });
+    }
+    return { ...effective, skills: [...byId.values()] };
+  }
+
   function budgetOf(nodeId: string): Budget {
     const node = loadNode(nodeId);
     if (!node) return { withoutAncestors: 0, withAncestors: 0, estimated: true };
@@ -167,12 +222,18 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     const node = nodes.get(nodeId);
     if (!node) return own.filter(isLlmMessage);
     const ancestors = node.mountAncestors ? ancestorsOf(nodeId) : [];
-    return buildContextPlan(node, own, ancestors, clock.now());
+    const skillState = requestSkillsFor(nodeId);
+    const compiled = compileSkillContext({
+      state: skillState,
+      capabilities: detectSkillProviderCapabilities({ providerId: "anthropic" }),
+      now: clock.now(),
+    });
+    return buildContextPlan(node, own, ancestors, clock.now(), compiled.messages);
   }
 
   function getNodeInit(nodeId: string): NodeInit | undefined {
     const n = loadNode(nodeId);
-    return n ? { systemPrompt: n.systemPrompt, model: n.model, messages: n.messages } : undefined;
+    return n ? { systemPrompt: n.systemPrompt, model: n.model, messages: n.messages.filter(isLlmMessage) } : undefined;
   }
 
   function sourceRootsFor(nodeId: string): string[] {
@@ -183,7 +244,13 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
 
   function toolsFor(nodeId: string): AgentTool[] {
     const sourceRoots = sourceRootsFor(nodeId);
-    return [...tools.list(), ...createProjectFileTools(sourceRoots), ...createProjectMutationTools(sourceRoots)];
+    const skillTools = catalogFor(nodeId).activeSkills.length > 0
+      ? [
+          createSkillListTool(() => catalogFor(nodeId).activeSkills),
+          createSkillReadTool(() => catalogFor(nodeId).activeSkills),
+        ]
+      : [];
+    return [...tools.list(), ...skillTools, ...createProjectFileTools(sourceRoots), ...createProjectMutationTools(sourceRoots)];
   }
 
   const tools = createToolRegistry(createDefaultReadonlyTools(clock));
@@ -244,6 +311,9 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     layout: n.layout,
     messages: n.messages.flatMap<CanvasMessageDto>((m, seq) => {
       const role = roleOf(m);
+      if (role === "loomSkillEvent") {
+        return [];
+      }
       if (role === "toolResult") {
         const anyMsg = m as any;
         const text = textOf(m);
@@ -272,6 +342,20 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       const usage = (m as any)?.usage;
       return [{ role, text: textOf(m), images: imagesOf(m), seq, usage, meta: n.messageMeta[seq] }];
     }),
+    skills: effectiveSkillsFor(n.id).skills.map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      sourceScope: skill.sourceScope,
+      sourcePath: skill.sourcePath,
+      hash: skill.hash,
+      diagnostics: skill.diagnostics,
+    })),
+    skillContext: compileSkillContext({
+      state: effectiveSkillsFor(n.id),
+      capabilities: detectSkillProviderCapabilities({ providerId: "anthropic" }),
+      now: clock.now(),
+    }).diagnostics,
   });
 
   function descendantsOf(nodeId: string): string[] {
@@ -333,7 +417,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return dto(node);
   }
 
-  async function send(arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[] }) {
+  async function send(arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[]; skillIds?: string[] }) {
     const node = loadNode(arg.nodeId);
     if (!node) {
       events.emit(arg.nodeId, "error", "节点不存在。");
@@ -347,6 +431,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       nodeId: arg.nodeId,
       operation: "send",
       prepare: () => {
+        pendingPromptSkillIds.set(arg.nodeId, [...new Set((arg.skillIds ?? []).map((id) => id.trim()).filter(Boolean))]);
         const text = arg.text.trim();
         const images = (arg.images ?? []).filter((img) => img.data && img.mimeType);
         const content =
@@ -364,6 +449,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       },
       finalize: (handle, from) => appendDelta(node, handle, from),
     });
+    pendingPromptSkillIds.delete(arg.nodeId);
     const { result } = query;
     if (!result.ok) {
       if (result.reason === "failed") events.emit(arg.nodeId, "error", String((query.error as any)?.message ?? query.error));
@@ -560,6 +646,41 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return approvals.decide(decision);
   }
 
+  function listSkills(nodeId: string) {
+    const catalog = catalogFor(nodeId);
+    const effective = effectiveSkillsFor(nodeId);
+    return {
+      catalog,
+      effective,
+      context: compileSkillContext({
+        state: effective,
+        capabilities: detectSkillProviderCapabilities({ providerId: "anthropic" }),
+        now: clock.now(),
+      }).diagnostics,
+    };
+  }
+
+  function appendSkillEvent(arg: { nodeId: string; skillId: string; action: "skill-enabled" | "skill-disabled" }) {
+    const node = loadNode(arg.nodeId);
+    if (!node) return { ok: false, reason: "node-not-found" };
+    const catalog = catalogFor(arg.nodeId);
+    const skill = catalog.activeSkills.find((item) => item.id === arg.skillId);
+    if (!skill) return { ok: false, reason: "skill-not-found" };
+    const event = createSkillEvent({
+      eventId: ids.message(),
+      action: arg.action,
+      skill,
+      timestamp: clock.now(),
+    }) as unknown as AgentMessage;
+    store.appendMessages(arg.nodeId, [persisted(event)]);
+    node.messages.push(event);
+    node.messageMeta.push(undefined);
+    queries.invalidate(arg.nodeId);
+    engine.drop(arg.nodeId);
+    events.emit(arg.nodeId, "skill", { action: arg.action, skillId: skill.id, name: skill.name });
+    return { ok: true, node: dto(node) };
+  }
+
   return {
     list,
     open,
@@ -580,6 +701,9 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     reset,
     invalidate,
     decideApproval,
+    listSkills,
+    enableSkill: (arg: { nodeId: string; skillId: string }) => appendSkillEvent({ ...arg, action: "skill-enabled" }),
+    disableSkill: (arg: { nodeId: string; skillId: string }) => appendSkillEvent({ ...arg, action: "skill-disabled" }),
     /** 注册一个 hook（H1+ 能力的落点）。 */
     registerHook: (hook: AgentHook) => hookRegistry.use(hook),
   };

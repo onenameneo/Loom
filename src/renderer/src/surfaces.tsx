@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BellRing,
+  BookOpen,
   CheckCircle2,
   Circle,
   Clock3,
   Copy,
+  FolderOpen,
   Power,
   PowerOff,
   Radio,
+  RefreshCw,
   Settings,
   Wrench,
 } from "lucide-react";
@@ -21,6 +24,7 @@ import type {
   ProjectMeta,
   SettingsPayload,
   SessionMeta,
+  SkillCatalogDto,
 } from "./env";
 import { IconEye, IconPlus, IconSettings, IconProject } from "./icons";
 import SessionCanvas from "./canvas/SessionCanvas";
@@ -562,6 +566,8 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
   const [monitorNotify, setMonitorNotify] = useState(true);
   const [saved, setSaved] = useState(false);
+  const [skillCatalog, setSkillCatalog] = useState<SkillCatalogDto | null>(null);
+  const [skillSourceDraft, setSkillSourceDraft] = useState("");
   const titlebarContext = useMemo(() => ({ title: "设置" }), []);
   useTitlebarContext(titlebarContext);
 
@@ -573,6 +579,15 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
     setTheme(s.appearance.theme);
     setMonitorNotify(s.monitor.notify);
   }, [s]);
+
+  const reloadSkills = useCallback(async () => {
+    if (!window.api?.settings.skills) return;
+    setSkillCatalog(await window.api.settings.skills(ctx.activeProjectId ?? undefined));
+  }, [ctx.activeProjectId]);
+
+  useEffect(() => {
+    void reloadSkills();
+  }, [reloadSkills, s?.skills]);
 
   if (!s) return <div className="surface-empty">加载中…</div>;
 
@@ -713,6 +728,23 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
     ctx.reloadSettings();
   }
 
+  async function addSkillSource() {
+    const path = skillSourceDraft.trim();
+    if (!path) return;
+    if (!window.api?.settings.addSkillSource) return;
+    await window.api.settings.addSkillSource(path);
+    setSkillSourceDraft("");
+    await ctx.reloadSettings();
+    await reloadSkills();
+  }
+
+  async function removeSkillSource(path: string) {
+    if (!window.api?.settings.removeSkillSource) return;
+    await window.api.settings.removeSkillSource(path);
+    await ctx.reloadSettings();
+    await reloadSkills();
+  }
+
   const providers = s.modelRegistry?.providers ?? [];
   const providerOptions = providers;
   const configuredProviders = providers
@@ -730,6 +762,64 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   return (
     <div className="surface-fill settings-surface">
       <div className="settings">
+      <section className="model-config skills-config">
+        <div className="model-config__head">
+          <div>
+            <h3>Skills</h3>
+            <p>管理全局与当前项目可用的 Agent Skills。</p>
+          </div>
+          <button className="btn" type="button" onClick={reloadSkills}><RefreshCw size={14} /> 重新扫描</button>
+        </div>
+        <div className="settings-grid">
+          <label className="field settings-grid__wide">
+            <span>添加全局来源 <em className="src">不会复制或删除原目录</em></span>
+            <div className="settings-inline">
+              <input value={skillSourceDraft} onChange={(e) => setSkillSourceDraft(e.target.value)} placeholder="/path/to/skills" />
+              <button className="btn" type="button" onClick={addSkillSource}>添加</button>
+            </div>
+          </label>
+        </div>
+        <div className="connection-list">
+          {(skillCatalog?.sources ?? []).map((source) => (
+            <div key={source.id} className="connection-row">
+              <div className="connection-main">
+                <div className="connection-title-row">
+                  <div>
+                    <div className="connection-name">{source.scope === "project" ? "当前项目" : source.registered ? "全局来源" : "默认全局来源"}</div>
+                    <div className="connection-meta">{source.rootPath} · {source.trusted ? "trusted" : "untrusted"}</div>
+                  </div>
+                  <span className={`status-pill ${source.trusted ? "available" : "unavailable"}`}>{source.scope}</span>
+                </div>
+              </div>
+              <button className="icon-btn" type="button" title="打开目录" onClick={() => window.api.settings.openSkillSource(source.rootPath)}><FolderOpen size={15} /></button>
+              {source.registered && <button className="btn" type="button" onClick={() => removeSkillSource(source.rootPath)}>移除</button>}
+            </div>
+          ))}
+          {(skillCatalog?.sources.length ?? 0) === 0 && <div className="empty-state compact"><div className="empty-state__title">暂无 Skill 来源</div></div>}
+        </div>
+        <div className="connection-list">
+          {(skillCatalog?.skills ?? []).map((skill) => (
+            <div key={`${skill.sourceId}:${skill.id}:${skill.rootPath}`} className={`connection-row ${skill.active ? "" : "muted"}`}>
+              <BookOpen size={16} />
+              <div className="connection-main">
+                <div className="connection-title-row">
+                  <div>
+                    <div className="connection-name">{skill.name}</div>
+                    <div className="connection-meta">{skill.id} · {skill.scope} · {skill.hash}</div>
+                  </div>
+                  <span className={`status-pill ${skill.active ? "available" : "unavailable"}`}>{skill.active ? "active" : "overridden"}</span>
+                </div>
+                <div className="ok-note">{skill.description}</div>
+                {skill.diagnostics.map((d) => (
+                  <div key={`${d.code}:${d.path ?? ""}`} className={d.level === "error" ? "warn-note" : "ok-note"}>{d.code}: {d.message}</div>
+                ))}
+              </div>
+            </div>
+          ))}
+          {(skillCatalog?.skills.length ?? 0) === 0 && <div className="empty-state compact"><div className="empty-state__title">没有发现可用 Skills</div><div className="empty-state__body">默认扫描 ~/.loom/skills，当前项目扫描已信任 source root 下的 .loom/skills。</div></div>}
+        </div>
+      </section>
+
       <section className="model-config">
         <div className="model-config__head">
           <div>

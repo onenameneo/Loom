@@ -186,6 +186,28 @@
   white-space: pre-wrap;
 }
 
+.m--skill {
+  align-self: stretch;
+}
+.m--skill .m__plain {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-left-color: var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: calc(var(--m-fs) - 1.5px);
+  line-height: 1.5;
+  padding: 5px 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ---- Markdown 正文 ---- */
 .m__md {
   font-size: var(--m-fs);

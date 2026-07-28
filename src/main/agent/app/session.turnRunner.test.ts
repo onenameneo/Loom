@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -68,14 +68,16 @@ class MemoryStore implements Store {
   deleteSession() {}
   listNodes(sessionId: string) { return [...this.nodes.values()].filter((n) => n.sessionId === sessionId); }
   getNode(id: string) { return this.nodes.get(id); }
-  createNode(input: { sessionId?: string; projectId?: string; title: string }): NodeRecord {
+  createNode(input: { sessionId?: string; projectId?: string; parentId?: string; title: string; seed?: unknown; mountAncestors?: boolean }): NodeRecord {
     const session = (input.sessionId ? this.getSession(input.sessionId) : this.ensureDefaultSession(input.projectId ?? "ws")) ?? this.sessions[0];
     const node: NodeRecord = {
       id: `n${this.nodes.size + 1}`,
       sessionId: session.id,
       projectId: session.projectId,
+      parentId: input.parentId,
       title: input.title,
-      mountAncestors: false,
+      seed: input.seed,
+      mountAncestors: Boolean(input.mountAncestors),
       messages: [],
     };
     this.nodes.set(node.id, node);
@@ -179,6 +181,33 @@ describe("createAgentSession turn runner integration", () => {
     }
   });
 
+  it("exposes active global skills to the agent as list and read tools", () => {
+    const root = mkdtempSync(join(tmpdir(), "loom-session-skill-tools-"));
+    try {
+      const skillRoot = join(root, "research");
+      mkdirSync(skillRoot, { recursive: true });
+      writeFileSync(join(skillRoot, "SKILL.md"), "---\nname: research\ndescription: Research helper\n---\n# Research\n", "utf-8");
+      const store = new MemoryStore();
+      store.settings = { ...DEFAULT_SETTINGS, skills: { globalSources: [root] } };
+      let getTools: ((nodeId: string) => AgentTool[]) | undefined;
+      createAgentSession({
+        store,
+        events: events().sink,
+        ids: { message: () => "id" },
+        clock: { now: () => 1 },
+        getApiKey: () => "key",
+        createEngine: (hooks) => {
+          getTools = hooks.getTools;
+          return createEngine(createHandle([], vi.fn()));
+        },
+      });
+
+      expect(getTools?.("n1").map((tool) => tool.name)).toEqual(expect.arrayContaining(["skill_list", "skill_read"]));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("resolves local tools from each node's owning Project sourceRoots", async () => {
     const firstRoot = mkdtempSync(join(tmpdir(), "loom-session-project-one-"));
     const secondRoot = mkdtempSync(join(tmpdir(), "loom-session-project-two-"));
@@ -223,6 +252,140 @@ describe("createAgentSession turn runner integration", () => {
     } finally {
       rmSync(firstRoot, { recursive: true, force: true });
       rmSync(secondRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("inherits skill context through branches independently of mounted ancestor dialogue", async () => {
+    const root = mkdtempSync(join(tmpdir(), "loom-session-skills-"));
+    const skillRoot = join(root, "research");
+    mkdirSync(skillRoot, { recursive: true });
+    writeFileSync(join(skillRoot, "SKILL.md"), "---\nname: research\ndescription: Research helper\n---\n# Research\n", "utf-8");
+    const store = new MemoryStore([{ role: "user", content: "ancestor dialogue" } as unknown as AgentMessage]);
+    store.settings = { ...DEFAULT_SETTINGS, skills: { globalSources: [root] } };
+    const eventLog = events();
+    let buildContext: ((nodeId: string, own: AgentMessage[]) => any) | undefined;
+    const session = createAgentSession({
+      store,
+      events: eventLog.sink,
+      ids: { message: () => `id-${Math.random()}` },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: (hooks) => {
+        buildContext = hooks.buildContext;
+        return createEngine(createHandle([], vi.fn()));
+      },
+    });
+
+    try {
+      expect(session.enableSkill({ nodeId: "n1", skillId: "research" })).toMatchObject({ ok: true });
+      const child = session.create({ sessionId: "sess", parentId: "n1", title: "child" });
+      expect(child.mountAncestors).toBe(false);
+
+      const inherited = await buildContext!(child.id, []);
+      expect(inherited.map((msg: any) => msg.role)).toEqual(["user"]);
+      expect(String(inherited[0].content)).toContain("Research helper");
+      expect(String(inherited[0].content)).not.toContain("ancestor dialogue");
+
+      expect(session.disableSkill({ nodeId: child.id, skillId: "research" })).toMatchObject({ ok: true });
+      expect(await buildContext!(child.id, store.listMessages(child.id).map((m) => m.content))).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not hydrate Loom skill events into the provider transcript after enabling a skill", () => {
+    const root = mkdtempSync(join(tmpdir(), "loom-session-skill-init-"));
+    const skillRoot = join(root, "research");
+    mkdirSync(skillRoot, { recursive: true });
+    writeFileSync(join(skillRoot, "SKILL.md"), "---\nname: research\ndescription: Research helper\n---\n# Research\n", "utf-8");
+    const store = new MemoryStore([{ role: "assistant", content: "before" } as unknown as AgentMessage]);
+    store.settings = { ...DEFAULT_SETTINGS, skills: { globalSources: [root] } };
+    let getNodeInit: ((nodeId: string) => NodeInit | undefined) | undefined;
+    let buildContext: ((nodeId: string, own: AgentMessage[]) => any) | undefined;
+    createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => `id-${Math.random()}` },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: (hooks) => {
+        getNodeInit = hooks.getNodeInit;
+        buildContext = hooks.buildContext;
+        return createEngine(createHandle([], vi.fn()));
+      },
+    }).enableSkill({ nodeId: "n1", skillId: "research" });
+
+    try {
+      const initMessages = getNodeInit!("n1")!.messages;
+      expect(initMessages.map((message) => (message as any).role)).toEqual(["assistant"]);
+      expect(buildContext!("n1", [...initMessages, { role: "user", content: "next" } as unknown as AgentMessage]).map((message: any) => message.role)).toEqual(["assistant", "user", "user"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps skill events out of primary chat messages while exposing effective skill metadata", () => {
+    const root = mkdtempSync(join(tmpdir(), "loom-session-skill-dto-"));
+    const skillRoot = join(root, "research");
+    mkdirSync(skillRoot, { recursive: true });
+    writeFileSync(join(skillRoot, "SKILL.md"), "---\nname: research\ndescription: Research helper\n---\n# Research\n", "utf-8");
+    const store = new MemoryStore();
+    store.settings = { ...DEFAULT_SETTINGS, skills: { globalSources: [root] } };
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => `id-${Math.random()}` },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    try {
+      const result = session.enableSkill({ nodeId: "n1", skillId: "research" });
+      expect(result).toMatchObject({ ok: true });
+      const node = result.node;
+      if (!node) throw new Error("enableSkill did not return a node");
+      expect(node.messages).toEqual([]);
+      expect(node.skills).toMatchObject([{ id: "research" }]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("applies composer-selected skills to only the current prompt without persisting skill events", async () => {
+    const root = mkdtempSync(join(tmpdir(), "loom-session-prompt-skill-"));
+    const skillRoot = join(root, "research");
+    mkdirSync(skillRoot, { recursive: true });
+    writeFileSync(join(skillRoot, "SKILL.md"), "---\nname: research\ndescription: Research helper\n---\n# Research\n", "utf-8");
+    const store = new MemoryStore();
+    store.settings = { ...DEFAULT_SETTINGS, skills: { globalSources: [root] } };
+    const observedContexts: string[][] = [];
+    const engineMessages: AgentMessage[] = [];
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => `id-${Math.random()}` },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: (hooks) =>
+        createEngine(createHandle(engineMessages, async (msg) => {
+          engineMessages.push(msg);
+          const context = await hooks.buildContext("n1", engineMessages);
+          observedContexts.push(context.map((item: any) => `${item.role}:${String(item.content).slice(0, 32)}`));
+          engineMessages.push({ role: "assistant", content: "done" } as unknown as AgentMessage);
+        })),
+    });
+
+    try {
+      await expect(session.send({ nodeId: "n1", text: "use it", skillIds: ["research"] })).resolves.toEqual({ ok: true });
+      expect(observedContexts[0]).toEqual([
+        expect.stringContaining("user:[Loom skill context]"),
+        "user:use it",
+      ]);
+      expect(store.listMessages("n1").map((m) => (m.content as any).role)).toEqual(["user", "assistant"]);
+      expect(session.list("sess")[0]!.skills).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

@@ -31,11 +31,16 @@ export interface ActivitySettings {
   verified?: { claude?: number; codex?: number };
 }
 
+export interface SkillsSettings {
+  globalSources: string[];
+}
+
 export interface Settings {
   access: AccessSettings;
   appearance: AppearanceSettings;
   monitor: MonitorSettings;
   activity: ActivitySettings;
+  skills: SkillsSettings;
   apiKeyEnc?: string; // 本地保存的 API key 载荷；字段名沿用旧 schema，避免迁移。
 }
 
@@ -164,6 +169,7 @@ export const DEFAULT_SETTINGS: Settings = {
   appearance: { theme: "system", density: "comfortable" },
   monitor: { notify: true },
   activity: {},
+  skills: { globalSources: [] },
 };
 
 export const SCHEMA_VERSION = 2;

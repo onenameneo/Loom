@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SlashPalette } from "./SlashPalette";
 import type { CmdCtx } from "./commands";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  delete (window as any).api;
+});
 
 function ctx(): CmdCtx {
   return {
@@ -33,5 +36,35 @@ describe("SlashPalette model command", () => {
     );
 
     expect(screen.queryByRole("option", { name: /missing/ })).toBeNull();
+  });
+
+  it("keyboard-selects a skill without rewriting unrelated composer text", async () => {
+    const enableSkill = vi.fn();
+    const setValue = vi.fn();
+    (window as any).api = {
+      canvas: {
+        skills: vi.fn(async () => ({
+          catalog: {
+            activeSkills: [
+              { id: "research", name: "Research", description: "Research helper", sourceId: "global:/skills", scope: "global", hash: "abc" },
+            ],
+          },
+        })),
+      },
+    };
+    render(
+      React.createElement(SlashPalette, {
+        value: "/skill re",
+        setValue,
+        ctx: { ...ctx(), enableSkill },
+        modelOptions: [],
+      }),
+    );
+
+    await waitFor(() => expect(screen.getByRole("option", { name: /Research/ })).toBeTruthy());
+    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Enter" });
+
+    expect(enableSkill).toHaveBeenCalledWith("research");
+    expect(setValue).toHaveBeenCalledWith("");
   });
 });

@@ -13,13 +13,21 @@ export interface ToolCallDto {
 }
 
 export interface NodeMsg {
-  role: "user" | "assistant" | "tool";
+  role: "user" | "assistant" | "tool" | "skill";
   text: string;
   images?: { data: string; mimeType: string }[];
   seq: number;
   usage?: { totalTokens?: number };
   meta?: unknown;
   toolCall?: ToolCallDto;
+  skillEvent?: {
+    eventId: string;
+    action: "skill-enabled" | "skill-disabled";
+    skillId: string;
+    name: string;
+    sourcePath: string;
+    hash: string;
+  };
 }
 export interface NodeSeed {
   text: string;
@@ -40,6 +48,13 @@ export interface CanvasNodeDto {
   color?: string;
   layout?: { x: number; y: number; width: number; height: number };
   messages: NodeMsg[];
+  skills?: SkillEffectiveDto[];
+  skillContext?: {
+    eventIds: string[];
+    cacheKey: string;
+    firstDivergence: "skill-context-tail" | "none";
+    mode: "system" | "structured-user";
+  };
 }
 export interface NodeBudget {
   withoutAncestors: number;
@@ -255,6 +270,7 @@ export interface SettingsPayload {
   access: { provider: string; baseUrl: string; model: string };
   appearance: { theme: "light" | "dark" | "system"; density: "comfortable" | "compact" };
   monitor: { notify: boolean };
+  skills?: { globalSources: string[] };
   modelRegistry?: ModelRegistryPayload;
   globalDefaultModel?: { providerId: string; modelId: string };
   sources: { baseUrl: string; model: string; key: string };
@@ -263,6 +279,45 @@ export interface SettingsPayload {
   keyStorage: "local";
   resolvedModel: string;
   resolvedTheme: "light" | "dark";
+}
+
+export interface SkillDiagnosticDto {
+  level: "info" | "warn" | "error";
+  code: string;
+  message: string;
+  path?: string;
+}
+
+export interface SkillCatalogItemDto {
+  id: string;
+  name: string;
+  description: string;
+  disableModelInvocation: boolean;
+  scope: "global" | "project";
+  sourceId: string;
+  rootPath: string;
+  skillFilePath: string;
+  hash: string;
+  trusted: boolean;
+  active: boolean;
+  diagnostics: SkillDiagnosticDto[];
+}
+
+export interface SkillEffectiveDto {
+  id: string;
+  name: string;
+  description: string;
+  sourceScope: "global" | "project";
+  sourcePath: string;
+  hash: string;
+  diagnostics: SkillDiagnosticDto[];
+}
+
+export interface SkillCatalogDto {
+  sources: Array<{ id: string; scope: "global" | "project"; rootPath: string; trusted: boolean; registered: boolean; projectId?: string }>;
+  skills: SkillCatalogItemDto[];
+  activeSkills: SkillCatalogItemDto[];
+  diagnostics: SkillDiagnosticDto[];
 }
 
 export interface ModelListItem {
@@ -328,7 +383,7 @@ declare global {
         list: (sessionId: string) => Promise<CanvasNodeDto[]>;
         open: (sessionId: string) => Promise<CanvasNodeDto[]>;
         create: (arg: { sessionId: string; parentId?: string; seed?: NodeSeed; title?: string }) => Promise<CanvasNodeDto>;
-        send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[]) => Promise<{ ok: boolean }>;
+        send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[]) => Promise<{ ok: boolean }>;
         abort: (nodeId: string) => Promise<{ ok: boolean }>;
         regenerate: (nodeId: string) => Promise<{ ok: boolean }>;
         editResend: (arg: { nodeId: string; seq: number; text: string }) => Promise<{ ok: boolean }>;
@@ -347,6 +402,13 @@ declare global {
         models: () => Promise<ModelListItem[]>;
         budget: (nodeId: string) => Promise<NodeBudget>;
         reset: (nodeId: string) => Promise<{ ok: boolean }>;
+        skills: (nodeId: string) => Promise<{
+          catalog: SkillCatalogDto;
+          effective: { skills: SkillEffectiveDto[]; eventIds: string[]; diagnostics: SkillDiagnosticDto[] };
+          context: { eventIds: string[]; cacheKey: string; firstDivergence: "skill-context-tail" | "none"; mode: "system" | "structured-user" };
+        }>;
+        enableSkill: (nodeId: string, skillId: string) => Promise<{ ok: boolean; node?: CanvasNodeDto; reason?: string }>;
+        disableSkill: (nodeId: string, skillId: string) => Promise<{ ok: boolean; node?: CanvasNodeDto; reason?: string }>;
         decideApproval: (decision: ApprovalDecisionPayload) => Promise<{ ok: boolean; reason?: string }>;
         onEvent: (cb: (e: CanvasEvent) => void) => () => void;
       };
@@ -357,6 +419,10 @@ declare global {
         addProviderModel: (input: AddProviderModelPayload) => Promise<{ ok: boolean }>;
         deleteProviderModel: (model: { providerId: string; modelId: string }) => Promise<{ ok: boolean }>;
         openModelsJson: () => Promise<{ ok: boolean; path: string; error?: string }>;
+        skills: (projectId?: string) => Promise<SkillCatalogDto>;
+        addSkillSource: (path: string) => Promise<{ ok: boolean; path: string }>;
+        removeSkillSource: (path: string) => Promise<{ ok: boolean; path: string }>;
+        openSkillSource: (path: string) => Promise<{ ok: boolean; path: string; error?: string }>;
       };
       monitor: {
         list: () => Promise<AgentProc[]>;

@@ -68,4 +68,39 @@ describe("buildContextPlan", () => {
     expect(String(plan[1].content)).toContain("片段");
     expect(plan[2].role).toBe("user");
   });
+
+  it("inserts tail context before the active final user message", () => {
+    const tail = [{ role: "user", content: "[skill context]", timestamp: 0 } as any];
+    const plan = buildContextPlan({ mountAncestors: false }, [user("history"), asst("answer"), user("next")], [], 0, tail);
+    expect(plan.map((m) => [m.role, typeof m.content === "string" ? m.content : textOf(m as any)])).toEqual([
+      ["user", "history"],
+      ["assistant", "answer"],
+      ["user", "[skill context]"],
+      ["user", "next"],
+    ]);
+  });
+
+  it("does not insert tail context between an assistant tool call and its tool result", () => {
+    const assistantWithToolCall = {
+      role: "assistant",
+      content: [{ type: "text", text: "" }],
+      toolCalls: [{ id: "call-1", name: "skill_read", args: { skillId: "research" } }],
+      timestamp: 0,
+    } as unknown as AgentMessage;
+    const toolResult = {
+      role: "toolResult",
+      toolName: "skill_read",
+      toolCallId: "call-1",
+      content: [{ type: "text", text: "skill body" }],
+      timestamp: 0,
+    } as unknown as AgentMessage;
+    const tail = [{ role: "user", content: "[skill context]", timestamp: 0 } as any];
+    const plan = buildContextPlan({ mountAncestors: false }, [user("next"), assistantWithToolCall, toolResult], [], 0, tail);
+
+    expect(plan.map((m) => [m.role, textOf(m as any)])).toEqual([
+      ["user", "next"],
+      ["assistant", ""],
+      ["toolResult", "skill body"],
+    ]);
+  });
 });

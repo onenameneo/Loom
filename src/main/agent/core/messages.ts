@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { LoomSkillEvent } from "../skills/types";
 
 // ---------------------------------------------------------------------------
 // ① 领域核心 · Loom 业务消息（"材料"）。
@@ -19,6 +20,7 @@ export interface LoomUiMessage {
 declare module "@earendil-works/pi-agent-core" {
   interface CustomAgentMessages {
     loomUi: LoomUiMessage;
+    loomSkillEvent: LoomSkillEvent;
   }
 }
 
