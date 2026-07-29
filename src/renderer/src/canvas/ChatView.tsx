@@ -42,7 +42,7 @@ export default function ChatView({
   initialMount: boolean;
   systemPrompt?: string;
   model?: ModelSelection;
-  onBranch: (seedText: string) => void;
+  onBranch: (seedText: string, mountAncestors: boolean) => void;
   onExpandCanvas: () => void;
   noKey: boolean;
   goSettings: () => void;
@@ -69,7 +69,6 @@ export default function ChatView({
   const [turn, setTurn] = useState<TurnCanvasEventPayload | null>(null);
   const [approval, setApproval] = useState<ApprovalState | null>(null);
   const [input, setInput] = useState(() => localStorage.getItem(`loom:draft:${nodeId}`) ?? "");
-  const [mount, setMount] = useState(initialMount);
   const [personaOpen, setPersonaOpen] = useState(false);
   const [persona, setPersona] = useState(systemPrompt ?? "");
   const [nodeModel, setNodeModel] = useState<string | undefined>(formatModelSelection(model));
@@ -79,7 +78,7 @@ export default function ChatView({
   const scrollRef = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  const [tb, setTb] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [tb, setTb] = useState<{ text: string; x: number; y: number; mountAncestors: boolean } | null>(null);
 
   const openSettings = useCallback(() => {
     goSettingsRef.current();
@@ -134,11 +133,10 @@ export default function ChatView({
 
   useEffect(() => {
     setInput(localStorage.getItem(`loom:draft:${nodeId}`) ?? "");
-    setMount(initialMount);
     setPersona(systemPrompt ?? "");
     setNodeModel(formatModelSelection(model));
     refreshBudget();
-  }, [initialMount, model, nodeId, refreshBudget, systemPrompt]);
+  }, [model, nodeId, refreshBudget, systemPrompt]);
 
   useEffect(() => {
     localStorage.setItem(`loom:draft:${nodeId}`, input);
@@ -231,11 +229,11 @@ export default function ChatView({
     }
     const r = range.getBoundingClientRect();
     const box = threadRef.current.getBoundingClientRect();
-    setTb({ text, x: r.left - box.left + r.width / 2, y: r.top - box.top - 6 });
+    setTb({ text, x: r.left - box.left + r.width / 2, y: r.top - box.top - 6, mountAncestors: false });
   }, []);
 
   const doBranch = () => {
-    if (tb) onBranch(tb.text);
+    if (tb) onBranch(tb.text, tb.mountAncestors);
     setTb(null);
     window.getSelection()?.removeAllRanges();
   };
@@ -298,13 +296,6 @@ export default function ChatView({
       return idx >= 0 ? [...m.slice(0, idx), { id: idRef.current++, role: "user", text, seq }] : m;
     });
     await window.api.canvas.editResend({ nodeId, seq, text });
-  }
-
-  async function toggleMount(on: boolean) {
-    setMount(on);
-    if (!window.api) return;
-    const r = await window.api.canvas.setMount(nodeId, on);
-    if (r?.budget) setBudget(r.budget);
   }
 
   async function clearNode() {
@@ -421,6 +412,15 @@ export default function ChatView({
                 <span><IconSplit size={13} /> 岔出分支</span>
                 <small>{tb.text.length > 40 ? `${tb.text.slice(0, 40)}…` : tb.text}</small>
               </button>
+              <button
+                className={`branch-mount-toggle ${tb.mountAncestors ? "on" : ""}`}
+                type="button"
+                aria-pressed={tb.mountAncestors}
+                onClick={() => setTb((current) => current && { ...current, mountAncestors: !current.mountAncestors })}
+                title="创建时冻结并携带根到当前节点的完整上下文"
+              >
+                挂载祖先
+              </button>
             </div>
           )}
         </div>
@@ -451,12 +451,10 @@ export default function ChatView({
             />
           ) : undefined}
           activeSkills={draftSkills}
-          mount={mount}
           canRegenerate={msgs.some((m) => m.role === "user") && !busy}
-          budgetLine={`将发送 ~${(mount ? budget?.withAncestors : budget?.withoutAncestors) ?? 0} tokens`}
+          budgetLine={`将发送 ~${(initialMount ? budget?.withAncestors : budget?.withoutAncestors) ?? 0} tokens`}
           onSubmit={submit}
           onStop={stop}
-          onToggleMount={toggleMount}
           onOpenPersona={() => setPersonaOpen(true)}
           onClearNode={clearNode}
           onRegenerate={regenerate}

@@ -15,6 +15,15 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.trace-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font: 10px var(--font-mono);
+}
+
 /* 全局焦点策略：鼠标点击不出浏览器默认（橙色）描边；只有键盘 focus-visible
    才给 on-style 的 accent 细环（保住可访问性）。:where 零特异性，不覆盖组件自带焦点样式。 */
 :where(button, [role="button"], a, summary, [tabindex]):focus:not(:focus-visible) {
@@ -53,6 +62,7 @@ body {
   overflow: hidden;
   transition: --sidebar-width var(--panel-motion-duration) var(--panel-motion-curve);
 }
+.app-shell.is-resizing { transition: none; }
 .app-shell.shell-collapsed,
 .app-shell.shell-collapsing {
   --sidebar-width: 0px;
@@ -133,6 +143,7 @@ body {
 }
 
 .sidebar-column {
+  position: relative;
   grid-column: 1;
   min-width: 0;
   min-height: 0;
@@ -158,6 +169,7 @@ body {
   opacity: 1;
   transition: opacity var(--panel-motion-duration) var(--panel-motion-curve);
 }
+.sidebar-resize-handle { position:absolute; top:0; right:-3px; width:6px; height:100%; cursor:col-resize; z-index:2; }
 .app-shell.shell-collapsing .sidebar-content {
   opacity: 0;
 }
@@ -177,6 +189,27 @@ body {
   flex-direction: column;
   background: var(--bg);
 }
+.workbench-column { position:relative; grid-column: 3; width:var(--workbench-width); min-width:300px; min-height:0; border-left:1px solid var(--border); background:var(--surface); }.workbench-resize-handle{position:absolute;top:0;left:-3px;width:6px;height:100%;cursor:col-resize;z-index:2}
+.workbench-page { height: 100%; display: flex; flex-direction: column; min-width: 0; }.workbench-tabs { display:flex; align-items:center; gap:var(--s2); padding:var(--s2); overflow-x:auto; }.workbench-tab { display:inline-flex; align-items:center; gap:var(--s2); padding:6px 8px; border-radius:var(--r-md); background:var(--surface-2); color:var(--text); font-size:12px; }.workbench-tab button,.workbench-add,.workbench-menu button { border:0; background:transparent; color:var(--muted); padding:2px; cursor:pointer; border-radius:var(--r-sm); }.workbench-add-wrap{position:relative}.workbench-add{width:28px;height:28px;display:grid;place-items:center}.workbench-menu{position:absolute;top:34px;right:0;width:160px;padding:var(--s1);border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);box-shadow:var(--shadow-float);z-index:2}.workbench-menu button{width:100%;display:flex;gap:var(--s2);padding:var(--s2)}.workbench-empty{height:100%;display:grid;place-items:center;padding:var(--s4)}.workbench-choices{width:min(100%,360px);display:grid;gap:var(--s1)}.workbench-choices button{width:100%;display:flex;align-items:center;gap:var(--s3);border:0;border-radius:var(--r-md);padding:var(--s3);background:transparent;color:var(--text);font:500 13px var(--font-ui);text-align:left;cursor:pointer}.workbench-choices button:hover{background:var(--surface-2)}.workbench-choices span{flex:1}.workbench-choices kbd{padding:2px 7px;border-radius:999px;background:var(--surface-2);color:var(--muted);font:10px var(--font-mono)}.trace-inspector{overflow:auto;padding:var(--s3)}.trace-inspector p{color:var(--muted);font-size:12px;line-height:1.6}.trace-record{border-bottom:1px solid var(--border);padding:var(--s2) 0}.trace-record summary{display:flex;gap:var(--s2);align-items:center;cursor:pointer;font-size:12px}.trace-record summary small{margin-left:auto;color:var(--faint);font-family:var(--font-mono)}.trace-state{font-family:var(--font-mono);font-size:10px;color:var(--muted)}.trace-state.completed{color:var(--ok)}.trace-state.failed,.trace-state.aborted{color:var(--err)}.trace-record h4{margin:var(--s2) 0 var(--s1);font:500 10px var(--font-mono);color:var(--muted)}.trace-record pre{margin:0;overflow:auto;padding:var(--s2);border:1px solid var(--border);border-radius:var(--r-sm);background:var(--code-bg);color:var(--code-text);font:10px/1.5 var(--font-mono);white-space:pre-wrap;user-select:text}
+.trace-section{padding:var(--s3) 0;border-top:1px solid var(--border)}.trace-section-heading{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s2);margin-bottom:var(--s2)}.trace-section-heading h3{margin:0;font-size:13px;font-weight:600}.trace-section-heading span{color:var(--faint);font:10px var(--font-mono)}.trace-facts{display:grid;grid-template-columns:64px minmax(0,1fr);gap:var(--s1) var(--s2);margin:0 0 var(--s2);font-size:12px}.trace-facts dt{color:var(--muted)}.trace-facts dd{margin:0;overflow-wrap:anywhere;font-family:var(--font-mono)}.trace-detail{border-top:1px solid var(--border);padding:var(--s2) 0}.trace-detail summary{display:flex;justify-content:space-between;align-items:center;gap:var(--s2);font-size:12px;font-weight:500;cursor:pointer}.trace-detail summary em,.trace-events em{color:var(--muted);font:10px var(--font-mono);font-style:normal}.trace-detail-body{position:relative;padding-top:var(--s2)}.trace-copy{display:inline-flex;align-items:center;gap:var(--s1);margin:0 0 var(--s1) auto;padding:3px 6px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--muted);font:10px var(--font-ui);cursor:pointer}.trace-detail-body>.trace-copy{display:flex}.trace-copy:hover{color:var(--text);background:var(--surface-2)}.trace-messages{display:grid;gap:var(--s2)}.trace-message,.trace-response{border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface)}.trace-message header,.trace-response header{display:flex;justify-content:space-between;align-items:center;padding:var(--s1) var(--s2);border-bottom:1px solid var(--border);color:var(--muted);font:10px var(--font-mono)}.trace-message pre,.trace-response pre{border:0;background:transparent}.trace-tool{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:var(--s2);padding:var(--s2) 0;border-top:1px solid var(--border);font-size:12px}.trace-tool>span{color:var(--muted);font:10px var(--font-mono)}.trace-tool details{grid-column:1 / -1}.trace-tool details summary,.trace-events summary{cursor:pointer;color:var(--muted);font:10px var(--font-mono)}.trace-events{padding:var(--s2) 0}.trace-events pre{margin-top:var(--s2)}
+.workbench-menu { position: fixed; right: auto; }
+.workbench-tabs { flex: none; min-height: 44px; border-bottom: 1px solid var(--border); }
+.trace-inspector { flex: 1 1 auto; min-height: 0; }
+.workbench-tab { min-width: 0; max-width: 180px; border: 1px solid transparent; cursor: pointer; }
+.workbench-tab.active { border-color: var(--border); background: var(--surface); }
+.workbench-tab > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workbench-tab:focus-visible, .workbench-add:focus-visible, .workbench-menu button:focus-visible, .workbench-choices button:focus-visible, .trace-new-activity:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.trace-new-activity { position: sticky; top: 0; z-index: 1; margin: 0 0 var(--s2); padding: var(--s1) var(--s2); border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: 10px var(--font-ui); cursor: pointer; }
+.trace-response-detail > summary { cursor: pointer; }
+.trace-response-detail > summary::-webkit-details-marker { display: none; }
+.trace-response-detail > summary::after { content: "⌄"; flex: none; color: var(--faint); font: 14px var(--font-mono); transform: rotate(0deg); transition: transform 140ms cubic-bezier(0.2,0,0,1); }
+.trace-response-detail:not([open]) > summary::after { transform: rotate(-90deg); }
+.trace-tool-decisions { display: grid; gap: var(--s1); margin-bottom: var(--s2); }
+.trace-tool-decision { display: grid; grid-template-columns: auto minmax(0, auto) minmax(0, 1fr); align-items: center; gap: var(--s2); padding: var(--s2); border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface-2); font-size: 12px; }
+.trace-tool-decision span { color: var(--muted); }
+.trace-tool-decision strong { font-weight: 600; }
+.trace-tool-decision code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font: 10px var(--font-mono); }
+@media (prefers-reduced-motion: reduce) { .trace-new-activity { scroll-behavior: auto; } }
 .app-titlebar {
   position: relative;
   z-index: 100;

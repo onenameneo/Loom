@@ -36,7 +36,7 @@ function surfaceCtx(): SurfaceCtx {
     settings: null,
     reloadSettings: vi.fn(),
     theme: "light",
-    setChatNodeId: vi.fn(),
+    setActiveNodeId: vi.fn(),
     sessionMode: "chat",
     setSessionMode: vi.fn(),
     treeVersion: 0,

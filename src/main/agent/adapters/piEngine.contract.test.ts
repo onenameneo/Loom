@@ -11,4 +11,12 @@ describe("piEngine hook contract", () => {
     expect(src).toContain("turnId: getCurrentTurnId?.(nodeId)");
     expect(src).not.toMatch(/approvalGate|ApprovalBroker|approval policy|createApproval/i);
   });
+
+  it("captures each completed assistant message so tool-call decisions appear in trace", () => {
+    const src = readFileSync(join(process.cwd(), "src/main/agent/adapters/piEngine.ts"), "utf-8");
+
+    expect(src).toContain('case "message_end"');
+    expect(src).toContain('captureTrace?.(nodeId, "response", { message: event.message })');
+    expect(src).not.toContain("[...(agent.state.messages as AgentMessage[])].reverse()");
+  });
 });

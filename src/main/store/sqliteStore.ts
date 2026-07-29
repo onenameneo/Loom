@@ -16,6 +16,7 @@ import {
   type Project,
 } from "./store";
 import { parseStoredModelRef, type StoredModelSelection } from "../modelConfig/modelRef";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 type ProjectRow = {
   id: string;
@@ -308,6 +309,7 @@ export class SqliteStore implements Store {
     title: string;
     seed?: unknown;
     mountAncestors?: boolean;
+    forkContextSnapshot?: AgentMessage[];
   }): NodeRecord {
     const sessionId = input.sessionId ?? (input.projectId ? this.ensureDefaultSession(input.projectId).id : undefined);
     if (!sessionId) throw new Error("Session not found.");
@@ -326,6 +328,7 @@ export class SqliteStore implements Store {
       title: input.title,
       seed: input.seed,
       mountAncestors: Boolean(input.mountAncestors),
+      forkContextSnapshot: input.forkContextSnapshot,
       messages: [],
     };
     this.db
@@ -344,14 +347,14 @@ export class SqliteStore implements Store {
         node.mountAncestors ? 1 : 0,
         now,
         now,
-        encode({}),
+        encode(node.forkContextSnapshot ? { forkContextSnapshot: node.forkContextSnapshot } : {}),
       );
     return node;
   }
 
   updateNode(
     id: string,
-    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: StoredModelSelection; color: string }>,
+    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; systemPrompt: string; model: StoredModelSelection; color: string }>,
   ): void {
     const current = this.getNode(id);
     if (!current) return;
@@ -359,6 +362,9 @@ export class SqliteStore implements Store {
       | { meta: string | null }
       | undefined;
     const meta = decode<Record<string, unknown>>(row?.meta, {});
+    if (Object.prototype.hasOwnProperty.call(patch, "forkContextSnapshot")) {
+      meta.forkContextSnapshot = patch.forkContextSnapshot;
+    }
     if (Object.prototype.hasOwnProperty.call(patch, "systemPrompt")) {
       const text = patch.systemPrompt?.trim() ?? "";
       if (text) meta.systemPrompt = text;
@@ -485,6 +491,7 @@ export class SqliteStore implements Store {
     const parsedModel = parseStoredModelRef(meta.model);
     const model = parsedModel.kind === "ref" ? parsedModel.ref : parsedModel.kind === "legacy" ? parsedModel.legacyModel : undefined;
     const color = typeof meta.color === "string" ? meta.color : undefined;
+    const forkContextSnapshot = Array.isArray(meta.forkContextSnapshot) ? meta.forkContextSnapshot as AgentMessage[] : undefined;
     return {
       id: row.id,
       sessionId: row.session_id,
@@ -497,6 +504,7 @@ export class SqliteStore implements Store {
       color,
       layout: toLayout(row),
       mountAncestors: Boolean(row.mount_ancestors),
+      forkContextSnapshot,
       messages: this.listMessages(row.id),
     };
   }

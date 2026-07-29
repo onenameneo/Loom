@@ -290,7 +290,7 @@ export default function Sidebar({
               {ctx.sessions.map((session) => {
                 const isExp = expanded.has(session.id);
                 const rows = isExp ? outlineRows(outlines[session.id] ?? []) : [];
-                const activeNodeId = ctx.sessionMode === "canvas" ? ctx.focusNodeId : ctx.chatNodeId;
+                const activeNodeId = ctx.activeNodeId;
                 return (
                   <Fragment key={session.id}>
                     <div

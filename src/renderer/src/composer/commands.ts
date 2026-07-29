@@ -1,8 +1,7 @@
 import type { LucideIcon } from "lucide-react";
-import { BookOpen, Code2, Cpu, Eraser, Image, Paperclip, RefreshCw, Settings, Workflow } from "lucide-react";
+import { BookOpen, Code2, Cpu, Eraser, Image, Paperclip, RefreshCw, Settings } from "lucide-react";
 
 export type CmdState = {
-  mount: boolean;
   model?: string;
   canRegenerate: boolean;
 };
@@ -11,7 +10,6 @@ export type CmdCtx = {
   nodeId: string;
   insertText: (t: string) => void;
   attachImage: () => void;
-  toggleMount: (on: boolean) => void;
   openPersona: () => void;
   clearNode: () => void;
   regenerate: () => void;
@@ -41,14 +39,6 @@ export const commands: Command[] = [
     group: "insert",
     hint: "插入围栏代码块",
     run: (ctx) => ctx.insertText(codeFence),
-  },
-  {
-    id: "insert-mount",
-    label: "挂载祖先",
-    icon: Workflow,
-    group: "insert",
-    hint: "把根到父节点的上下文一并发送",
-    run: (ctx) => ctx.toggleMount(!ctx.getState().mount),
   },
   {
     id: "insert-image",
@@ -89,14 +79,6 @@ export const commands: Command[] = [
     group: "action",
     hint: "打开节点 persona",
     run: (ctx) => ctx.openPersona(),
-  },
-  {
-    id: "mount",
-    label: "/mount",
-    icon: Workflow,
-    group: "action",
-    hint: "切换挂载祖先",
-    run: (ctx) => ctx.toggleMount(!ctx.getState().mount),
   },
   {
     id: "clear",

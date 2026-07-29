@@ -57,6 +57,14 @@ describe("NodeQueryEngine", () => {
     expect(finalize).toHaveBeenCalledWith(handle, 0);
   });
 
+  it("exposes the acquired turn to request instrumentation before preparation", async () => {
+    const handle: EngineHandle = { messages: [], prompt: vi.fn(), continue: vi.fn(), abort: vi.fn(), reset: vi.fn(), syncMessages: vi.fn() };
+    const started = vi.fn();
+    const queries = createNodeQueryEngine({ engine: engine(handle), turns: createTurnRunner({ events: eventSink() }) });
+    await queries.run({ nodeId: "n1", operation: "send", onTurnStarted: started, prepare: () => ({ kind: "continue" }), finalize: vi.fn() });
+    expect(started).toHaveBeenCalledWith(expect.objectContaining({ nodeId: "n1", turnId: expect.any(String) }));
+  });
+
   it("finalizes partial output after abort but not after invalidation", async () => {
     const gate = deferred();
     const messages: AgentMessage[] = [];

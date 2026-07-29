@@ -68,7 +68,7 @@ class MemoryStore implements Store {
   deleteSession() {}
   listNodes(sessionId: string) { return [...this.nodes.values()].filter((n) => n.sessionId === sessionId); }
   getNode(id: string) { return this.nodes.get(id); }
-  createNode(input: { sessionId?: string; projectId?: string; parentId?: string; title: string; seed?: unknown; mountAncestors?: boolean }): NodeRecord {
+  createNode(input: { sessionId?: string; projectId?: string; parentId?: string; title: string; seed?: unknown; mountAncestors?: boolean; forkContextSnapshot?: AgentMessage[] }): NodeRecord {
     const session = (input.sessionId ? this.getSession(input.sessionId) : this.ensureDefaultSession(input.projectId ?? "ws")) ?? this.sessions[0];
     const node: NodeRecord = {
       id: `n${this.nodes.size + 1}`,
@@ -78,6 +78,7 @@ class MemoryStore implements Store {
       title: input.title,
       seed: input.seed,
       mountAncestors: Boolean(input.mountAncestors),
+      forkContextSnapshot: input.forkContextSnapshot,
       messages: [],
     };
     this.nodes.set(node.id, node);
@@ -181,7 +182,7 @@ describe("createAgentSession turn runner integration", () => {
     }
   });
 
-  it("exposes active global skills to the agent as list and read tools", () => {
+  it("exposes active global skills to the agent as the read tool", () => {
     const root = mkdtempSync(join(tmpdir(), "loom-session-skill-tools-"));
     try {
       const skillRoot = join(root, "research");
@@ -202,7 +203,8 @@ describe("createAgentSession turn runner integration", () => {
         },
       });
 
-      expect(getTools?.("n1").map((tool) => tool.name)).toEqual(expect.arrayContaining(["skill_list", "skill_read"]));
+      expect(getTools?.("n1").map((tool) => tool.name)).toContain("skill_read");
+      expect(getTools?.("n1").map((tool) => tool.name)).not.toContain("skill_list");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -282,15 +284,34 @@ describe("createAgentSession turn runner integration", () => {
       expect(child.mountAncestors).toBe(false);
 
       const inherited = await buildContext!(child.id, []);
-      expect(inherited.map((msg: any) => msg.role)).toEqual(["user"]);
-      expect(String(inherited[0].content)).toContain("Research helper");
-      expect(String(inherited[0].content)).not.toContain("ancestor dialogue");
+      expect(inherited).toEqual([]);
 
       expect(session.disableSkill({ nodeId: child.id, skillId: "research" })).toMatchObject({ ok: true });
       expect(await buildContext!(child.id, store.listMessages(child.id).map((m) => m.content))).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("freezes mounted parent context when a branch is created", async () => {
+    const store = new MemoryStore([
+      { role: "user", content: "parent question" } as unknown as AgentMessage,
+      { role: "assistant", content: "parent answer" } as unknown as AgentMessage,
+    ]);
+    let buildContext: ((nodeId: string, own: AgentMessage[]) => any) | undefined;
+    const session = createAgentSession({
+      store, events: events().sink, ids: { message: () => "id" }, clock: { now: () => 1 }, getApiKey: () => "key",
+      createEngine: (hooks) => { buildContext = hooks.buildContext; return createEngine(createHandle([], vi.fn())); },
+    });
+
+    const child = session.create({ sessionId: "sess", parentId: "n1", seed: { text: "selected", from: "Node", parent: "n1" }, mountAncestors: true });
+    store.appendMessages("n1", [{ id: "late", seq: 2, role: "user", content: { role: "user", content: "later parent message" } as AgentMessage }]);
+
+    expect((await buildContext!(child.id, [])).map((message: any) => String(message.content))).toEqual([
+      "parent question",
+      "parent answer",
+      expect.stringContaining("selected"),
+    ]);
   });
 
   it("does not hydrate Loom skill events into the provider transcript after enabling a skill", () => {
@@ -318,7 +339,7 @@ describe("createAgentSession turn runner integration", () => {
     try {
       const initMessages = getNodeInit!("n1")!.messages;
       expect(initMessages.map((message) => (message as any).role)).toEqual(["assistant"]);
-      expect(buildContext!("n1", [...initMessages, { role: "user", content: "next" } as unknown as AgentMessage]).map((message: any) => message.role)).toEqual(["assistant", "user", "user"]);
+      expect(buildContext!("n1", [...initMessages, { role: "user", content: "next" } as unknown as AgentMessage]).map((message: any) => message.role)).toEqual(["assistant", "user"]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -378,10 +399,7 @@ describe("createAgentSession turn runner integration", () => {
 
     try {
       await expect(session.send({ nodeId: "n1", text: "use it", skillIds: ["research"] })).resolves.toEqual({ ok: true });
-      expect(observedContexts[0]).toEqual([
-        expect.stringContaining("user:[Loom skill context]"),
-        "user:use it",
-      ]);
+      expect(observedContexts[0]).toEqual(["user:use it"]);
       expect(store.listMessages("n1").map((m) => (m.content as any).role)).toEqual(["user", "assistant"]);
       expect(session.list("sess")[0]!.skills).toEqual([]);
     } finally {

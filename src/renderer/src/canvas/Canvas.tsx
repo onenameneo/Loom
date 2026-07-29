@@ -132,6 +132,7 @@ export default function Canvas({
   model,
   focusNodeId,
   onFocused,
+  onSelectedNode,
   onReturnChat,
   onTreeChange,
 }: {
@@ -139,6 +140,7 @@ export default function Canvas({
   model?: ModelSelection;
   focusNodeId?: string | null;
   onFocused?: () => void;
+  onSelectedNode?: (nodeId: string | null) => void;
   onReturnChat?: (nodeId: string) => void;
   onTreeChange?: () => void;
 }) {
@@ -152,6 +154,8 @@ export default function Canvas({
   const titleRef = useRef(new Map<string, string>());
   const flowRef = useRef<ReactFlowInstance | null>(null);
   const flashTimerRef = useRef<number | null>(null);
+  const zoomFrameRef = useRef<number | null>(null);
+  const pendingZoomRef = useRef(1);
   const treeChangeRef = useRef(onTreeChange);
   const modelRef = useRef(model);
   const layoutStore = useCanvasLayoutStore();
@@ -343,9 +347,19 @@ export default function Canvas({
   useEffect(
     () => () => {
       if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
+      if (zoomFrameRef.current) window.cancelAnimationFrame(zoomFrameRef.current);
     },
     [],
   );
+
+  const onViewportMove = useCallback((_: unknown, viewport: { zoom: number }) => {
+    pendingZoomRef.current = viewport.zoom;
+    if (zoomFrameRef.current) return;
+    zoomFrameRef.current = window.requestAnimationFrame(() => {
+      zoomFrameRef.current = null;
+      setZoom(pendingZoomRef.current);
+    });
+  }, []);
 
   const applyResizeLayout = useCallback(
     (id: string, next: ResizeParams) => {
@@ -530,13 +544,13 @@ export default function Canvas({
   }, [nodes, focusNodeId, focusNode, onFocused]);
 
   const onBranch = useCallback(
-    async (sourceId: string, seedText: string) => {
+    async (sourceId: string, seedText: string, mountAncestors: boolean) => {
       const from = titleRef.current.get(sourceId) ?? "";
       const seed = { text: seedText, from, parent: sourceId };
       let id: string;
       let createdDto: CanvasNodeDto | undefined;
       if (window.api) {
-        const dto = await window.api.canvas.create({ sessionId, parentId: sourceId, seed });
+        const dto = await window.api.canvas.create({ sessionId, parentId: sourceId, seed, mountAncestors });
         id = dto.id;
         createdDto = dto;
       } else {
@@ -571,7 +585,7 @@ export default function Canvas({
             title,
             seed,
             messages: [],
-            mountAncestors: false,
+            mountAncestors,
             model,
           },
           { x: initialLayout.x, y: initialLayout.y },
@@ -674,7 +688,9 @@ export default function Canvas({
         selectionOnDrag={false}
         onPaneClick={() => {
           setNodes((nds) => nds.map((node) => (node.selected ? { ...node, selected: false } : node)));
+          onSelectedNode?.(null);
         }}
+        onNodeClick={(_, node) => onSelectedNode?.(node.id)}
         onNodeMouseEnter={(_, node) => setHoverId(node.id)}
         onNodeMouseLeave={() => setHoverId(null)}
         onNodeDragStart={(_, node) => {
@@ -687,7 +703,7 @@ export default function Canvas({
         onInit={(instance) => {
           flowRef.current = instance;
         }}
-        onMove={(_, viewport) => setZoom(viewport.zoom)}
+        onMove={onViewportMove}
         defaultEdgeOptions={defaultEdgeOptions}
         minZoom={0.55}
         maxZoom={1.6}

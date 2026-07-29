@@ -3,7 +3,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { buildSkillCatalog, compileSkillContext, createSkillEvent, createSkillListTool, createSkillReadTool, detectSkillProviderCapabilities, replaySkillEvents } from ".";
+import { buildSkillCatalog, compileAvailableSkillsIndex, compileSkillContext, createSkillEvent, createSkillReadTool, detectSkillProviderCapabilities, replaySkillEvents } from ".";
 import type { Project, Settings } from "../../store/store";
 import { DEFAULT_SETTINGS } from "../../store/store";
 
@@ -106,37 +106,20 @@ describe("skill events and context", () => {
     expect(detectSkillProviderCapabilities({ providerId: "anthropic", compatibility: { midConversationSystemMessages: true } })).toEqual({ midConversationSystemMessages: true });
     expect(detectSkillProviderCapabilities({ providerId: "legacy", compatibility: { midConversationSystemMessages: false } })).toEqual({ midConversationSystemMessages: false });
   });
+
+  it("builds a system-prompt index from model-invocable active Skills only", () => {
+    const index = compileAvailableSkillsIndex([
+      { id: "research", name: "research", description: "Research primary sources", active: true, disableModelInvocation: false },
+      { id: "manual-only", name: "manual-only", description: "Manual command", active: true, disableModelInvocation: true },
+    ] as any);
+
+    expect(index).toContain('<skill id="research" description="Research primary sources">');
+    expect(index).toContain("skill_read");
+    expect(index).not.toContain("manual-only");
+  });
 });
 
 describe("skill_read", () => {
-  it("lists active skills without exposing skill body text", async () => {
-    const root = mkdtempSync(join(tmpdir(), "loom-skill-list-"));
-    try {
-      skill(root, "research", "---\nname: research\ndescription: Research helper\n---\n# Body should stay out of list output\n");
-      const catalog = buildSkillCatalog({ settings: settings([root]), homeDir: join(root, "home") });
-      const tool = createSkillListTool(() => catalog.activeSkills);
-
-      await expect(tool.execute({ toolCallId: "t0", args: {} })).resolves.toMatchObject({
-        details: {
-          skills: [
-            expect.objectContaining({
-              id: "research",
-              name: "research",
-              description: "Research helper",
-              sourceScope: "global",
-            }),
-          ],
-        },
-      });
-      const result = await tool.execute({ toolCallId: "t1", args: {} });
-      expect(result.content[0]).toMatchObject({ type: "text" });
-      expect(String((result.content[0] as any).text)).toContain("research");
-      expect(String((result.content[0] as any).text)).not.toContain("Body should stay out of list output");
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
   it("reads references inside the skill root and rejects traversal", async () => {
     const root = mkdtempSync(join(tmpdir(), "loom-skill-read-"));
     try {
@@ -155,15 +138,16 @@ describe("skill_read", () => {
     }
   });
 
-  it("declares active skill ids in the read tool schema for model selection", () => {
+  it("keeps skill ids out of the read tool schema because the static prompt is the discovery index", () => {
     const root = mkdtempSync(join(tmpdir(), "loom-skill-read-schema-"));
     try {
       skill(root, "mao", "---\nname: mao-zedong-perspective\ndescription: 毛泽东思维框架\n---\n# Body\n");
       const catalog = buildSkillCatalog({ settings: settings([root]), homeDir: join(root, "home") });
       const tool = createSkillReadTool(() => catalog.activeSkills);
 
-      expect(tool.description).toContain("mao-zedong-perspective");
-      expect(JSON.stringify(tool.parameters)).toContain("mao-zedong-perspective");
+      expect(tool.description).not.toContain("mao-zedong-perspective");
+      expect(JSON.stringify(tool.parameters)).not.toContain("mao-zedong-perspective");
+      expect(tool.description).toContain("<available_skills>");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

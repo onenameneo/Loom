@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTurnRunner } from "./turnRunner";
+import { createTraceRepository } from "./traceRepository";
 import type { EngineHandle, EventSinkPort } from "../ports";
 
 function engineHandle(): EngineHandle {
@@ -58,5 +59,16 @@ describe("createTurnRunner", () => {
     runner.invalidate("n1");
     expect(runner.settle(acquired.turn)).toEqual({ ok: false, reason: "stale" });
     expect(events.map((event) => (event.payload as any)?.state)).not.toContain("completed");
+  });
+
+  it("records approval transitions as approval trace entries", () => {
+    const traces = createTraceRepository({ now: () => 1 });
+    const runner = createTurnRunner({ events: eventSink().sink, traces });
+    const acquired = runner.acquire("n1", "send");
+    if (!acquired.ok) throw new Error("expected turn");
+
+    acquired.turn.setAwaitingApproval({ requestId: "approval-1", toolName: "shell", toolCallId: "call-1" });
+
+    expect(traces.snapshot("n1").records[0]?.entries.map((entry) => entry.kind)).toContain("approval");
   });
 });

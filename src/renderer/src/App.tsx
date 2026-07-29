@@ -3,6 +3,7 @@ import type { ActivitySession, ActivityStatus, ActivityTool, AgentProc, ProjectM
 import Sidebar from "./Sidebar";
 import { CanvasLayoutProvider } from "./canvas/CanvasLayoutContext";
 import { AppChrome, TitlebarProvider } from "./titlebar/Titlebar";
+import { Workbench } from "./workbench/Workbench";
 import { isBrowserSidebarShortcut } from "./titlebar/sidebarState";
 import { useAppShellController } from "./titlebar/useAppShellController";
 import {
@@ -19,10 +20,9 @@ export default function App() {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
-  const [chatNodeId, setChatNodeId] = useState<string | null>(null);
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [sessionMode, setSessionMode] = useState<"chat" | "canvas">("chat");
-  const sessionUiStateRef = useRef(new Map<string, { focusNodeId: string | null; chatNodeId: string | null; mode: "chat" | "canvas" }>());
+  const sessionUiStateRef = useRef(new Map<string, { nodeId: string | null; mode: "chat" | "canvas" }>());
   const previousSessionIdRef = useRef<string | null>(null);
   const [treeVersion, setTreeVersion] = useState(0);
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
@@ -33,6 +33,7 @@ export default function App() {
   const [activeSessionKey, setActiveSessionKey] = useState<string | null>(null);
   const [activityNow, setActivityNow] = useState(Date.now());
   const [fullscreen, setFullscreen] = useState(false);
+  const [workbenchOpen, setWorkbenchOpen] = useState(() => localStorage.getItem("loom:workbench:open") === "1");
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const sidebarContentRef = useRef<HTMLDivElement>(null);
   const shellController = useAppShellController({
@@ -111,12 +112,11 @@ export default function App() {
   useEffect(() => {
     const previous = previousSessionIdRef.current;
     if (previous && previous !== activeSessionId) {
-      sessionUiStateRef.current.set(previous, { focusNodeId, chatNodeId, mode: sessionMode });
+      sessionUiStateRef.current.set(previous, { nodeId: activeNodeId, mode: sessionMode });
     }
     if (activeSessionId && previous !== activeSessionId) {
       const saved = sessionUiStateRef.current.get(activeSessionId);
-      setFocusNodeId(saved?.focusNodeId ?? null);
-      setChatNodeId(saved?.chatNodeId ?? null);
+      setActiveNodeId(saved?.nodeId ?? null);
       setSessionMode(saved?.mode ?? "chat");
     }
     previousSessionIdRef.current = activeSessionId;
@@ -194,8 +194,7 @@ export default function App() {
     const session = await window.api.sessions.create(activeProjectId);
     await reloadSessions(activeProjectId);
     setActiveSessionId(session.id);
-    setFocusNodeId(null);
-    setChatNodeId(null);
+    setActiveNodeId(null);
     setActiveSurface("project");
   }, [activeProjectId, reloadSessions]);
 
@@ -242,10 +241,8 @@ export default function App() {
     settings,
     reloadSettings,
     theme,
-    focusNodeId,
-    clearFocusNode: () => setFocusNodeId(null),
-    chatNodeId,
-    setChatNodeId,
+    activeNodeId,
+    setActiveNodeId,
     sessionMode,
     setSessionMode,
     treeVersion,
@@ -264,6 +261,7 @@ export default function App() {
   const Active = SURFACES.find((s) => s.id === activeSurface) ?? SURFACES[0];
   const defaultTitlebar = useMemo(() => ({ title: Active.label }), [Active.label]);
   const platform = window.api?.platform ?? "browser";
+  useEffect(() => localStorage.setItem("loom:workbench:open", workbenchOpen ? "1" : "0"), [workbenchOpen]);
 
   return (
     <TitlebarProvider defaultDescriptor={defaultTitlebar}>
@@ -287,23 +285,17 @@ export default function App() {
                 onSelectSession={async (id) => {
                   setActiveSessionId(id);
                   if (sessionMode !== "canvas") {
-                    setFocusNodeId(null);
-                    setChatNodeId(null);
+                    setActiveNodeId(null);
                     return;
                   }
                   const nodes = window.api ? await window.api.canvas.list(id) : [];
                   const root = nodes.find((node) => !node.parentId) ?? nodes[0];
-                  setFocusNodeId(root?.id ?? null);
+                  setActiveNodeId(root?.id ?? null);
                 }}
                 onFocusNode={(sessionId, nodeId) => {
                   setActiveSessionId(sessionId);
                   setActiveSurface("project");
-                  if (sessionMode === "canvas") {
-                    setFocusNodeId(nodeId);
-                  } else {
-                    setChatNodeId(nodeId);
-                    setFocusNodeId(null);
-                  }
+                  setActiveNodeId(nodeId);
                 }}
                 onCreateProject={createProject}
                 onRenameProject={async (id, name) => {
@@ -338,6 +330,9 @@ export default function App() {
             main={
               <Active.Panel ctx={ctx} />
             }
+            right={<Workbench nodeId={activeNodeId} />}
+            workbenchOpen={workbenchOpen}
+            onToggleWorkbench={() => setWorkbenchOpen((open) => !open)}
           />
         </div>
       </CanvasLayoutProvider>

@@ -62,7 +62,7 @@ const api = {
   canvas: {
     list: (sessionId: string): Promise<any[]> => ipcRenderer.invoke("node:list", sessionId),
     open: (sessionId: string): Promise<any[]> => ipcRenderer.invoke("node:open", sessionId),
-    create: (arg: { sessionId: string; parentId?: string; seed?: any; title?: string }): Promise<any> =>
+    create: (arg: { sessionId: string; parentId?: string; seed?: any; title?: string; mountAncestors?: boolean }): Promise<any> =>
       ipcRenderer.invoke("node:create", arg),
     send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[]): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("node:send", { nodeId, text, images, skillIds }),
@@ -80,13 +80,17 @@ const api = {
       ipcRenderer.invoke("node:updateLayout", { nodeId, layout }),
     updateLayouts: (items: Array<{ id: string; layout: { x: number; y: number; width: number; height: number } }>): Promise<any> =>
       ipcRenderer.invoke("node:updateLayouts", items),
-    setMount: (nodeId: string, on: boolean): Promise<{ ok: boolean; budget: any }> =>
-      ipcRenderer.invoke("node:setMount", { nodeId, on }),
     setModel: (nodeId: string, model: string | { providerId: string; modelId: string }): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("node:setModel", { nodeId, model }),
     models: (): Promise<{ id: string; name: string }[]> => ipcRenderer.invoke("node:models"),
     budget: (nodeId: string): Promise<{ withoutAncestors: number; withAncestors: number; estimated: boolean }> =>
       ipcRenderer.invoke("node:budget", nodeId),
+    trace: (nodeId: string): Promise<any> => ipcRenderer.invoke("node:trace", nodeId),
+    onTrace: (listener: (snapshot: any) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, snapshot: any) => listener(snapshot);
+      ipcRenderer.on("node:trace:update", handler);
+      return () => ipcRenderer.removeListener("node:trace:update", handler);
+    },
     reset: (nodeId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("node:reset", nodeId),
     skills: (nodeId: string): Promise<any> => ipcRenderer.invoke("node:skills", nodeId),
     enableSkill: (nodeId: string, skillId: string): Promise<any> =>

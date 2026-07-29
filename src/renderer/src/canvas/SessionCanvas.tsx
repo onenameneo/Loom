@@ -14,10 +14,8 @@ export default function SessionCanvas({
   model,
   noKey,
   goSettings,
-  focusNodeId,
-  chatNodeId,
-  onFocusedNode,
-  onChatNodeChange,
+  activeNodeId,
+  onNodeChange,
   onModeChange,
   onTreeChange,
 }: {
@@ -26,10 +24,8 @@ export default function SessionCanvas({
   model?: ModelSelection;
   noKey: boolean;
   goSettings: () => void;
-  focusNodeId?: string | null;
-  chatNodeId?: string | null;
-  onFocusedNode?: () => void;
-  onChatNodeChange?: (nodeId: string | null) => void;
+  activeNodeId?: string | null;
+  onNodeChange?: (nodeId: string | null) => void;
   onModeChange?: (mode: "chat" | "canvas") => void;
   onTreeChange?: () => void;
 }) {
@@ -52,11 +48,17 @@ export default function SessionCanvas({
 
   const isCanvas = viewMode === "canvas" || (viewMode === "auto" && nodeCount > 1);
   const root = nodeList.find((d) => !d.parentId) ?? nodeList[0] ?? null;
-  const chatNode = nodeList.find((d) => d.id === chatNodeId) ?? root;
+  const chatNode = nodeList.find((d) => d.id === activeNodeId) ?? root;
 
   useEffect(() => {
     onModeChange?.(isCanvas ? "canvas" : "chat");
   }, [isCanvas, onModeChange]);
+
+  // 普通对话会在未选中节点时回退显示根节点；把实际渲染节点同步给共享状态，
+  // 因而标题栏、侧栏、Trace 与 ChatView 始终使用同一个 node id。
+  useEffect(() => {
+    if (!isCanvas && chatNode && activeNodeId !== chatNode.id) onNodeChange?.(chatNode.id);
+  }, [isCanvas, chatNode, activeNodeId, onNodeChange]);
 
   const titlebarContext = useMemo(
     () => ({
@@ -72,19 +74,20 @@ export default function SessionCanvas({
   }, []);
 
   const returnChat = useCallback(async (nodeId?: string) => {
-    onChatNodeChange?.(nodeId ?? null);
+    onNodeChange?.(nodeId ?? null);
     await reload();
     setViewMode("chat");
-  }, [onChatNodeChange, reload]);
+  }, [onNodeChange, reload]);
 
   const branchFromChat = useCallback(
-    async (seedText: string) => {
+    async (seedText: string, mountAncestors: boolean) => {
       if (!chatNode) return;
       if (window.api) {
         await window.api.canvas.create({
           sessionId: sessionId,
           parentId: chatNode.id,
           seed: { text: seedText, from: chatNode.title || "主线", parent: chatNode.id },
+          mountAncestors,
         });
       }
       setViewMode("canvas"); // 切到画布；Canvas 会自行 open 载入 root+新分支
@@ -100,8 +103,9 @@ export default function SessionCanvas({
           <Canvas
             sessionId={sessionId}
             model={model}
-            focusNodeId={focusNodeId}
-            onFocused={onFocusedNode}
+            focusNodeId={activeNodeId}
+            onFocused={() => onNodeChange?.(null)}
+            onSelectedNode={onNodeChange}
             onReturnChat={returnChat}
             onTreeChange={onTreeChange}
           />

@@ -14,14 +14,12 @@ export function Composer({
   onChange,
   busy,
   placeholder,
-  mount,
   canRegenerate,
   budgetLine,
   activeSkills,
   topAccessory,
   onSubmit,
   onStop,
-  onToggleMount,
   onOpenPersona,
   onClearNode,
   onRegenerate,
@@ -34,14 +32,12 @@ export function Composer({
   onChange: (value: string) => void;
   busy: boolean;
   placeholder: string;
-  mount: boolean;
   canRegenerate: boolean;
   budgetLine?: string;
   activeSkills?: SkillEffectiveDto[];
   topAccessory?: ReactNode;
   onSubmit: (text: string, images: ComposerImage[], skillIds: string[]) => void;
   onStop: () => void;
-  onToggleMount: (on: boolean) => void;
   onOpenPersona: () => void;
   onClearNode: () => void;
   onRegenerate: () => void;
@@ -85,15 +81,14 @@ export function Composer({
       nodeId,
       insertText,
       attachImage,
-      toggleMount: onToggleMount,
       openPersona: onOpenPersona,
       clearNode: onClearNode,
       regenerate: onRegenerate,
       setModel: onSetModel,
       enableSkill: onEnableSkill,
-      getState: () => ({ mount, canRegenerate }),
+      getState: () => ({ canRegenerate }),
     }),
-    [attachImage, canRegenerate, insertText, mount, nodeId, onClearNode, onEnableSkill, onOpenPersona, onRegenerate, onSetModel, onToggleMount],
+    [attachImage, canRegenerate, insertText, nodeId, onClearNode, onEnableSkill, onOpenPersona, onRegenerate, onSetModel],
   );
 
   useEffect(() => {
@@ -230,14 +225,6 @@ export function Composer({
             }}
           />
           <CommandMenu ctx={ctx} />
-          <button
-            type="button"
-            className={`mount-toggle ${mount ? "on" : ""}`}
-            onClick={() => onToggleMount(!mount)}
-            title="是否把根→父的完整路径也一并发给模型（上下文更全，但更贵）"
-          >
-            挂载祖先
-          </button>
           <button
             type="button"
             className={`round-send ${busy ? "is-stop" : ""}`}

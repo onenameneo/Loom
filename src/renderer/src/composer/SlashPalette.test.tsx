@@ -15,12 +15,11 @@ function ctx(): CmdCtx {
     nodeId: "node-1",
     insertText: vi.fn(),
     attachImage: vi.fn(),
-    toggleMount: vi.fn(),
     openPersona: vi.fn(),
     clearNode: vi.fn(),
     regenerate: vi.fn(),
     setModel: vi.fn(),
-    getState: () => ({ mount: false, canRegenerate: false }),
+    getState: () => ({ canRegenerate: false }),
   };
 }
 

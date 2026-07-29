@@ -41,10 +41,8 @@ export interface SurfaceCtx {
   settings: SettingsPayload | null;
   reloadSettings: () => void;
   theme: "light" | "dark";
-  focusNodeId?: string | null;
-  clearFocusNode?: () => void;
-  chatNodeId?: string | null;
-  setChatNodeId: (nodeId: string | null) => void;
+  activeNodeId?: string | null;
+  setActiveNodeId: (nodeId: string | null) => void;
   sessionMode: "chat" | "canvas";
   setSessionMode: (mode: "chat" | "canvas") => void;
   treeVersion: number;
@@ -103,10 +101,8 @@ function ProjectPanel({ ctx }: { ctx: SurfaceCtx }) {
       model={ctx.settings?.resolvedModel}
       noKey={Boolean(noKey)}
       goSettings={ctx.goSettings}
-      focusNodeId={ctx.focusNodeId}
-      chatNodeId={ctx.chatNodeId}
-      onFocusedNode={ctx.clearFocusNode}
-      onChatNodeChange={ctx.setChatNodeId}
+      activeNodeId={ctx.activeNodeId}
+      onNodeChange={ctx.setActiveNodeId}
       onModeChange={ctx.setSessionMode}
       onTreeChange={ctx.bumpTreeVersion}
     />

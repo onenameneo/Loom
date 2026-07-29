@@ -53,7 +53,7 @@ vi.mock("@xyflow/react", async () => {
           {children}
           <BranchContext.Consumer>
             {(branch) => (
-              <button type="button" onClick={() => void branch?.onBranch("root", "branch seed")}>
+              <button type="button" onClick={() => void branch?.onBranch("root", "branch seed", false)}>
                 模拟新建分支
               </button>
             )}

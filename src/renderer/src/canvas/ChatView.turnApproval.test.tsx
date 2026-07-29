@@ -143,6 +143,6 @@ describe("ChatView turn and approval controls", () => {
     fireEvent.change(input, { target: { value: "hello" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(send).toHaveBeenCalledWith("n1", "hello", []);
+    expect(send).toHaveBeenCalledWith("n1", "hello", [], []);
   });
 });

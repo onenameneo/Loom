@@ -1064,6 +1064,35 @@
   font-size: 10px;
   font-weight: 450;
 }
+.seltb .branch-mount-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  margin-top: 4px;
+  padding: 5px 9px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+}
+.seltb .branch-mount-toggle::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+}
+.seltb .branch-mount-toggle.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.seltb .branch-mount-toggle.on::before {
+  border-color: var(--accent);
+  background: var(--accent);
+}
 .seltb::after {
   content: "";
   position: absolute;
@@ -1383,42 +1412,6 @@
   color: var(--faint);
   border: 1px solid var(--border);
   cursor: default;
-}
-
-/* 挂载祖先 = 样式化开关 pill（替原生 checkbox），内嵌输入框左下 */
-.mount-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  font-size: 10.5px;
-  color: var(--muted);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 0 11px;
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-}
-.mount-toggle::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--faint);
-}
-.mount-toggle:hover {
-  color: var(--text);
-  border-color: var(--border-strong);
-}
-.mount-toggle.on {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: var(--accent-soft);
-}
-.mount-toggle.on::before {
-  background: var(--accent);
 }
 
 /* 单一右下角 resize control：22px 命中区，视觉角标内嵌并以圆角收边。 */

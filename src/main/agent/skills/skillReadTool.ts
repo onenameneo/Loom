@@ -23,53 +23,13 @@ function isAllowedRelativePath(path: string): boolean {
   return clean === "SKILL.md" || clean.startsWith("references/") || clean.startsWith("assets/");
 }
 
-function skillIndex(skills: SkillCatalogItem[]): string {
-  const active = skills.filter((skill) => skill.active);
-  if (active.length === 0) return "No active skills.";
-  return active.map((skill) => `${skill.id} (${skill.name}): ${skill.description}`).join("; ");
-}
-
-export function createSkillListTool(getSkills: () => SkillCatalogItem[]): ReadonlyAgentTool<Record<string, never>, { skills: Array<{
-  id: string;
-  name: string;
-  description: string;
-  sourceScope: SkillCatalogItem["scope"];
-  sourcePath: string;
-  hash: string;
-  diagnostics: SkillCatalogItem["diagnostics"];
-}> }> {
-  return {
-    name: "skill_list",
-    label: "List Skills",
-    description: "List active Loom skills available in this node. Use this before skill_read when the user asks what skills are available or asks to choose a skill.",
-    parameters: Type.Object({}),
-    readOnly: true,
-    execute: async () => {
-      const skills = getSkills().filter((skill) => skill.active).map((skill) => ({
-        id: skill.id,
-        name: skill.name,
-        description: skill.description,
-        sourceScope: skill.scope,
-        sourcePath: skill.rootPath,
-        hash: skill.hash,
-        diagnostics: skill.diagnostics,
-      }));
-      const text = skills.length > 0
-        ? skills.map((skill) => `- ${skill.id}: ${skill.description} (${skill.sourceScope}, ${skill.hash})`).join("\n")
-        : "No active Loom skills are available for this node.";
-      return textResult(text, { skills });
-    },
-  };
-}
-
 export function createSkillReadTool(getSkills: () => SkillCatalogItem[]): ReadonlyAgentTool<{ skillId: string; path?: string; limit?: number }, unknown> {
-  const availableSkills = skillIndex(getSkills());
   return {
     name: "skill_read",
     label: "Read Skill File",
-    description: `Read bounded UTF-8 text from an active Loom skill's SKILL.md, references, or assets directory. Available skill ids: ${availableSkills}`,
+    description: "Read bounded UTF-8 text from an active Loom skill's SKILL.md, references, or assets directory. Use a skill id from <available_skills>.",
     parameters: Type.Object({
-      skillId: Type.String({ description: `Catalog skill id. Use one of: ${availableSkills}` }),
+      skillId: Type.String({ description: "An active skill id from <available_skills>." }),
       path: Type.Optional(Type.String({ description: "Relative path: SKILL.md, references/*, or assets/*." })),
       limit: Type.Optional(Type.Number({ description: "Maximum returned characters." })),
     }),

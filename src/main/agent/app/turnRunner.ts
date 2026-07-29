@@ -1,4 +1,5 @@
 import type { EngineHandle, EventSinkPort, TurnLifecycleEvent, TurnOperationKind, TurnResult, TurnRunContext } from "../ports";
+import type { TraceRepository } from "./traceRepository";
 
 export interface TurnRunner {
   acquire(nodeId: string, operation: TurnOperationKind): { ok: true; turn: TurnRunContext } | { ok: false; reason: "node_busy" };
@@ -31,7 +32,7 @@ function boundedError(err: unknown): string {
   return text.length > 240 ? `${text.slice(0, 237)}...` : text;
 }
 
-export function createTurnRunner(deps: { events: EventSinkPort }): TurnRunner {
+export function createTurnRunner(deps: { events: EventSinkPort; traces?: TraceRepository }): TurnRunner {
   const activeByNode = new Map<string, ActiveTurn>();
   const generationByNode = new Map<string, number>();
 
@@ -53,6 +54,8 @@ export function createTurnRunner(deps: { events: EventSinkPort }): TurnRunner {
       state,
       ...extra,
     } satisfies TurnLifecycleEvent);
+    if (state === "completed" || state === "aborted" || state === "failed") deps.traces?.finish(active.nodeId, active.turnId, state);
+    else deps.traces?.append(active.nodeId, active.turnId, state === "awaiting_approval" ? "approval" : "turn", { state, ...extra });
   }
 
   function contextFor(active: ActiveTurn): TurnRunContext {
@@ -95,6 +98,7 @@ export function createTurnRunner(deps: { events: EventSinkPort }): TurnRunner {
       settled: false,
     };
     activeByNode.set(nodeId, active);
+    deps.traces?.start({ nodeId, turnId: active.turnId, operation });
     emit(active, "running");
     return { ok: true as const, turn: contextFor(active) };
   }

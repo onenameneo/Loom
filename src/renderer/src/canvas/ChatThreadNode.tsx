@@ -13,7 +13,7 @@ import { ApprovalPrompt, type ApprovalState } from "./ApprovalPrompt";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill";
 type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
-type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number };
+type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number; mountAncestors: boolean };
 type RectLike = Pick<DOMRect, "left" | "top" | "bottom" | "width" | "height">;
 
 function formatModelSelection(model?: ModelSelection) {
@@ -43,7 +43,7 @@ export function selectionToolbarFromRects({
   scrollTop: number;
   clientWidth: number;
   zoom: number;
-}): SelectionToolbar | null {
+}): Omit<SelectionToolbar, "mountAncestors"> | null {
   if (selection.width === 0 && selection.height === 0) return null;
   const scale = zoom > 0 ? zoom : 1;
   const toolbarWidth = Math.min(240, Math.max(0, clientWidth - 24));
@@ -94,7 +94,6 @@ export function ChatThreadNode(props: any) {
   const [turn, setTurn] = useState<TurnCanvasEventPayload | null>(null);
   const [approval, setApproval] = useState<ApprovalState | null>(null);
   const [input, setInput] = useState(() => localStorage.getItem(`loom:draft:${id}`) ?? "");
-  const [mount, setMount] = useState<boolean>(!!data.mountAncestors);
   const [budget, setBudget] = useState<NodeBudget | null>(null);
   const [tb, setTb] = useState<SelectionToolbar | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -275,21 +274,14 @@ export function ChatThreadNode(props: any) {
       clientWidth: el.clientWidth,
       zoom,
     });
-    setTb(toolbar);
+    setTb(toolbar && { ...toolbar, mountAncestors: false });
   }, []);
 
   const doBranch = () => {
-    if (tb) branch?.onBranch(id, tb.text);
+    if (tb) branch?.onBranch(id, tb.text, tb.mountAncestors);
     setTb(null);
     window.getSelection()?.removeAllRanges();
   };
-
-  async function toggleMount(on: boolean) {
-    setMount(on);
-    if (!window.api) return;
-    const r = await window.api.canvas.setMount(id, on);
-    if (r?.budget) setBudget(r.budget);
-  }
 
   function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = []) {
     if (busy || (!text && images.length === 0)) return;
@@ -421,7 +413,7 @@ export function ChatThreadNode(props: any) {
   const seedPreview = seedText.length > 42 ? `${seedText.slice(0, 42)}…` : seedText;
   const titleEditUnits = Array.from(title || "标题").reduce((sum, char) => sum + (char.charCodeAt(0) > 255 ? 2 : 1), 0);
   const titleEditWidth = `${Math.min(Math.max(titleEditUnits + 2, 8), 36)}ch`;
-  const tokens = budget ? (mount ? budget.withAncestors : budget.withoutAncestors) : null;
+  const tokens = budget ? (data.mountAncestors ? budget.withAncestors : budget.withoutAncestors) : null;
   const tokenLabel =
     tokens == null ? "—" : tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : `${tokens}`;
   const streaming = busy && msgs[msgs.length - 1]?.role === "assistant";
@@ -647,6 +639,15 @@ export function ChatThreadNode(props: any) {
                 <span><IconSplit size={13} /> 岔出分支</span>
                 <small>{tb.text.length > 40 ? `${tb.text.slice(0, 40)}…` : tb.text}</small>
               </button>
+              <button
+                className={`branch-mount-toggle ${tb.mountAncestors ? "on" : ""}`}
+                type="button"
+                aria-pressed={tb.mountAncestors}
+                onClick={() => setTb((current) => current && { ...current, mountAncestors: !current.mountAncestors })}
+                title="创建时冻结并携带根到当前节点的完整上下文"
+              >
+                挂载祖先
+              </button>
             </div>
           )}
       </div>
@@ -685,11 +686,9 @@ export function ChatThreadNode(props: any) {
             />
           ) : undefined}
           activeSkills={draftSkills}
-          mount={mount}
           canRegenerate={msgs.some((m) => m.role === "user") && !busy}
           onSubmit={submit}
           onStop={stop}
-          onToggleMount={toggleMount}
           onOpenPersona={() => setPersonaOpen(true)}
           onClearNode={clearNode}
           onRegenerate={regenerate}

@@ -8,7 +8,7 @@
     "build": "electron-vite build",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "start": "ELECTRON_RUN_AS_NODE= electron-vite preview",
-    "test": "vitest run",
+    "test": "ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs run",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },
   "dependencies": {

@@ -67,10 +67,11 @@ export interface PiEngineDeps {
   dispatcher: HookDispatcher;
   /** 当前节点活跃 outer turn id；仅用于把工具调用与应用 turn 相关联。 */
   getCurrentTurnId?: (nodeId: string) => string | undefined;
+  captureTrace?: (nodeId: string, kind: "request" | "response" | "tool" | "event" | "error", payload: unknown) => void;
 }
 
 export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
-  const { events, resolveModel, buildContext, getNodeInit, getTools, getProjectRoot, dispatcher, getCurrentTurnId } = deps;
+  const { events, resolveModel, buildContext, getNodeInit, getTools, getProjectRoot, dispatcher, getCurrentTurnId, captureTrace } = deps;
   const cache = new Map<string, { agent: Agent; handle: EngineHandle; configStamp: string }>();
 
   function fileStamp(filePath: string | undefined) {
@@ -170,6 +171,13 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
       },
       streamFn: (requestModel, context, options) => {
         const ref = { providerId: String(requestModel.provider), modelId: String(requestModel.id) };
+        captureTrace?.(nodeId, "request", {
+          model: { provider: ref.providerId, id: ref.modelId },
+          systemPrompt: init?.systemPrompt || SYSTEM_PROMPT,
+          messages: context,
+          tools: getTools(nodeId).map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })),
+          options,
+        });
         try {
           return attributedStream(modelContext.models.streamSimple(requestModel, context, options), ref);
         } catch (error) {
@@ -183,6 +191,7 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
       //   空注册表下：transformContext 恒等、before/after 返回 undefined → 行为中性。
       transformContext: (messages: AgentMessage[]) => dispatcher.contextTransform(messages),
       beforeToolCall: async ({ toolCall, args }: BeforeToolCallContext) => {
+        captureTrace?.(nodeId, "tool", { state: "start", name: toolCall.name, id: toolCall.id, arguments: args });
         const d = await dispatcher.toolCall({
           nodeId,
           turnId: getCurrentTurnId?.(nodeId),
@@ -192,8 +201,9 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
         });
         return d ? { block: true, reason: d.reason } : undefined;
       },
-      afterToolCall: ({ toolCall, args, result, isError }: AfterToolCallContext) =>
-        dispatcher.toolResult({
+      afterToolCall: ({ toolCall, args, result, isError }: AfterToolCallContext) => {
+        captureTrace?.(nodeId, "tool", { state: "end", name: toolCall.name, id: toolCall.id, arguments: args, result: result.content, details: result.details, isError, usage: result.usage });
+        return dispatcher.toolResult({
           nodeId,
           toolName: toolCall.name,
           toolCallId: toolCall.id,
@@ -202,10 +212,12 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
           details: result.details,
           isError,
           usage: result.usage,
-        }),
+        });
+      },
     });
 
     agent.subscribe((event: AgentEvent) => {
+      captureTrace?.(nodeId, "event", { type: event.type, detail: event });
       switch (event.type) {
         case "agent_start":
           events.emit(nodeId, "thinking");
@@ -216,6 +228,9 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
         case "message_update":
           if (event.assistantMessageEvent?.type === "text_delta")
             events.emit(nodeId, "delta", event.assistantMessageEvent.delta);
+          break;
+        case "message_end":
+          if (event.message?.role === "assistant") captureTrace?.(nodeId, "response", { message: event.message });
           break;
         case "agent_end":
           events.emit(nodeId, "done");

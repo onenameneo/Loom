@@ -117,6 +117,8 @@ export interface NodeRecord {
   color?: string;
   layout?: NodeLayout;
   mountAncestors: boolean;
+  /** Hidden immutable LLM context captured when this branch mounts its ancestors. */
+  forkContextSnapshot?: AgentMessage[];
   messages: PersistedMessage[];
 }
 
@@ -148,10 +150,11 @@ export interface Store {
     title: string;
     seed?: unknown;
     mountAncestors?: boolean;
+    forkContextSnapshot?: AgentMessage[];
   }): NodeRecord;
   updateNode(
     id: string,
-    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: StoredModelSelection; color: string }>,
+    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; systemPrompt: string; model: StoredModelSelection; color: string }>,
   ): void;
   updateNodeLayout(id: string, layout: NodeLayout): boolean;
   updateNodeLayouts(items: Array<{ id: string; layout: NodeLayout }>): string[];

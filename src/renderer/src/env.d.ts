@@ -382,7 +382,7 @@ declare global {
       canvas: {
         list: (sessionId: string) => Promise<CanvasNodeDto[]>;
         open: (sessionId: string) => Promise<CanvasNodeDto[]>;
-        create: (arg: { sessionId: string; parentId?: string; seed?: NodeSeed; title?: string }) => Promise<CanvasNodeDto>;
+        create: (arg: { sessionId: string; parentId?: string; seed?: NodeSeed; title?: string; mountAncestors?: boolean }) => Promise<CanvasNodeDto>;
         send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[]) => Promise<{ ok: boolean }>;
         abort: (nodeId: string) => Promise<{ ok: boolean }>;
         regenerate: (nodeId: string) => Promise<{ ok: boolean }>;
@@ -397,10 +397,11 @@ declare global {
         updateLayouts: (
           items: Array<{ id: string; layout: { x: number; y: number; width: number; height: number } }>,
         ) => Promise<{ ok: boolean; updatedIds: string[]; reason?: "invalid" | "storage" }>;
-        setMount: (nodeId: string, on: boolean) => Promise<{ ok: boolean; budget: NodeBudget }>;
         setModel: (nodeId: string, model: string | { providerId: string; modelId: string }) => Promise<{ ok: boolean }>;
         models: () => Promise<ModelListItem[]>;
         budget: (nodeId: string) => Promise<NodeBudget>;
+        trace: (nodeId: string) => Promise<any>;
+        onTrace: (listener: (snapshot: any) => void) => () => void;
         reset: (nodeId: string) => Promise<{ ok: boolean }>;
         skills: (nodeId: string) => Promise<{
           catalog: SkillCatalogDto;

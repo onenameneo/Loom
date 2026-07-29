@@ -45,6 +45,23 @@ function ResolvedTitlebar() {
 }
 
 describe("global titlebar", () => {
+  it("publishes the fallback root node through the shared active-node callback", async () => {
+    const onNodeChange = vi.fn();
+    render(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <SessionCanvas
+          sessionId="session-1"
+          sessionName="ordinary chat"
+          noKey={false}
+          goSettings={() => {}}
+          onNodeChange={onNodeChange}
+        />
+      </TitlebarProvider>,
+    );
+
+    await waitFor(() => expect(onNodeChange).toHaveBeenCalledWith("root"));
+  });
+
   it("keeps child actions active while Workspace updates its context", async () => {
     const view = render(
       <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>

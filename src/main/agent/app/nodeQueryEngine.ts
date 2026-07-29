@@ -22,6 +22,7 @@ export function createNodeQueryEngine(deps: { engine: LlmEnginePort; turns: Turn
     if (!acquired.ok) return { result: acquired };
 
     const turn: TurnRunContext = acquired.turn;
+    request.onTurnStarted?.(turn);
     let handle: Awaited<ReturnType<LlmEnginePort["ensure"]>> | undefined;
     let from = 0;
     let error: unknown;

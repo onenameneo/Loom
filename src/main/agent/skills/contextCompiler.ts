@@ -1,5 +1,5 @@
 import type { Message, UserMessage } from "@earendil-works/pi-ai";
-import type { EffectiveSkillState } from "./types";
+import type { EffectiveSkillState, SkillCatalogItem } from "./types";
 
 export type SkillProviderCapabilities = {
   midConversationSystemMessages: boolean;
@@ -23,6 +23,17 @@ export interface SkillContextDiagnostics {
 export interface SkillContextCompileResult {
   messages: Message[];
   diagnostics: SkillContextDiagnostics;
+}
+
+/** Stable, discoverable capability map for the model-facing system prompt. */
+export function compileAvailableSkillsIndex(skills: SkillCatalogItem[]): string {
+  const available = skills.filter((skill) => skill.active && !skill.disableModelInvocation).sort((a, b) => a.id.localeCompare(b.id));
+  if (available.length === 0) return "";
+  return [
+    "<available_skills>",
+    ...available.map((skill) => `  <skill id=\"${skill.id}\" description=\"${skill.description.replaceAll('\"', "'")}\">Use skill_read with this id to load SKILL.md before following its detailed instructions.</skill>`),
+    "</available_skills>",
+  ].join("\n");
 }
 
 function systemMsg(text: string, timestamp: number): Message {

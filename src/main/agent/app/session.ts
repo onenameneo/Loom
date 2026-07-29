@@ -14,12 +14,13 @@ import { createApprovalPolicyStore } from "./approvalPolicy";
 import { createToolRegistry } from "./toolRuntime";
 import { createTurnRunner } from "./turnRunner";
 import { createNodeQueryEngine } from "./nodeQueryEngine";
+import { createTraceRepository } from "./traceRepository";
 import { createApprovalGate } from "../hooks/tools/approvalGate";
 import {
   buildSkillCatalog,
+  compileAvailableSkillsIndex,
   compileSkillContext,
   createSkillEvent,
-  createSkillListTool,
   createSkillReadTool,
   detectSkillProviderCapabilities,
   replaySkillEvents,
@@ -57,6 +58,7 @@ export interface CanvasNode {
   color?: string;
   layout?: NodeLayout;
   mountAncestors: boolean;
+  forkContextSnapshot?: Message[];
   messages: AgentMessage[];
   messageMeta: unknown[];
 }
@@ -75,6 +77,7 @@ export interface CanvasRuntimeDeps {
     getTools: (nodeId: string) => AgentTool[];
     dispatcher: HookDispatcher;
     getCurrentTurnId: (nodeId: string) => string | undefined;
+    captureTrace: (nodeId: string, kind: "request" | "response" | "tool" | "event" | "error", payload: unknown) => void;
   }) => LlmEnginePort;
 }
 
@@ -107,6 +110,7 @@ interface CanvasMessageDto {
 }
 
 const NO_KEY_ERROR = "未配置 API key（去设置填写，或设置 ANTHROPIC_API_KEY）。";
+const DEFAULT_SYSTEM_PROMPT = "你是一个冷静、精确、克制的思考助手。回答直接，不啰嗦。";
 
 export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   const { store, events, ids, clock, getApiKey } = deps;
@@ -133,6 +137,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       color: record.color,
       layout: record.layout,
       mountAncestors: record.mountAncestors,
+      forkContextSnapshot: record.forkContextSnapshot as Message[] | undefined,
       messages: record.messages.map((m) => m.content),
       messageMeta: record.messages.map((m) => m.meta),
     };
@@ -221,19 +226,18 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   function buildContext(nodeId: string, own: AgentMessage[]): Message[] {
     const node = nodes.get(nodeId);
     if (!node) return own.filter(isLlmMessage);
-    const ancestors = node.mountAncestors ? ancestorsOf(nodeId) : [];
-    const skillState = requestSkillsFor(nodeId);
-    const compiled = compileSkillContext({
-      state: skillState,
-      capabilities: detectSkillProviderCapabilities({ providerId: "anthropic" }),
-      now: clock.now(),
-    });
-    return buildContextPlan(node, own, ancestors, clock.now(), compiled.messages);
+    return buildContextPlan(node, own, clock.now());
   }
 
   function getNodeInit(nodeId: string): NodeInit | undefined {
     const n = loadNode(nodeId);
-    return n ? { systemPrompt: n.systemPrompt, model: n.model, messages: n.messages.filter(isLlmMessage) } : undefined;
+    if (!n) return undefined;
+    const skillIndex = compileAvailableSkillsIndex(catalogFor(nodeId).skills);
+    return {
+      systemPrompt: [n.systemPrompt || DEFAULT_SYSTEM_PROMPT, skillIndex].filter(Boolean).join("\n\n"),
+      model: n.model,
+      messages: n.messages.filter(isLlmMessage),
+    };
   }
 
   function sourceRootsFor(nodeId: string): string[] {
@@ -246,7 +250,6 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     const sourceRoots = sourceRootsFor(nodeId);
     const skillTools = catalogFor(nodeId).activeSkills.length > 0
       ? [
-          createSkillListTool(() => catalogFor(nodeId).activeSkills),
           createSkillReadTool(() => catalogFor(nodeId).activeSkills),
         ]
       : [];
@@ -258,7 +261,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   // Hook 扩展面：能力经 registerHook 落卡片；工具生命周期经稳定 Loom 事件输出。
   const hookRegistry = createHookRegistry();
   hookRegistry.use(createToolLifecycleHook(events));
-  const turns = createTurnRunner({ events });
+  const traces = createTraceRepository({ now: clock.now });
+  const turns = createTurnRunner({ events, traces });
   let queries!: ReturnType<typeof createNodeQueryEngine>;
   const approvals = createApprovalBroker({ events, clock });
   const policies = createApprovalPolicyStore({
@@ -280,6 +284,10 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     getTools: toolsFor,
     dispatcher: hookRegistry,
     getCurrentTurnId: (nodeId) => queries.state(nodeId)?.turnId,
+    captureTrace: (nodeId, kind, payload) => {
+      const turnId = queries.state(nodeId)?.turnId;
+      if (turnId) traces.append(nodeId, turnId, kind, payload);
+    },
   });
   queries = createNodeQueryEngine({ engine, turns });
 
@@ -403,14 +411,18 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return items.map(dto);
   }
 
-  function create(arg: { sessionId: string; parentId?: string; seed?: Seed; title?: string }) {
+  function create(arg: { sessionId: string; parentId?: string; seed?: Seed; title?: string; mountAncestors?: boolean }) {
+    const forkContextSnapshot = arg.parentId && arg.mountAncestors
+      ? [...ancestorsOf(arg.parentId), loadNode(arg.parentId)].filter((item): item is CanvasNode => Boolean(item)).flatMap((item) => item.messages.filter(isLlmMessage)) as Message[]
+      : undefined;
     const node = toCanvasNode(
       store.createNode({
         sessionId: arg.sessionId,
         parentId: arg.parentId,
         title: arg.title ?? (arg.seed ? "新分支" : "主线"),
         seed: arg.seed,
-        mountAncestors: false,
+        mountAncestors: Boolean(arg.mountAncestors),
+        forkContextSnapshot,
       }),
     );
     nodes.set(node.id, node);
@@ -447,7 +459,9 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
         node.messageMeta.push(undefined);
         return { kind: "prompt", message: userMessage, from: node.messages.length };
       },
-      finalize: (handle, from) => appendDelta(node, handle, from),
+      finalize: (handle, from) => {
+        appendDelta(node, handle, from);
+      },
     });
     pendingPromptSkillIds.delete(arg.nodeId);
     const { result } = query;
@@ -589,15 +603,6 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return { ok: true, deletedIds };
   }
 
-  function setMount(arg: { nodeId: string; on: boolean }) {
-    const node = loadNode(arg.nodeId);
-    if (node) {
-      node.mountAncestors = Boolean(arg.on);
-      store.updateNode(arg.nodeId, { mountAncestors: node.mountAncestors });
-    }
-    return { ok: true, budget: budgetOf(arg.nodeId) };
-  }
-
   function budget(nodeId: string) {
     return budgetOf(nodeId);
   }
@@ -694,7 +699,6 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     updateLayout,
     updateLayouts,
     deleteNode,
-    setMount,
     budget,
     models,
     setModel,
@@ -706,6 +710,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     disableSkill: (arg: { nodeId: string; skillId: string }) => appendSkillEvent({ ...arg, action: "skill-disabled" }),
     /** 注册一个 hook（H1+ 能力的落点）。 */
     registerHook: (hook: AgentHook) => hookRegistry.use(hook),
+    trace: (nodeId: string) => traces.snapshot(nodeId),
+    onTrace: (listener: Parameters<typeof traces.subscribe>[0]) => traces.subscribe(listener),
   };
 }
 

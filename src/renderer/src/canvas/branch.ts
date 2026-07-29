@@ -1,7 +1,7 @@
 import { createContext } from "react";
 
 export interface BranchContextValue {
-  onBranch: (sourceId: string, seed: string) => void;
+  onBranch: (sourceId: string, seed: string, mountAncestors: boolean) => void;
   onFocusNode?: (nodeId: string, opts?: { flash?: boolean }) => void;
 }
 

@@ -49,14 +49,16 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
         },
         dispatcher: hooks.dispatcher,
         getCurrentTurnId: hooks.getCurrentTurnId,
+        captureTrace: hooks.captureTrace,
       }),
   });
+  runtime.onTrace((snapshot) => getWin()?.webContents.send("node:trace:update", snapshot));
 
   // ---- IPC：一一转调 session（channel/入参/出参不变）------------------------
 
   ipcMain.handle("node:list", (_e, sessionId: string) => runtime.list(sessionId));
   ipcMain.handle("node:open", (_e, sessionId: string) => runtime.open(sessionId));
-  ipcMain.handle("node:create", (_e, arg: { sessionId: string; parentId?: string; seed?: Seed; title?: string }) =>
+  ipcMain.handle("node:create", (_e, arg: { sessionId: string; parentId?: string; seed?: Seed; title?: string; mountAncestors?: boolean }) =>
     runtime.create(arg),
   );
   ipcMain.handle("node:send", (_e, arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[]; skillIds?: string[] }) =>
@@ -72,8 +74,8 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     runtime.updateLayouts(items),
   );
   ipcMain.handle("node:delete", (_e, nodeId: string) => runtime.deleteNode(nodeId));
-  ipcMain.handle("node:setMount", (_e, arg: { nodeId: string; on: boolean }) => runtime.setMount(arg));
   ipcMain.handle("node:budget", (_e, nodeId: string) => runtime.budget(nodeId));
+  ipcMain.handle("node:trace", (_e, nodeId: string) => runtime.trace(nodeId));
   ipcMain.handle("node:models", () => runtime.models());
   ipcMain.handle("node:setModel", (_e, arg: { nodeId: string; model: StoredModelSelection }) => runtime.setModel(arg));
   ipcMain.handle("node:reset", (_e, nodeId: string) => runtime.reset(nodeId));

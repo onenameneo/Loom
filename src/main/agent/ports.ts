@@ -69,6 +69,7 @@ export type QueryInvocation =
 export interface NodeQueryRequest {
   nodeId: string;
   operation: TurnOperationKind;
+  onTurnStarted?(turn: TurnRunContext): void;
   prepare(handle: EngineHandle): QueryInvocation | Promise<QueryInvocation>;
   finalize(handle: EngineHandle, from: number): void | Promise<void>;
 }
