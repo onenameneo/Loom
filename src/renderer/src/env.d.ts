@@ -13,12 +13,30 @@ export interface ToolCallDto {
 }
 
 export interface NodeMsg {
-  role: "user" | "assistant" | "tool" | "skill";
+  role: "user" | "assistant" | "tool" | "skill" | "checkpoint";
   text: string;
   images?: { data: string; mimeType: string }[];
   seq: number;
   usage?: { totalTokens?: number };
   meta?: unknown;
+  checkpoint?: {
+    id: string;
+    kind: "context" | "frozen-branch";
+    reason?: "manual" | "threshold" | "overflow";
+    createdAt: number;
+    coverage: { fromSeq: number; toSeq: number };
+    retainedTail?: { fromSeq: number; toSeq: number };
+    diagnostics: {
+      before: { tokens: number; exact: boolean };
+      after: { tokens: number; exact: boolean };
+    };
+    summaryUsage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+      exact: boolean;
+    };
+  };
   toolCall?: ToolCallDto;
   skillEvent?: {
     eventId: string;
@@ -121,10 +139,36 @@ export interface ToolCanvasEventPayload {
   details?: unknown;
 }
 
+export interface CompactionCanvasEventPayload {
+  state: "planned" | "succeeded" | "failed" | "aborted";
+  trigger: "manual" | "threshold" | "overflow";
+  at: number;
+  kind?: "none" | "retain-tail" | "split-turn";
+  compactThroughSeq?: number;
+  retainedFromSeq?: number;
+  retainedTokenCount?: number;
+  checkpointId?: string;
+  coverage?: { fromSeq: number; toSeq: number };
+  retainedTail?: { fromSeq: number; toSeq: number };
+  diagnostics?: {
+    before: { tokens: number; exact: boolean };
+    after: { tokens: number; exact: boolean };
+  };
+  summaryUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    exact: boolean;
+  };
+  reason?: string;
+  error?: string;
+}
+
 export type TypedCanvasEvent =
   | { nodeId: string; type: "tool"; payload: ToolCanvasEventPayload }
   | { nodeId: string; type: "turn"; payload: TurnCanvasEventPayload }
   | { nodeId: string; type: "approval"; payload: ApprovalRequestPayload }
+  | { nodeId: string; type: "compaction"; payload: CompactionCanvasEventPayload }
   | CanvasEvent;
 
 export interface AgentProc {
@@ -379,12 +423,16 @@ declare global {
   interface Window {
     api: {
       platform: NodeJS.Platform;
+      lifecycle: {
+        ready: () => void;
+      };
       canvas: {
         list: (sessionId: string) => Promise<CanvasNodeDto[]>;
         open: (sessionId: string) => Promise<CanvasNodeDto[]>;
         create: (arg: { sessionId: string; parentId?: string; seed?: NodeSeed; title?: string; mountAncestors?: boolean }) => Promise<CanvasNodeDto>;
-        send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[]) => Promise<{ ok: boolean }>;
+        send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[]) => Promise<{ ok: boolean; recovered?: "overflow"; reason?: string }>;
         abort: (nodeId: string) => Promise<{ ok: boolean }>;
+        compact: (nodeId: string) => Promise<{ ok: boolean; node?: CanvasNodeDto; reason?: string; error?: string }>;
         regenerate: (nodeId: string) => Promise<{ ok: boolean }>;
         editResend: (arg: { nodeId: string; seq: number; text: string }) => Promise<{ ok: boolean }>;
         delete: (nodeId: string) => Promise<{ ok: boolean; deletedIds: string[] }>;

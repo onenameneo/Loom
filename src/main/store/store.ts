@@ -119,6 +119,8 @@ export interface NodeRecord {
   mountAncestors: boolean;
   /** Hidden immutable LLM context captured when this branch mounts its ancestors. */
   forkContextSnapshot?: AgentMessage[];
+  /** Hidden immutable summary projection captured when mounted ancestors exceed child budget. */
+  frozenBranchSummary?: AgentMessage;
   messages: PersistedMessage[];
 }
 
@@ -151,15 +153,17 @@ export interface Store {
     seed?: unknown;
     mountAncestors?: boolean;
     forkContextSnapshot?: AgentMessage[];
+    frozenBranchSummary?: AgentMessage;
   }): NodeRecord;
   updateNode(
     id: string,
-    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; systemPrompt: string; model: StoredModelSelection; color: string }>,
+    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; frozenBranchSummary: AgentMessage; systemPrompt: string; model: StoredModelSelection; color: string }>,
   ): void;
   updateNodeLayout(id: string, layout: NodeLayout): boolean;
   updateNodeLayouts(items: Array<{ id: string; layout: NodeLayout }>): string[];
   deleteNode(id: string): void;
   appendMessages(nodeId: string, msgs: PersistedMessage[]): void;
+  replaceMessageContent?(nodeId: string, seq: number, content: AgentMessage): void;
   deleteMessagesFrom(nodeId: string, seq: number): void;
   listMessages(nodeId: string): PersistedMessage[];
 

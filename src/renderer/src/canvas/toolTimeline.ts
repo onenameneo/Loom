@@ -95,7 +95,8 @@ export function upsertToolTimelineMessage<T extends ToolTimelineMessage>(
   createMessage: (toolCall: ToolCallView) => T,
 ): T[] {
   const index = messages.findIndex((m) => m.role === "tool" && m.toolCall?.id === payload.toolCallId);
-  const existing = index >= 0 && messages[index].toolCall ? [messages[index].toolCall] : [];
+  const existingMessage = index >= 0 ? messages[index] : undefined;
+  const existing = existingMessage?.toolCall ? [existingMessage.toolCall] : [];
   const [toolCall] = applyToolEvent(existing, payload);
   if (!toolCall) return messages;
   if (index >= 0) {

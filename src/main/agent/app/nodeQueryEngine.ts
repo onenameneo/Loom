@@ -34,12 +34,14 @@ export function createNodeQueryEngine(deps: { engine: LlmEnginePort; turns: Turn
       from = invocation.from ?? handle.messages.length;
       if (invocation.kind === "prompt") await handle.prompt(invocation.message);
       else await handle.continue();
+      const assistantError = assistantErrorFromDelta(handle.messages.slice(from));
+      if (assistantError) throw assistantError;
     } catch (cause) {
       error = cause;
     } finally {
       // Invalidated queries belong to a removed or superseded node and must
       // never persist a late engine delta. Aborted queries still retain output.
-      if (handle && !turn.isStale()) await request.finalize(handle, from);
+      if (handle && !turn.isStale() && (!error || turn.signal.aborted)) await request.finalize(handle, from);
     }
 
     return { result: deps.turns.settle(turn, error), error };
@@ -54,4 +56,9 @@ export function createNodeQueryEngine(deps: { engine: LlmEnginePort; turns: Turn
     setAwaitingApproval: (nodeId, turnId, approval) => deps.turns.setAwaitingApproval(nodeId, turnId, approval),
     setRunning: (nodeId, turnId) => deps.turns.setRunning(nodeId, turnId),
   };
+}
+
+function assistantErrorFromDelta(messages: readonly unknown[]): Error | undefined {
+  const failed = messages.find((message: any) => message?.role === "assistant" && typeof message.errorMessage === "string" && message.errorMessage);
+  return failed ? new Error((failed as any).errorMessage) : undefined;
 }

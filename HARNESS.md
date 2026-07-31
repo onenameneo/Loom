@@ -101,6 +101,19 @@ src/main/
 | pi-ai `isContextOverflow()` | ② 触发压缩 | H3 |
 | `CustomAgentMessages`（声明合并） | ① 自定义消息类型（seed chip / compactionSummary / branchSummary） | H1/H3 |
 
+### H3 当前落地状态（context-checkpoint-compaction）
+
+H3 已落成一条可运行的 checkpoint 压缩链路：
+
+- ① `core/messages.ts` 定义 versioned Loom derived messages：`loomContextCheckpoint`、`loomSplitTurnContext`、`loomFrozenBranchSummary`。原始 transcript 保持 append-only，checkpoint 只作为投影材料。
+- ① `core/budget.ts` / `core/compaction.ts` 负责 token accounting、final request budget allocation、turn-safe cut planning、checkpoint summary input serialization；工具调用/result 配对和 oversized split-turn 都有纯函数回归测试。
+- ② `app/compactionService.ts` 负责计划、summarize、持久化、trace/event 生命周期；只有 summary 成功且 abort guard 通过后才 append checkpoint。
+- ② `app/session.ts` 在 completed turn 后做 threshold compaction，在新 prompt 前做 preflight compaction；context overflow 只 retry 一次，第二次 overflow 以 bounded error 结束。
+- ④ `adapters/summarizationAdapter.ts` 和 `canvas.ts` 把 production summarizer 接到 registry/runtime model 配置；`node:compact` IPC 暴露手动 compact。
+- Renderer conversation timeline 显示默认折叠 checkpoint item；Trace 显示 ordered compaction lifecycle、coverage、budget diagnostics 和 summary usage。
+
+仍需手工验证的不是架构空洞，而是真实 Electron/模型环境里的长会话 smoke：长 mounted-ancestor branch、checkpoint expansion、restart recovery、overflow retry。自动覆盖已包含这些路径的单元/集成回归；真实模型触发仍要在发布前跑一次。
+
 ## 4.1 类型分层规范：原子 → 分子 → 材料
 
 Loom 遵循 pi-coding-agent 的类型构造方式，但不把 pi 类型误当成业务模型。每层只解决本层的问题，向外组合，不能反向泄漏：
@@ -210,7 +223,7 @@ src/main/agent/tools/
 | **H0 · 拆层** | 按洋葱重组 canvas.ts，**零新功能**，测试全绿 | 建①②③④骨架 | 现有对话/分支/画布行为不变；① 有单测 |
 | **H1 · 工具运行时** | 注册表 + 只读工具（web_fetch/search/now/calc）+ 节点内工具时间线 | ① tool契约、② toolRuntime、③ HttpPort、④ 工具实现 + pi 事件转发 | 只读工具能跑、能渲染调用/结果；无需批准 |
 | **H2 · 权限安全网** | `beforeToolCall` 批准门（一次/会话/永久·持久化）+ 首个副作用工具（受限目录 fs→bash）+ `afterToolCall` 脱敏 | ① permission、③ ApprovalPort/Fs/Shell、④ 批准弹窗 + 钩子接线 | 副作用工具默认拒绝、弹窗放行、策略可记住 |
-| **H3 · 上下文引擎 v2** | 摘要式压缩（`compactionSummary` 自定义消息 + `isContextOverflow` + `agent_end` 触发）+ 真实 usage token | ① compaction/budget、② compactionService、④ pi 适配器 | 超阈值自动压缩、token 计数诚实 |
+| **H3 · 上下文引擎 v2** | 摘要式压缩（versioned checkpoint 自定义消息 + overflow retry + completed/preflight/manual 触发）+ usage diagnostics | ① compaction/budget、② compactionService、④ pi/summarizer 适配器 | 已实现自动/手动/overflow 压缩；自动测试全绿；真实 Electron 长会话 smoke 待跑 |
 | **H4 · 记忆** | gbrain CLI 包成 `memory_search`/`memory_write` 工具 + 召回注入 | ③ MemoryPort、④ gbrain 适配器、② memory | 跨会话事实可召回 |
 | **H5 · Steering & 打磨** | 跑一半插话 / 停机追问 / 推理档位 / 成本计 | ② session、④ IPC、renderer | 长任务可操控 |
 

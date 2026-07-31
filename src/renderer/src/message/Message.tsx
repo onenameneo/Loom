@@ -2,10 +2,13 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BookOpen, Check, Copy, Pencil, RefreshCcw } from "lucide-react";
+import type { NodeMsg } from "../env";
 import { CodeBlock } from "./CodeBlock";
 
-export type MsgRole = "user" | "assistant" | "error" | "tool" | "skill";
+export type MsgRole = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
 export type Density = "compact" | "comfortable";
+type CheckpointInfo = NonNullable<NodeMsg["checkpoint"]>;
+const CHECKPOINT_SUMMARY_LIMIT = 4_000;
 
 // react-markdown 组件覆盖：围栏代码块 → CodeBlock（高亮/复制），行内 code → token 化，
 // 链接 → 新窗口（经主进程 window-open handler 走系统浏览器）。不启用 rehype-raw（转义 HTML）。
@@ -26,6 +29,78 @@ const mdComponents = {
   ),
 };
 
+function rangeText(range?: { fromSeq: number; toSeq: number }, prefix = "") {
+  return range ? `${prefix}${range.fromSeq}..${range.toSeq}` : undefined;
+}
+
+function tokenText(value?: { tokens: number; exact: boolean }) {
+  if (!value) return undefined;
+  return `${value.exact ? "" : "~"}${value.tokens}`;
+}
+
+function tokenDetail(label: string, value?: { tokens: number; exact: boolean }) {
+  if (!value) return undefined;
+  return `${value.exact ? "exact" : "estimated"} ${label}: ${value.tokens} tokens`;
+}
+
+function boundedSummary(text: string) {
+  return text.length > CHECKPOINT_SUMMARY_LIMIT
+    ? `${text.slice(0, CHECKPOINT_SUMMARY_LIMIT).trimEnd()}\n\n[summary truncated]`
+    : text;
+}
+
+function CheckpointView({ checkpoint, text }: { checkpoint?: CheckpointInfo; text: string }) {
+  const title = checkpoint?.kind === "frozen-branch" ? "Frozen branch summary" : "Context checkpoint";
+  const coverage = rangeText(checkpoint?.coverage, "covers ");
+  const retainedTail = rangeText(checkpoint?.retainedTail, "tail ");
+  const before = tokenText(checkpoint?.diagnostics.before);
+  const after = tokenText(checkpoint?.diagnostics.after);
+  const budget = before && after ? `${before} -> ${after} tokens` : undefined;
+  const summaryTotal = checkpoint?.summaryUsage?.totalTokens;
+  const summaryExact = checkpoint?.summaryUsage?.exact;
+  const summaryUsage = typeof summaryTotal === "number" ? `${summaryExact ? "" : "~"}${summaryTotal} summary request tokens` : undefined;
+  const beforeDetail = tokenDetail("before", checkpoint?.diagnostics.before);
+  const afterDetail = tokenDetail("after", checkpoint?.diagnostics.after);
+  const summaryCost = typeof summaryTotal === "number" ? `${summaryExact ? "exact" : "estimated"} summary request cost: ${summaryTotal} tokens` : undefined;
+  const summary = boundedSummary(text);
+
+  return (
+    <details className="m__checkpoint" open={checkpoint?.reason === "manual" ? true : undefined}>
+      <summary>
+        <BookOpen size={13} />
+        <span>{title}</span>
+        {checkpoint?.reason && <em>{checkpoint.reason}</em>}
+      </summary>
+      <div className="m__checkpoint-body">
+        {coverage && <span>{coverage}</span>}
+        {retainedTail && <span>{retainedTail}</span>}
+        {budget && <span>{budget}</span>}
+        {summaryUsage && <span>{summaryUsage}</span>}
+      </div>
+      <div className="m__checkpoint-detail">
+        <section>
+          <h4>Projected context budget</h4>
+          <dl>
+            {beforeDetail && <><dt>Before</dt><dd>{beforeDetail}</dd></>}
+            {afterDetail && <><dt>After</dt><dd>{afterDetail}</dd></>}
+            {summaryCost && <><dt>Summary request</dt><dd>{summaryCost}</dd></>}
+          </dl>
+        </section>
+        {summary && (
+          <section>
+            <h4>Checkpoint summary</h4>
+            <div className="m__checkpoint-summary">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                {summary}
+              </ReactMarkdown>
+            </div>
+          </section>
+        )}
+      </div>
+    </details>
+  );
+}
+
 // 共用消息组件：画布节点与 ChatView 都用它。助手消息渲染 Markdown，其余纯文本。
 export function Message({
   role,
@@ -34,6 +109,7 @@ export function Message({
   density = "comfortable",
   streaming = false,
   meta,
+  checkpoint,
   canRegenerate = false,
   canEdit = false,
   onRegenerate,
@@ -46,6 +122,7 @@ export function Message({
   density?: Density;
   streaming?: boolean;
   meta?: string;
+  checkpoint?: CheckpointInfo;
   canRegenerate?: boolean;
   canEdit?: boolean;
   onRegenerate?: () => void;
@@ -115,6 +192,8 @@ export function Message({
             <button className="primary" onClick={submitEdit}>重发</button>
           </div>
         </div>
+      ) : role === "checkpoint" ? (
+        <CheckpointView checkpoint={checkpoint} text={text} />
       ) : role === "skill" ? (
         <span className="m__plain m__skill"><BookOpen size={13} /> {text}</span>
       ) : role === "assistant" ? (

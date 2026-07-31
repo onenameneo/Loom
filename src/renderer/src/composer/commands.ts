@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { BookOpen, Code2, Cpu, Eraser, Image, Paperclip, RefreshCw, Settings } from "lucide-react";
+import { Archive, BookOpen, Code2, Cpu, Eraser, Image, Paperclip, RefreshCw, Settings } from "lucide-react";
 
 export type CmdState = {
   model?: string;
@@ -14,6 +14,7 @@ export type CmdCtx = {
   clearNode: () => void;
   regenerate: () => void;
   setModel: (id: string) => void;
+  compact: () => void;
   enableSkill?: (id: string) => void;
   getState: () => CmdState;
 };
@@ -87,6 +88,14 @@ export const commands: Command[] = [
     group: "action",
     hint: "清空本节点",
     run: (ctx) => ctx.clearNode(),
+  },
+  {
+    id: "compact",
+    label: "/compact",
+    icon: Archive,
+    group: "action",
+    hint: "压缩本节点上下文",
+    run: (ctx) => ctx.compact(),
   },
   {
     id: "retry",

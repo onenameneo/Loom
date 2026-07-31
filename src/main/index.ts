@@ -20,6 +20,7 @@ import { ModelRegistry } from "./modelConfig/registry";
 import { loadScopedModelSettings } from "./modelConfig/scopes";
 import { platformWindowOptions } from "./windowOptions";
 import { addGlobalSkillSource, buildSkillCatalog, openSkillSource, removeGlobalSkillSource } from "./agent/skills";
+import { markRendererNotReady, markRendererReady, sendToWindow } from "./ipcSafeSend";
 
 // ---------------------------------------------------------------------------
 // 主进程：持久化(store) + 设置 + 会话 + 画布引擎(pi 多节点)。
@@ -51,6 +52,12 @@ function invalidateAgent() {
 }
 
 function registerIpc() {
+  ipcMain.on("renderer:ready", (event) => {
+    const current = win;
+    if (!current || current.isDestroyed() || event.sender !== current.webContents) return;
+    if (markRendererReady(current)) sendToWindow(() => current, "window:fullscreen", current.isFullScreen());
+  });
+
   // ---- settings ----
   ipcMain.handle("settings:get", async () => {
     const s = store.getSettings();
@@ -180,7 +187,7 @@ function registerIpc() {
 
 function buildMenu() {
   const isMac = process.platform === "darwin";
-  const menuAction = (name: string) => () => win?.webContents.send("menu:action", name);
+  const menuAction = (name: string) => () => sendToWindow(() => win, "menu:action", name);
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(isMac ? [{ role: "appMenu" as const }] : []),
     {
@@ -221,16 +228,23 @@ function createWindow() {
     ...platformWindowOptions(process.platform, resolvedTheme() === "dark"),
     webPreferences: { preload: join(__dirname, "../preload/index.js"), sandbox: false },
   });
+  const windowRef = win;
+  markRendererNotReady(windowRef);
   if (store && !monitor) monitor = registerMonitor({ getWin: () => win, store });
   if (store && !acp) acp = registerAcp({ getWin: () => win, store });
   if (store && !collector) collector = registerCollector({ getWin: () => win, store });
   win.on("ready-to-show", () => win?.show());
   // 全屏时 macOS 隐藏红绿灯，渲染层据此把侧栏开关移到左缘、收掉预留内边距。
-  const emitFullScreen = () => win?.webContents.send("window:fullscreen", win?.isFullScreen() ?? false);
+  const emitFullScreen = () => sendToWindow(() => windowRef, "window:fullscreen", windowRef.isFullScreen());
   win.on("enter-full-screen", emitFullScreen);
   win.on("leave-full-screen", emitFullScreen);
-  win.webContents.on("did-finish-load", emitFullScreen);
+  win.webContents.on("did-start-navigation", (_event, _url, _isInPlace, isMainFrame) => {
+    if (isMainFrame) markRendererNotReady(windowRef);
+  });
+  win.webContents.on("render-process-gone", () => markRendererNotReady(windowRef));
+  win.webContents.on("destroyed", () => markRendererNotReady(windowRef));
   win.on("closed", () => {
+    markRendererNotReady(windowRef);
     collector?.stop();
     collector = null;
     acp?.stop();

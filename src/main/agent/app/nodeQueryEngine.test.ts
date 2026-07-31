@@ -57,6 +57,26 @@ describe("NodeQueryEngine", () => {
     expect(finalize).toHaveBeenCalledWith(handle, 0);
   });
 
+  it("treats pi assistant error messages as failed queries instead of completed empty replies", async () => {
+    const messages: AgentMessage[] = [];
+    const user = { role: "user", content: "hello" } as AgentMessage;
+    const handle: EngineHandle = {
+      messages,
+      prompt: vi.fn(async (message) => {
+        messages.push(message, { role: "assistant", content: "", errorMessage: "provider rejected request" } as unknown as AgentMessage);
+      }),
+      continue: vi.fn(), abort: vi.fn(), reset: vi.fn(), syncMessages: vi.fn(),
+    };
+    const finalize = vi.fn();
+    const queries = createNodeQueryEngine({ engine: engine(handle), turns: createTurnRunner({ events: eventSink() }) });
+
+    const output = await queries.run({ nodeId: "n1", operation: "send", prepare: () => ({ kind: "prompt", message: user }), finalize });
+
+    expect(output.result).toMatchObject({ ok: false, reason: "failed" });
+    expect(String((output.error as Error).message)).toContain("provider rejected request");
+    expect(finalize).not.toHaveBeenCalled();
+  });
+
   it("exposes the acquired turn to request instrumentation before preparation", async () => {
     const handle: EngineHandle = { messages: [], prompt: vi.fn(), continue: vi.fn(), abort: vi.fn(), reset: vi.fn(), syncMessages: vi.fn() };
     const started = vi.fn();

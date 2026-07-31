@@ -19,6 +19,7 @@ function ctx(): CmdCtx {
     clearNode: vi.fn(),
     regenerate: vi.fn(),
     setModel: vi.fn(),
+    compact: vi.fn(),
     getState: () => ({ canRegenerate: false }),
   };
 }
@@ -64,6 +65,24 @@ describe("SlashPalette model command", () => {
     fireEvent.keyDown(screen.getByRole("listbox"), { key: "Enter" });
 
     expect(enableSkill).toHaveBeenCalledWith("research");
+    expect(setValue).toHaveBeenCalledWith("");
+  });
+
+  it("runs the compact command from the slash palette", () => {
+    const compact = vi.fn();
+    const setValue = vi.fn();
+    render(
+      React.createElement(SlashPalette, {
+        value: "/compact",
+        setValue,
+        ctx: { ...ctx(), compact },
+        modelOptions: [],
+      }),
+    );
+
+    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Enter" });
+
+    expect(compact).toHaveBeenCalledOnce();
     expect(setValue).toHaveBeenCalledWith("");
   });
 });

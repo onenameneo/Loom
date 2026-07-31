@@ -1,6 +1,12 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Message, UserMessage } from "@earendil-works/pi-ai";
 import type { CanvasNodeModel, Seed } from "./graph";
+import {
+  isLoomContextCheckpoint,
+  isLoomFrozenBranchSummary,
+  type LoomContextCheckpointMessage,
+  type LoomFrozenBranchSummaryMessage,
+} from "./messages";
 
 // ---------------------------------------------------------------------------
 // ① 领域核心 · 分支上下文装配规则（纯 TS，零基础设施依赖）。
@@ -43,21 +49,49 @@ export function seedMessage(seed: Seed, now = 0): UserMessage {
   return userMsg(`（上下文）我以下面这段为出发点继续追问：\n「${seed.text}」`, now);
 }
 
+export function checkpointContextMessage(checkpoint: LoomContextCheckpointMessage, now = 0): UserMessage {
+  return userMsg(
+    [
+      "（上下文 checkpoint）以下是本节点较早对话的结构化摘要。原始 transcript 仍保留，当前请求只投影摘要和未覆盖的最近消息。",
+      `触发原因：${checkpoint.reason}`,
+      `覆盖范围：${checkpoint.coverage.fromSeq}..${checkpoint.coverage.toSeq}`,
+      checkpoint.summary,
+    ].join("\n"),
+    now,
+  );
+}
+
+export function frozenBranchSummaryMessage(summary: LoomFrozenBranchSummaryMessage, now = 0): UserMessage {
+  return userMsg(
+    [
+      "（冻结祖先摘要）以下是创建此子分支时捕获的不可变祖先上下文摘要。",
+      `来源父节点：${summary.source.parentNodeId}`,
+      `覆盖范围：${summary.source.fromSeq}..${summary.source.toSeq}`,
+      summary.summary,
+    ].join("\n"),
+    now,
+  );
+}
+
 /**
  * 装配某节点发往 LLM 的上下文计划：
  *   [ mountAncestors ? 冻结的祖先快照 : ∅ ] + [ seed ? seed 消息 : ∅ ] + own.filter(isLlmMessage)
  * @param now 注入到合成上下文消息的时间戳（默认 0，保持纯净；生产由 ClockPort 提供）。
  */
 export function buildContextPlan(
-  node: Pick<CanvasNodeModel, "mountAncestors" | "seed"> & { forkContextSnapshot?: Message[] },
+  node: Pick<CanvasNodeModel, "mountAncestors" | "seed"> & { forkContextSnapshot?: Message[]; frozenBranchSummary?: AgentMessage },
   ownMessages: AgentMessage[],
   now = 0,
   tailContext: Message[] = [],
 ): Message[] {
   const out: Message[] = [];
-  if (node.mountAncestors && node.forkContextSnapshot) out.push(...node.forkContextSnapshot);
+  if (node.mountAncestors && isLoomFrozenBranchSummary(node.frozenBranchSummary)) {
+    out.push(frozenBranchSummaryMessage(node.frozenBranchSummary, now), ...node.frozenBranchSummary.retainedContext);
+  } else if (node.mountAncestors && node.forkContextSnapshot) {
+    out.push(...node.forkContextSnapshot);
+  }
   if (node.seed) out.push(seedMessage(node.seed, now));
-  const ownLlmMessages = ownMessages.filter(isLlmMessage);
+  const ownLlmMessages = projectOwnMessages(ownMessages, now);
   if (tailContext.length > 0 && ownLlmMessages.length > 0 && roleOf(ownLlmMessages[ownLlmMessages.length - 1] as AgentMessage) === "user") {
     out.push(...ownLlmMessages.slice(0, -1));
     out.push(...tailContext);
@@ -67,4 +101,21 @@ export function buildContextPlan(
     if (ownLlmMessages.length === 0) out.push(...tailContext);
   }
   return out;
+}
+
+function projectOwnMessages(ownMessages: AgentMessage[], now: number): Message[] {
+  const checkpoint = newestValidCheckpoint(ownMessages);
+  if (!checkpoint) return ownMessages.filter(isLlmMessage);
+  return [
+    checkpointContextMessage(checkpoint, now),
+    ...ownMessages.filter((msg, index): msg is Message => index > checkpoint.coverage.toSeq && isLlmMessage(msg)),
+  ];
+}
+
+function newestValidCheckpoint(messages: AgentMessage[]): LoomContextCheckpointMessage | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (isLoomContextCheckpoint(msg) && msg.invalidatedAt === undefined) return msg;
+  }
+  return undefined;
 }

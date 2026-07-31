@@ -16,7 +16,15 @@ describe("piEngine hook contract", () => {
     const src = readFileSync(join(process.cwd(), "src/main/agent/adapters/piEngine.ts"), "utf-8");
 
     expect(src).toContain('case "message_end"');
-    expect(src).toContain('captureTrace?.(nodeId, "response", { message: event.message })');
+    expect(src).toContain('captureTrace?.(nodeId, "response", { message: summarizeMessage(event.message) })');
     expect(src).not.toContain("[...(agent.state.messages as AgentMessage[])].reverse()");
+  });
+
+  it("captures the LLM request message array instead of the whole context object", () => {
+    const src = readFileSync(join(process.cwd(), "src/main/agent/adapters/piEngine.ts"), "utf-8");
+
+    expect(src).toContain("messages: summarizeMessages(context.messages)");
+    expect(src).not.toContain("messages: context,");
+    expect(src).not.toContain("detail: event");
   });
 });

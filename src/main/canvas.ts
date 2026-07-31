@@ -1,13 +1,18 @@
 import { BrowserWindow, ipcMain } from "electron";
 import type { NodeLayout, Store } from "./store/store";
 import { resolveModelConfig } from "./settings";
+import { sendToWindow } from "./ipcSafeSend";
 import { createIpcEventSink } from "./agent/adapters/ipcEventSink";
 import { createPiEngine } from "./agent/adapters/piEngine";
 import { createIds, systemClock } from "./agent/adapters/runtime";
+import { createRuntimeSummarizer } from "./agent/adapters/summarizationAdapter";
 import { createCanvasRuntime } from "./agent/app/session";
 import type { Seed } from "./agent/core/graph";
 import type { ApprovalDecision } from "./agent/ports";
 import type { StoredModelSelection } from "./modelConfig/modelRef";
+import { ModelRegistry } from "./modelConfig/registry";
+import { createRuntimeModelsFromRegistry } from "./modelConfig/runtimeModels";
+import { loadScopedModelSettings, resolveSelectedModel } from "./modelConfig/scopes";
 
 // ---------------------------------------------------------------------------
 // 画布引擎接线（主进程）：组装洋葱四圈 + 把 node:* IPC 绑定到 ② runtime。
@@ -27,6 +32,19 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   const events = createIpcEventSink(getWin);
   const clock = systemClock;
   const ids = createIds(clock);
+  const summarizer = createRuntimeSummarizer({
+    resolveModel: () => ({ model: resolveModelConfig(store).model }),
+    streamSummary: async (_summaryModel, messages, options) => {
+      const registry = await ModelRegistry.load();
+      const scoped = loadScopedModelSettings({});
+      const selected = resolveSelectedModel({ registry, scoped });
+      if (!selected.model || !selected.available) throw new Error(selected.diagnostic?.message || "Summary model is unavailable.");
+      const models = await createRuntimeModelsFromRegistry(registry);
+      const model = models.getModel(selected.ref.providerId, selected.ref.modelId);
+      if (!model) throw new Error(`Summary model template not found: ${selected.ref.providerId}/${selected.ref.modelId}`);
+      return models.streamSimple(model, { messages }, { signal: options.signal, apiKey: options.apiKey, maxTokens: options.maxOutputTokens });
+    },
+  });
 
   const runtime = createCanvasRuntime({
     store,
@@ -34,6 +52,9 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     ids,
     clock,
     getApiKey: () => "registry-managed",
+    compaction: {
+      summarize: (input, options) => summarizer.summarize(input, options),
+    },
     // 注入 pi 引擎工厂：session 只认端口，pi 收敛在适配器。
     createEngine: (hooks) =>
       createPiEngine({
@@ -52,7 +73,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
         captureTrace: hooks.captureTrace,
       }),
   });
-  runtime.onTrace((snapshot) => getWin()?.webContents.send("node:trace:update", snapshot));
+  runtime.onTrace((snapshot) => sendToWindow(getWin, "node:trace:update", snapshot));
 
   // ---- IPC：一一转调 session（channel/入参/出参不变）------------------------
 
@@ -65,6 +86,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     runtime.send(arg),
   );
   ipcMain.handle("node:abort", (_e, nodeId: string) => runtime.abort(nodeId));
+  ipcMain.handle("node:compact", (_e, nodeId: string) => runtime.compact(nodeId));
   ipcMain.handle("node:regenerate", (_e, nodeId: string) => runtime.regenerate(nodeId));
   ipcMain.handle("node:editResend", (_e, arg: { nodeId: string; seq: number; text: string }) => runtime.editResend(arg));
   ipcMain.handle("node:setSystemPrompt", (_e, arg: { nodeId: string; text: string }) => runtime.setSystemPrompt(arg));

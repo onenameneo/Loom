@@ -41,4 +41,43 @@ describe("main/preload project IPC contracts", () => {
     expect(mainSource).toMatch(/const session = store\.ensureDefaultSession\(project\.id\)/);
     expect(mainSource).toContain('store.createNode({ sessionId: session.id, title: "主线", mountAncestors: false })');
   });
+
+  it("exposes context compaction IPC through main, preload, and renderer contracts", () => {
+    const canvasSource = readSource("src/main/canvas.ts");
+    const preloadSource = readSource("src/preload/index.ts");
+    const envSource = readSource("src/renderer/src/env.d.ts");
+
+    expect(canvasSource).toContain('ipcMain.handle("node:compact"');
+    expect(canvasSource).toContain("createRuntimeSummarizer");
+    expect(canvasSource).toContain("compaction: {");
+    expect(canvasSource).toContain("summarize: (input, options) => summarizer.summarize(input, options)");
+    expect(canvasSource).toContain("maxTokens: options.maxOutputTokens");
+    expect(preloadSource).toContain('compact: (nodeId: string)');
+    expect(preloadSource).toContain('ipcRenderer.invoke("node:compact", nodeId)');
+    expect(envSource).toContain('type: "compaction"');
+    expect(envSource).toContain("CompactionCanvasEventPayload");
+  });
+
+  it("routes main-to-renderer pushes through the renderer lifecycle gate", () => {
+    const mainSource = readSource("src/main/index.ts");
+    const safeSendSource = readSource("src/main/ipcSafeSend.ts");
+    const preloadSource = readSource("src/preload/index.ts");
+    const rendererSource = readSource("src/renderer/src/main.tsx");
+    const mainFiles = [
+      "src/main/index.ts",
+      "src/main/monitor.ts",
+      "src/main/canvas.ts",
+      "src/main/collector.ts",
+      "src/main/acp.ts",
+      "src/main/agent/adapters/ipcEventSink.ts",
+    ].map(readSource);
+
+    expect(mainSource).toContain('ipcMain.on("renderer:ready"');
+    expect(mainSource).toContain("markRendererNotReady");
+    expect(safeSendSource).toContain("readyContents");
+    expect(safeSendSource).toContain("webContents.mainFrame");
+    expect(preloadSource).toContain('ready: () => ipcRenderer.send("renderer:ready")');
+    expect(rendererSource).toContain("window.api?.lifecycle.ready()");
+    for (const source of mainFiles) expect(source).not.toMatch(/webContents\.send\(/);
+  });
 });

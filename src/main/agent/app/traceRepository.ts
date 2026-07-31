@@ -38,26 +38,40 @@ export interface TraceRepository {
 
 const SENSITIVE_KEY = /^(?:api[_-]?key|authorization|token|access[_-]?token|refresh[_-]?token|password|secret)$/i;
 
-export function sanitizeTraceValue(value: unknown, options: { maxTextLength?: number } = {}, seen = new WeakSet<object>()): TraceValue {
-  const maxTextLength = options.maxTextLength ?? 4_000;
+export function sanitizeTraceValue(
+  value: unknown,
+  options: { maxTextLength?: number; maxArrayLength?: number; maxObjectKeys?: number; maxDepth?: number } = {},
+  seen = new WeakSet<object>(),
+  depth = 0,
+): TraceValue {
+  const maxTextLength = options.maxTextLength ?? 1_500;
+  const maxArrayLength = options.maxArrayLength ?? 30;
+  const maxObjectKeys = options.maxObjectKeys ?? 40;
+  const maxDepth = options.maxDepth ?? 5;
   if (typeof value === "string") {
     return value.length <= maxTextLength ? value : { text: value.slice(0, maxTextLength), truncated: true };
   }
   if (value == null || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "bigint") return String(value);
   if (typeof value !== "object") return String(value);
+  if (depth >= maxDepth) return { truncated: "depth" };
   if (seen.has(value)) return "[CIRCULAR]";
   seen.add(value);
-  if (Array.isArray(value)) return value.map((item) => sanitizeTraceValue(item, options, seen));
+  if (Array.isArray(value)) {
+    const head = value.slice(0, maxArrayLength).map((item) => sanitizeTraceValue(item, options, seen, depth + 1));
+    return value.length > maxArrayLength ? [...head, { omitted: value.length - maxArrayLength }] : head;
+  }
   const input = value as Record<string, unknown>;
   const record: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(input)) {
+  const entries = Object.entries(input);
+  for (const [key, child] of entries.slice(0, maxObjectKeys)) {
     if (input.type === "image" && key === "data" && typeof child === "string") {
       record[key] = { omitted: "binary", bytes: child.length };
       continue;
     }
-    record[key] = SENSITIVE_KEY.test(key) ? "[REDACTED]" : sanitizeTraceValue(child, options, seen);
+    record[key] = SENSITIVE_KEY.test(key) ? "[REDACTED]" : sanitizeTraceValue(child, options, seen, depth + 1);
   }
+  if (entries.length > maxObjectKeys) record.__omittedKeys = entries.length - maxObjectKeys;
   return record;
 }
 

@@ -2,6 +2,7 @@ import { execFile } from "child_process";
 import { basename } from "path";
 import { promisify } from "util";
 import { BrowserWindow, Notification, ipcMain } from "electron";
+import { sendToWindow } from "./ipcSafeSend";
 import type { Store } from "./store/store";
 
 const execFileAsync = promisify(execFile);
@@ -200,7 +201,7 @@ export function registerMonitor(opts: { getWin: () => BrowserWindow | null; stor
   let timer: NodeJS.Timeout | undefined;
 
   function send(type: MonitorEvent["type"], nextAgents: AgentProc[], agent?: AgentProc) {
-    getWin()?.webContents.send("monitor:event", { type, agents: nextAgents, agent } satisfies MonitorEvent);
+    sendToWindow(getWin, "monitor:event", { type, agents: nextAgents, agent } satisfies MonitorEvent);
   }
 
   function notify(type: "started" | "stopped", agent: AgentProc) {

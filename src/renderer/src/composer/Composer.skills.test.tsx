@@ -22,6 +22,7 @@ describe("Composer active skills", () => {
         onClearNode={vi.fn()}
         onRegenerate={vi.fn()}
         onSetModel={vi.fn()}
+        onCompact={vi.fn()}
         activeSkills={[
           {
             id: "mao-zedong-perspective",
@@ -56,6 +57,7 @@ describe("Composer active skills", () => {
         onClearNode={vi.fn()}
         onRegenerate={vi.fn()}
         onSetModel={vi.fn()}
+        onCompact={vi.fn()}
         onDisableSkill={remove}
         activeSkills={[
           {

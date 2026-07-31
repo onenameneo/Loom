@@ -11,12 +11,14 @@
   position: relative;
 }
 .m--comfortable {
-  --m-fs: 14px;
-  --m-lh: 1.65;
+  --m-fs: 15px;
+  --m-lh: 1.76;
+  --m-block-gap: 0.9em;
 }
 .m--compact {
   --m-fs: 13px;
-  --m-lh: 1.65;
+  --m-lh: 1.72;
+  --m-block-gap: 0.78em;
 }
 
 /* 用户：靠右气泡 */
@@ -30,7 +32,7 @@
   border-radius: var(--r-lg);
   padding: 8px 12px;
   font-size: var(--m-fs);
-  line-height: var(--m-lh);
+  line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -208,33 +210,138 @@
   word-break: break-word;
 }
 
+.m--checkpoint {
+  align-self: stretch;
+}
+.m__checkpoint {
+  width: 100%;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 0;
+}
+.m__checkpoint summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  color: var(--muted);
+  font: 12px var(--font-ui);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.m__checkpoint summary span {
+  color: var(--text);
+  font-weight: 550;
+}
+.m__checkpoint summary em {
+  margin-left: auto;
+  color: var(--faint);
+  font: 10px var(--font-mono);
+  font-style: normal;
+}
+.m__checkpoint-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 7px 0 1px 20px;
+}
+.m__checkpoint-body span {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font: 10px var(--font-mono);
+  padding: 2px 6px;
+}
+.m__checkpoint-detail {
+  display: grid;
+  gap: 10px;
+  padding: 9px 0 2px 20px;
+}
+.m__checkpoint-detail section {
+  display: grid;
+  gap: 6px;
+}
+.m__checkpoint-detail h4 {
+  margin: 0;
+  color: var(--muted);
+  font: 600 11px var(--font-ui);
+}
+.m__checkpoint-detail dl {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 4px 8px;
+  margin: 0;
+}
+.m__checkpoint-detail dt {
+  color: var(--faint);
+  font: 10px var(--font-mono);
+}
+.m__checkpoint-detail dd {
+  margin: 0;
+  color: var(--muted);
+  font: 10px var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.m__checkpoint-summary {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  padding: 8px 9px;
+}
+.m__checkpoint-summary .m__md,
+.m__checkpoint-summary {
+  color: var(--text);
+  font-size: calc(var(--m-fs) - 1px);
+  line-height: 1.55;
+}
+.m__checkpoint-summary > * + * {
+  margin-top: 0.5em;
+}
+
 /* ---- Markdown 正文 ---- */
 .m__md {
   font-size: var(--m-fs);
   line-height: var(--m-lh);
   color: var(--text);
   word-break: break-word;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  font-kerning: normal;
 }
 .m__md > * + * {
-  margin-top: 0.6em;
+  margin-top: var(--m-block-gap);
 }
 .m__md p {
   margin: 0;
 }
+.m__md p + p {
+  margin-top: 0.95em;
+}
 .m__md ul,
 .m__md ol {
-  margin: 0;
-  padding-left: 1.4em;
+  margin: 0.15em 0;
+  padding-left: 1.55em;
   display: flex;
   flex-direction: column;
-  gap: 0.25em;
+  gap: 0.34em;
 }
 .m__md li {
   margin: 0;
+  padding-left: 0.12em;
+}
+.m__md li > p {
+  margin: 0;
+}
+.m__md li > ul,
+.m__md li > ol {
+  margin-top: 0.34em;
 }
 .m__md blockquote {
   margin: 0;
-  padding: 2px 0 2px 12px;
+  padding: 0.2em 0 0.2em 1em;
   border-left: 2px solid var(--border-strong);
   color: var(--muted);
 }
@@ -249,33 +356,51 @@
 .m__md h2,
 .m__md h3,
 .m__md h4 {
-  margin: 0;
+  margin: 1.25em 0 0;
   font-weight: 650;
   line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+.m__md > h1:first-child,
+.m__md > h2:first-child,
+.m__md > h3:first-child,
+.m__md > h4:first-child {
+  margin-top: 0;
 }
 .m__md h1 {
-  font-size: 1.3em;
+  font-size: 1.42em;
 }
 .m__md h2 {
-  font-size: 1.18em;
+  font-size: 1.24em;
 }
 .m__md h3 {
-  font-size: 1.08em;
+  font-size: 1.1em;
+}
+.m__md h4 {
+  font-size: 1em;
+}
+.m__md strong {
+  font-weight: 650;
 }
 .m__md hr {
   border: none;
   border-top: 1px solid var(--border);
-  margin: 0.4em 0;
+  margin: 1.25em 0;
 }
 .m__md table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
-  font-size: 0.95em;
+  font-size: 0.92em;
 }
 .m__md th,
 .m__md td {
   border: 1px solid var(--border);
-  padding: 4px 9px;
+  padding: 0.48em 0.72em;
   text-align: left;
+  vertical-align: top;
 }
 .m__md th {
   background: var(--surface-2);
@@ -293,7 +418,8 @@
   background: var(--inline-code-bg);
   color: var(--inline-code-text);
   border-radius: var(--r-sm);
-  padding: 1px 5px;
+  padding: 0.08em 0.38em;
+  white-space: break-spaces;
 }
 
 /* 流式光标 */
@@ -309,7 +435,7 @@
 
 /* ---- 代码块 ---- */
 .codeblock {
-  margin: 0;
+  margin: 1em 0;
   border: 1px solid var(--code-border);
   border-radius: var(--r-md);
   background: var(--code-bg);
@@ -347,11 +473,11 @@
 }
 .codeblock__pre {
   margin: 0;
-  padding: 10px 12px;
+  padding: 12px 14px;
   overflow-x: auto;
   font-family: var(--font-mono);
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.6;
   color: var(--code-text);
   tab-size: 2;
 }

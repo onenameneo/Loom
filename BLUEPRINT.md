@@ -58,16 +58,20 @@
 
 ## ★ 画布上下文引擎（最核心、也最该秀的一点）
 pi 的消息流水线：`AgentMessage[] → transformContext() → convertToLlm() → LLM`。
-**画布「片段+挂载」逻辑 = 一个自定义 `convertToLlm`**：节点发消息时，从 SQLite 画布图谱取
+**画布「片段+挂载」逻辑 = 一个自定义 `convertToLlm` + checkpoint 投影层**：节点发消息时，从 SQLite 画布图谱取
 
 ```
 [ (可选)祖先链  if mountAncestors ]   ← root→父 的完整路径
   seed 片段（快照）                    ← 「用户以下面这段为出发点：…」
+  newest valid checkpoint summary       ← 历史长上下文的结构化摘要（若存在）
   本节点历史消息
 ] → 发给 Claude
 ```
 - 默认 `mountAncestors=false`（只带片段，发散清爽）；一键挂载接上祖先。
 - 每节点显示 **token 计数器**（含祖先与否），让上下文成本可见。
+- 长上下文通过 append-only checkpoint 压缩：原始消息不删除；请求时投影 newest checkpoint + 未覆盖 tail，避免重复发送旧历史。
+- checkpoint 可由 completed turn threshold、preflight、手动 compact、overflow recovery 触发；overflow 只 retry 一次，避免无限重试。
+- 对话时间线默认折叠显示 checkpoint，Trace 展示 ordered lifecycle、coverage、before/after budget diagnostics 和 summary usage。
 - 工程叙事：「在 pi-agent-core 的 context 管线上实现了**空间化/分支式上下文装配**」。
 - 附带用得上：pi 的 `steer()`（跑一半插话）、custom message types（引文 chip 作 UI-only 消息，convertToLlm 时过滤）。
 
@@ -106,7 +110,7 @@ Electron · React · React Flow(@xyflow/react) · TypeScript · pi-mono(`@marioz
 - **P1 · App Shell + 持久化基座**（openspec: `app-shell`）：两面侧栏导航 + 会话管理 + 设置(接入/外观) + 窗口 chrome + SQLite 基座。先立骨架。
 - **P2 · 画布引擎**（openspec: `canvas-branching-context`）：React Flow 画布 + 片段分支（含手动挂载）+ **自定义 convertToLlm 上下文引擎**，插进 shell 会话面、用 shell 存储。
 - **P3 · 工作站（原「观察哨」，已完成）**（openspec: `agent-monitor`）：被动感知本地在跑的 Codex/Claude Code。实现走**进程表扫描**（`ps` 枚举 + 启发式过滤 + `lsof` 取 cwd + 快照 diff + 系统通知），**只读进程元数据、不读会话内容**。比原设想（hooks/日志 tail）更轻、零侵入。
-- **P4 · 能力层**：工具/MCP + 记忆（gbrain CLI）+ 打磨。
+- **P4 · 能力层**：工具/MCP + 记忆（gbrain CLI）+ 打磨。上下文 checkpoint 压缩已先行落入能力层基础设施；发布前仍需真实 Electron/模型长会话 smoke（mounted ancestors、checkpoint inspection、restart recovery、overflow retry）。
 - **P5 · 本地 agent 驱动（构想，待定）**：在 Loom 里**主动驱动**本地 Codex/Claude Code 对话——不是接管已在跑的 TUI（做不到），而是由主进程 `spawn` 一个 **headless 协议**子进程收发结构化流：Claude Code 走 `--input/--output-format stream-json`（或官方 Agent SDK）、Codex 走 `codex app-server`（JSON-RPC）；用 **ACP**（Zed 的 Agent Client Protocol）做跨 agent 统一层。此后「节点大脑」可选 pi 或外部 agent，Loom 从思考台升级为**多 agent 编排台**。硬骨头：认证走 CLI 自身登录（不用我们的 key）、**工具批准 UI**（agent 会真读写文件/跑命令，`--permission-prompt-tool stdio`）、每会话绑目录 + 子进程生命周期。MVP：先接**一个** agent（倾向 Codex app-server）+ 目录绑定 + 流式渲染 + 权限弹窗，跑通再抽象 ACP、接第二个。（证据：工作站扫到的 VSCode `claude … --output-format stream-json` 与被过滤的 `codex app-server` 正是这两条协议。）
 
 ## 项目要沉淀的能力

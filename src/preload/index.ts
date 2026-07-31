@@ -59,6 +59,9 @@ type AcpEvent = {
 
 const api = {
   platform: process.platform,
+  lifecycle: {
+    ready: () => ipcRenderer.send("renderer:ready"),
+  },
   canvas: {
     list: (sessionId: string): Promise<any[]> => ipcRenderer.invoke("node:list", sessionId),
     open: (sessionId: string): Promise<any[]> => ipcRenderer.invoke("node:open", sessionId),
@@ -67,6 +70,7 @@ const api = {
     send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[]): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("node:send", { nodeId, text, images, skillIds }),
     abort: (nodeId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("node:abort", nodeId),
+    compact: (nodeId: string): Promise<{ ok: boolean; node?: any; reason?: string; error?: string }> => ipcRenderer.invoke("node:compact", nodeId),
     regenerate: (nodeId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("node:regenerate", nodeId),
     editResend: (arg: { nodeId: string; seq: number; text: string }): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("node:editResend", arg),

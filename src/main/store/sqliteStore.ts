@@ -310,6 +310,7 @@ export class SqliteStore implements Store {
     seed?: unknown;
     mountAncestors?: boolean;
     forkContextSnapshot?: AgentMessage[];
+    frozenBranchSummary?: AgentMessage;
   }): NodeRecord {
     const sessionId = input.sessionId ?? (input.projectId ? this.ensureDefaultSession(input.projectId).id : undefined);
     if (!sessionId) throw new Error("Session not found.");
@@ -329,6 +330,7 @@ export class SqliteStore implements Store {
       seed: input.seed,
       mountAncestors: Boolean(input.mountAncestors),
       forkContextSnapshot: input.forkContextSnapshot,
+      frozenBranchSummary: input.frozenBranchSummary,
       messages: [],
     };
     this.db
@@ -347,14 +349,17 @@ export class SqliteStore implements Store {
         node.mountAncestors ? 1 : 0,
         now,
         now,
-        encode(node.forkContextSnapshot ? { forkContextSnapshot: node.forkContextSnapshot } : {}),
+        encode({
+          ...(node.forkContextSnapshot ? { forkContextSnapshot: node.forkContextSnapshot } : {}),
+          ...(node.frozenBranchSummary ? { frozenBranchSummary: node.frozenBranchSummary } : {}),
+        }),
       );
     return node;
   }
 
   updateNode(
     id: string,
-    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; systemPrompt: string; model: StoredModelSelection; color: string }>,
+    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; frozenBranchSummary: AgentMessage; systemPrompt: string; model: StoredModelSelection; color: string }>,
   ): void {
     const current = this.getNode(id);
     if (!current) return;
@@ -364,6 +369,9 @@ export class SqliteStore implements Store {
     const meta = decode<Record<string, unknown>>(row?.meta, {});
     if (Object.prototype.hasOwnProperty.call(patch, "forkContextSnapshot")) {
       meta.forkContextSnapshot = patch.forkContextSnapshot;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "frozenBranchSummary")) {
+      meta.frozenBranchSummary = patch.frozenBranchSummary;
     }
     if (Object.prototype.hasOwnProperty.call(patch, "systemPrompt")) {
       const text = patch.systemPrompt?.trim() ?? "";
@@ -449,6 +457,12 @@ export class SqliteStore implements Store {
     tx(msgs);
   }
 
+  replaceMessageContent(nodeId: string, seq: number, content: AgentMessage): void {
+    this.db
+      .prepare("UPDATE messages SET role = ?, content = ?, meta = meta WHERE node_id = ? AND seq = ?")
+      .run(String((content as any)?.role ?? "custom"), encode(content), nodeId, seq);
+  }
+
   deleteMessagesFrom(nodeId: string, seq: number): void {
     const tx = this.db.transaction(() => {
       this.db.prepare("DELETE FROM messages WHERE node_id = ? AND seq >= ?").run(nodeId, seq);
@@ -492,6 +506,7 @@ export class SqliteStore implements Store {
     const model = parsedModel.kind === "ref" ? parsedModel.ref : parsedModel.kind === "legacy" ? parsedModel.legacyModel : undefined;
     const color = typeof meta.color === "string" ? meta.color : undefined;
     const forkContextSnapshot = Array.isArray(meta.forkContextSnapshot) ? meta.forkContextSnapshot as AgentMessage[] : undefined;
+    const frozenBranchSummary = meta.frozenBranchSummary && typeof meta.frozenBranchSummary === "object" ? meta.frozenBranchSummary as AgentMessage : undefined;
     return {
       id: row.id,
       sessionId: row.session_id,
@@ -505,6 +520,7 @@ export class SqliteStore implements Store {
       layout: toLayout(row),
       mountAncestors: Boolean(row.mount_ancestors),
       forkContextSnapshot,
+      frozenBranchSummary,
       messages: this.listMessages(row.id),
     };
   }

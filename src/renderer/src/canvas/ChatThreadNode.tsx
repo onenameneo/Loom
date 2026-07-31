@@ -11,8 +11,8 @@ import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimeline
 import { useComposerHeightVar } from "./useComposerHeightVar";
 import { ApprovalPrompt, type ApprovalState } from "./ApprovalPrompt";
 
-type Role = "user" | "assistant" | "error" | "tool" | "skill";
-type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
+type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
+type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
 type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number; mountAncestors: boolean };
 type RectLike = Pick<DOMRect, "left" | "top" | "bottom" | "width" | "height">;
 
@@ -82,10 +82,11 @@ export function ChatThreadNode(props: any) {
   const cardRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const footRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(1);
 
   const toMsgs = useCallback((items: NodeMsg[] = []) => (
-    items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, toolCall: m.toolCall, skillEvent: m.skillEvent }))
+    items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }))
   ), []);
 
   const [msgs, setMsgs] = useState<Msg[]>(() => toMsgs(data.messages ?? []));
@@ -96,6 +97,22 @@ export function ChatThreadNode(props: any) {
   const [input, setInput] = useState(() => localStorage.getItem(`loom:draft:${id}`) ?? "");
   const [budget, setBudget] = useState<NodeBudget | null>(null);
   const [tb, setTb] = useState<SelectionToolbar | null>(null);
+  useEffect(() => {
+    if (!tb) return;
+    const isInsideToolbar = (target: EventTarget | null) => target instanceof Node && Boolean(toolbarRef.current?.contains(target));
+    const onPointerDown = (event: PointerEvent) => {
+      if (!isInsideToolbar(event.target)) setTb(null);
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      if (!isInsideToolbar(event.target)) setTb(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("focusin", onFocusIn);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("focusin", onFocusIn);
+    };
+  }, [tb]);
   const [autoScroll, setAutoScroll] = useState(true);
   const [title, setTitle] = useState(String(data.title ?? ""));
   const [editingTitle, setEditingTitle] = useState(false);
@@ -274,7 +291,7 @@ export function ChatThreadNode(props: any) {
       clientWidth: el.clientWidth,
       zoom,
     });
-    setTb(toolbar && { ...toolbar, mountAncestors: false });
+    setTb(toolbar && { ...toolbar, mountAncestors: true });
   }, []);
 
   const doBranch = () => {
@@ -367,6 +384,26 @@ export function ChatThreadNode(props: any) {
     if (r.ok) {
       setNodeModel(next);
       data.onTreeChange?.();
+    }
+  }
+
+  async function compactNode() {
+    if (!window.api || busy) return;
+    setBusy(true);
+    setThinking(true);
+    try {
+      const result = await window.api.canvas.compact(id);
+      if (result.ok) {
+        await reloadNode();
+        await refreshBudget();
+      } else if (result.reason !== "not_needed") {
+        setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: `压缩失败：${result.error ?? result.reason ?? "unknown"}` }]);
+      } else {
+        setMsgs((m) => [...m, { id: idRef.current++, role: "tool", text: "压缩未执行：当前上下文还不需要压缩。" }]);
+      }
+    } finally {
+      setBusy(false);
+      setThinking(false);
     }
   }
 
@@ -618,6 +655,7 @@ export function ChatThreadNode(props: any) {
                 density="compact"
                 streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1]?.id}
                 meta={item.message.role === "assistant" ? metaFor(item.message) : undefined}
+                checkpoint={item.message.checkpoint}
                 canRegenerate={item.message.role === "assistant" && item.message.id === msgs[msgs.length - 1]?.id && !busy}
                 canEdit={item.message.role === "user" && !busy}
                 onRegenerate={regenerate}
@@ -632,8 +670,14 @@ export function ChatThreadNode(props: any) {
           {tb && (
             <div
               className={`seltb seltb--${tb.place}`}
+              ref={toolbarRef}
               style={{ left: tb.x, top: tb.y, "--seltb-arrow-x": `${tb.arrowX}px` } as CSSProperties}
-              onMouseDown={(e) => e.preventDefault()}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onMouseUp={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
             >
               <button onClick={doBranch}>
                 <span><IconSplit size={13} /> 岔出分支</span>
@@ -693,6 +737,7 @@ export function ChatThreadNode(props: any) {
           onClearNode={clearNode}
           onRegenerate={regenerate}
           onSetModel={setModel}
+          onCompact={compactNode}
           onEnableSkill={enableSkill}
           onDisableSkill={disableDraftSkill}
         />

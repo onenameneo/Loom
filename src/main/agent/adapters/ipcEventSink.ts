@@ -1,4 +1,5 @@
 import type { BrowserWindow } from "electron";
+import { sendToWindow } from "../../ipcSafeSend";
 import type { EventSinkPort } from "../ports";
 
 // ---------------------------------------------------------------------------
@@ -9,7 +10,7 @@ import type { EventSinkPort } from "../ports";
 export function createIpcEventSink(getWin: () => BrowserWindow | null): EventSinkPort {
   return {
     emit(nodeId, type, payload) {
-      getWin()?.webContents.send("canvas:event", { nodeId, type, payload });
+      sendToWindow(getWin, "canvas:event", { nodeId, type, payload });
     },
   };
 }

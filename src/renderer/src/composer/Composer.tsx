@@ -24,6 +24,7 @@ export function Composer({
   onClearNode,
   onRegenerate,
   onSetModel,
+  onCompact,
   onEnableSkill,
   onDisableSkill,
 }: {
@@ -42,6 +43,7 @@ export function Composer({
   onClearNode: () => void;
   onRegenerate: () => void;
   onSetModel: (model: string) => void;
+  onCompact: () => void;
   onEnableSkill?: (skillId: string) => void;
   onDisableSkill?: (skillId: string) => void;
 }) {
@@ -85,10 +87,11 @@ export function Composer({
       clearNode: onClearNode,
       regenerate: onRegenerate,
       setModel: onSetModel,
+      compact: onCompact,
       enableSkill: onEnableSkill,
       getState: () => ({ canRegenerate }),
     }),
-    [attachImage, canRegenerate, insertText, nodeId, onClearNode, onEnableSkill, onOpenPersona, onRegenerate, onSetModel],
+    [attachImage, canRegenerate, insertText, nodeId, onClearNode, onCompact, onEnableSkill, onOpenPersona, onRegenerate, onSetModel],
   );
 
   useEffect(() => {

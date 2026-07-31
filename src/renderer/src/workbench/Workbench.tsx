@@ -6,6 +6,29 @@ import { acceptTraceSnapshot } from "./traceState";
 type TraceEntry = { sequence: number; kind: string; payload: any };
 type TraceRecord = { turnId: string; state: string; operation: string; entries: TraceEntry[] };
 type WorkbenchPageId = "trace";
+type CompactionTracePayload = {
+  state: string;
+  trigger: string;
+  kind?: string;
+  compactThroughSeq?: number;
+  retainedFromSeq?: number;
+  retainedTokenCount?: number;
+  checkpointId?: string;
+  coverage?: { fromSeq?: number; toSeq?: number };
+  retainedTail?: { fromSeq?: number; toSeq?: number };
+  diagnostics?: {
+    before?: { tokens?: number; exact?: boolean };
+    after?: { tokens?: number; exact?: boolean };
+  };
+  summaryUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    exact?: boolean;
+  };
+  reason?: string;
+  error?: string;
+};
 
 const WORKBENCH_PAGES: Record<WorkbenchPageId, { label: string; icon: typeof Activity }> = {
   trace: { label: "Trace", icon: Activity },
@@ -27,8 +50,45 @@ function traceSummary(record: TraceRecord & { startedAt?: number; endedAt?: numb
   const response = record.entries.find((entry) => entry.kind === "response")?.payload;
   const model = request?.model?.provider && request?.model?.id ? `${request.model.provider}/${request.model.id}` : "—";
   const duration = typeof record.startedAt === "number" && typeof record.endedAt === "number" ? `${((record.endedAt - record.startedAt) / 1000).toFixed(1)}s` : undefined;
-  const tokens = response?.message?.usage?.totalTokens ?? response?.usage?.totalTokens;
-  return [model, duration, typeof tokens === "number" ? `${tokens} tokens` : undefined].filter(Boolean).join(" · ");
+  const usage = usageFacts(response?.message?.usage ?? response?.usage);
+  return [model, duration, usageSummary(usage)].filter(Boolean).join(" · ");
+}
+
+type UsageFacts = {
+  input?: number;
+  output?: number;
+  total?: number;
+  cached?: number;
+  reasoning?: number;
+};
+
+function numberField(value: any, keys: string[]) {
+  for (const key of keys) {
+    const field = value?.[key];
+    if (typeof field === "number" && Number.isFinite(field)) return field;
+  }
+  return undefined;
+}
+
+function usageFacts(usage: any): UsageFacts | undefined {
+  if (!usage || typeof usage !== "object") return undefined;
+  return {
+    input: numberField(usage, ["inputTokens", "promptTokens", "prompt_tokens", "input_tokens"]),
+    output: numberField(usage, ["outputTokens", "completionTokens", "completion_tokens", "output_tokens"]),
+    total: numberField(usage, ["totalTokens", "total_tokens"]),
+    cached: numberField(usage, ["cachedTokens", "cacheTokens", "cached_tokens", "promptCacheHitTokens", "prompt_cache_hit_tokens"]),
+    reasoning: numberField(usage, ["reasoningTokens", "reasoning_tokens"]),
+  };
+}
+
+function usageSummary(usage: UsageFacts | undefined) {
+  if (!usage) return undefined;
+  const parts = [
+    typeof usage.input === "number" ? `in ${usage.input}` : undefined,
+    typeof usage.output === "number" ? `out ${usage.output}` : undefined,
+    typeof usage.total === "number" ? `total ${usage.total}` : undefined,
+  ].filter(Boolean);
+  return parts.length > 0 ? `${parts.join(" · ")} tokens` : undefined;
 }
 
 function Json({ value }: { value: unknown }) {
@@ -55,8 +115,26 @@ function textFromContent(content: unknown) {
   }).join("\n");
 }
 
+function textFromTraceMessage(message: any) {
+  const preview = traceText(message?.text, "");
+  const content = textFromContent(message?.content);
+  const body = [preview, content === "—" ? "" : content].filter((line) => typeof line === "string" && line.trim().length > 0);
+  if (body.length > 0) return body.join("\n");
+  if (Array.isArray(message?.contentParts) && message.contentParts.length > 0) return `[content parts: ${message.contentParts.join(", ")}]`;
+  return "—";
+}
+
 function toolCallsFromContent(content: unknown) {
   return Array.isArray(content) ? content.filter((part: any) => part?.type === "toolCall") : [];
+}
+
+function isCompactionPayload(payload: unknown): payload is CompactionTracePayload {
+  if (!payload || typeof payload !== "object") return false;
+  const { state, trigger } = payload as { state?: unknown; trigger?: unknown };
+  return typeof state === "string"
+    && ["planned", "succeeded", "aborted", "failed"].includes(state)
+    && typeof trigger === "string"
+    && ["manual", "threshold", "overflow"].includes(trigger);
 }
 
 function isSkillMessage(message: any) {
@@ -77,7 +155,7 @@ function MessageList({ messages }: { messages: any[] }) {
   return <div className="trace-messages">
     {messages.map((message, index) => <article className="trace-message" key={`${message?.timestamp ?? index}-${index}`}>
       <header><span>{message?.role ?? "message"}</span><CopyButton label="消息" value={message} /></header>
-      <pre>{textFromContent(message?.content)}</pre>
+      <pre>{textFromTraceMessage(message)}</pre>
     </article>)}
   </div>;
 }
@@ -87,6 +165,9 @@ function RequestView({ payload, index }: { payload: any; index: number }) {
   const skills = messages.filter(isSkillMessage);
   const conversation = messages.filter((message: any) => !isSkillMessage(message));
   const tools = Array.isArray(payload?.tools) ? payload.tools : [];
+  const conversationCount = typeof payload?.messageCount === "number" && payload.messageCount !== conversation.length
+    ? `${conversation.length} shown / ${payload.messageCount} sent`
+    : `${conversation.length}`;
   return <section className="trace-section trace-request">
     <div className="trace-section-heading"><h3>LLM Request {index + 1}</h3><span>实际提交前的语义请求</span></div>
     <dl className="trace-facts"><dt>Model</dt><dd>{payload?.model?.provider ?? "—"}/{payload?.model?.id ?? "—"}</dd></dl>
@@ -99,7 +180,7 @@ function RequestView({ payload, index }: { payload: any; index: number }) {
       <div className="trace-detail-body"><MessageList messages={skills} /></div>
     </details>}
     <details className="trace-detail" open>
-      <summary><span>Conversation</span><em>{conversation.length}</em></summary>
+      <summary><span>Conversation</span><em>{conversationCount}</em></summary>
       <div className="trace-detail-body"><MessageList messages={conversation} /></div>
     </details>
     <details className="trace-detail">
@@ -117,6 +198,7 @@ function ResponseView({ payload, index }: { payload: any; index: number }) {
   const message = payload?.message ?? payload;
   const toolCalls = toolCallsFromContent(message?.content);
   const heading = toolCalls.length > 0 ? `LLM Tool Decision ${index + 1}` : `LLM Response ${index + 1}`;
+  const usage = usageFacts(message?.usage);
   return <details className="trace-section trace-response-detail" open>
     <summary className="trace-section-heading"><h3>{heading}</h3><span>{toolCalls.length > 0 ? `${toolCalls.length} tool call${toolCalls.length > 1 ? "s" : ""}` : traceText(message?.role, "assistant")}</span></summary>
     {toolCalls.length > 0 && <div className="trace-tool-decisions">
@@ -125,7 +207,22 @@ function ResponseView({ payload, index }: { payload: any; index: number }) {
       </div>)}
     </div>}
     <div className="trace-response"><header><span>{traceText(message?.role, "assistant")}</span><CopyButton label="模型响应" value={message} /></header><pre>{textFromContent(message?.content ?? message)}</pre></div>
-    {message?.usage && <details className="trace-detail"><summary><span>Usage</span><em>{message.usage.totalTokens ?? "—"} tokens</em></summary><div className="trace-detail-body"><Json value={message.usage} /></div></details>}
+    {message?.usage && <details className="trace-detail" open>
+      <summary><span>Response usage</span><em>{usageSummary(usage) ?? "available"}</em></summary>
+      <div className="trace-detail-body">
+        <dl className="trace-facts">
+          {typeof usage?.input === "number" && <><dt>Input</dt><dd>{usage.input} tokens</dd></>}
+          {typeof usage?.output === "number" && <><dt>Output</dt><dd>{usage.output} tokens</dd></>}
+          {typeof usage?.total === "number" && <><dt>Total</dt><dd>{usage.total} tokens</dd></>}
+          {typeof usage?.cached === "number" && <><dt>Cached</dt><dd>{usage.cached} tokens</dd></>}
+          {typeof usage?.reasoning === "number" && <><dt>Reasoning</dt><dd>{usage.reasoning} tokens</dd></>}
+        </dl>
+        <details className="trace-detail">
+          <summary><span>Raw usage</span><em>JSON</em></summary>
+          <div className="trace-detail-body"><Json value={message.usage} /></div>
+        </details>
+      </div>
+    </details>}
   </details>;
 }
 
@@ -137,6 +234,47 @@ function ToolEntryView({ payload }: { payload: any }) {
   return <section className="trace-section trace-tool-section">
     <div className="trace-section-heading"><h3>Tool {traceText(payload?.name, "tool")}</h3><span>{traceText(payload?.state, "")}</span></div>
     <ToolView payload={payload} />
+  </section>;
+}
+
+function spanText(range: { fromSeq?: number; toSeq?: number } | undefined) {
+  if (!range || typeof range.fromSeq !== "number" || typeof range.toSeq !== "number") return null;
+  return `${range.fromSeq}..${range.toSeq}`;
+}
+
+function tokenDiagnosticText(label: string, value: { tokens?: number; exact?: boolean } | undefined) {
+  if (!value || typeof value.tokens !== "number") return null;
+  return `${value.exact ? "exact" : "estimated"} ${label}: ${value.tokens} tokens`;
+}
+
+function CompactionEntryView({ payload }: { payload: CompactionTracePayload }) {
+  const coverage = spanText(payload.coverage);
+  const retainedTail = spanText(payload.retainedTail);
+  const meta = [payload.trigger, payload.kind].filter(Boolean).join(" · ");
+  const before = tokenDiagnosticText("before", payload.diagnostics?.before);
+  const after = tokenDiagnosticText("after", payload.diagnostics?.after);
+  const summaryUsage = typeof payload.summaryUsage?.totalTokens === "number"
+    ? `${payload.summaryUsage.exact ? "exact" : "estimated"} summary: ${payload.summaryUsage.totalTokens} tokens`
+    : null;
+  return <section className="trace-section trace-compaction-section">
+    <div className="trace-section-heading"><h3>Compaction {payload.state}</h3><span>{meta}</span></div>
+    <dl className="trace-facts">
+      {coverage && <><dt>Coverage</dt><dd>coverage {coverage}</dd></>}
+      {retainedTail && <><dt>Retained</dt><dd>{retainedTail}</dd></>}
+      {typeof payload.compactThroughSeq === "number" && <><dt>Through</dt><dd>{payload.compactThroughSeq}</dd></>}
+      {typeof payload.retainedFromSeq === "number" && <><dt>Tail from</dt><dd>{payload.retainedFromSeq}</dd></>}
+      {typeof payload.retainedTokenCount === "number" && <><dt>Tail tokens</dt><dd>{payload.retainedTokenCount}</dd></>}
+      {payload.checkpointId && <><dt>Checkpoint</dt><dd>{payload.checkpointId}</dd></>}
+      {before && <><dt>Before</dt><dd>{before}</dd></>}
+      {after && <><dt>After</dt><dd>{after}</dd></>}
+      {summaryUsage && <><dt>Summary</dt><dd>{summaryUsage}</dd></>}
+      {payload.reason && <><dt>Reason</dt><dd>{payload.reason}</dd></>}
+      {payload.error && <><dt>Error</dt><dd>{payload.error}</dd></>}
+    </dl>
+    <details className="trace-detail">
+      <summary><span>Diagnostics</span><em>{payload.diagnostics ? "available" : "event"}</em></summary>
+      <div className="trace-detail-body"><CopyButton label="压缩事件" value={payload} /><Json value={payload} /></div>
+    </details>
   </section>;
 }
 
@@ -215,9 +353,9 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
     }}>
       {hasNewActivity && <button className="trace-new-activity" onClick={() => { inspectorRef.current?.scrollTo({ top: 0, behavior: "smooth" }); readingHistoryRef.current = false; setHasNewActivity(false); }}>有新的 Trace 活动</button>}
       {!nodeId ? <p>选择一个节点以查看 trace。</p> : !trace?.records?.length ? <p>此节点运行后，实际模型请求、响应和工具调用会出现在这里。</p> : trace.records.map((record: TraceRecord) => {
-        const events = record.entries.filter((entry) => !["request", "response", "tool"].includes(entry.kind));
+        const events = record.entries.filter((entry) => !["request", "response", "tool"].includes(entry.kind) && !(entry.kind === "event" && isCompactionPayload(entry.payload)));
         const visibleEntries = record.entries
-          .filter((entry) => ["request", "response", "tool"].includes(entry.kind))
+          .filter((entry) => ["request", "response", "tool"].includes(entry.kind) || (entry.kind === "event" && isCompactionPayload(entry.payload)))
           .sort((a, b) => a.sequence - b.sequence);
         let requestIndex = 0;
         let responseIndex = 0;
@@ -225,6 +363,7 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
           {visibleEntries.map((entry) => {
             if (entry.kind === "request") return <RequestView key={entry.sequence} index={requestIndex++} payload={entry.payload} />;
             if (entry.kind === "response") return <ResponseView key={entry.sequence} index={responseIndex++} payload={entry.payload} />;
+            if (entry.kind === "event" && isCompactionPayload(entry.payload)) return <CompactionEntryView key={entry.sequence} payload={entry.payload} />;
             return <ToolEntryView key={entry.sequence} payload={entry.payload} />;
           })}
           {events.length > 0 && <details className="trace-events"><summary>Events <em>{events.length}</em></summary><Json value={events.map((entry) => entry.payload)} /></details>}

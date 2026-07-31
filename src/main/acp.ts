@@ -16,6 +16,7 @@ import type {
   ToolCallStatus,
 } from "@agentclientprotocol/sdk";
 import type { Store } from "./store/store";
+import { sendToWindow } from "./ipcSafeSend";
 
 export type AcpSessionStatus = "starting" | "ready" | "thinking" | "error" | "stopped";
 
@@ -132,7 +133,7 @@ export function registerAcp(opts: { getWin: () => BrowserWindow | null; store: S
   const sessions = new Map<string, AcpSession>();
 
   function send(event: AcpEvent) {
-    getWin()?.webContents.send("acp:event", event);
+    sendToWindow(getWin, "acp:event", event);
   }
 
   function finishPermission(session: AcpSession, requestId: string, response: RequestPermissionResponse) {

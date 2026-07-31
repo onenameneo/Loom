@@ -11,3 +11,5 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </StrictMode>,
 );
+
+requestAnimationFrame(() => window.api?.lifecycle.ready());

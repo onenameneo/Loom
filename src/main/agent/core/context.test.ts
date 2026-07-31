@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { LoomUiMessage } from "./messages";
+import { createLoomContextCheckpoint } from "./messages";
 import { buildContextPlan, isLlmMessage, roleOf, textOf } from "./context";
 
 const user = (text: string): AgentMessage => ({ role: "user", content: text, timestamp: 0 }) as AgentMessage;
@@ -94,5 +95,38 @@ describe("buildContextPlan", () => {
       ["assistant", ""],
       ["toolResult", "skill body"],
     ]);
+  });
+
+  it("projects the newest valid checkpoint and only uncovered source tail without mutating transcript", () => {
+    const older = createLoomContextCheckpoint({
+      id: "cp-old",
+      nodeId: "n1",
+      createdAt: 1,
+      reason: "threshold",
+      summary: "old summary",
+      coverage: { fromSeq: 0, toSeq: 1 },
+      retainedTail: { fromSeq: 2, toSeq: 3 },
+      diagnostics: { before: { tokens: 100, exact: true }, after: { tokens: 50, exact: true } },
+    }) as any;
+    const newer = createLoomContextCheckpoint({
+      id: "cp-new",
+      nodeId: "n1",
+      createdAt: 2,
+      reason: "manual",
+      summary: "new summary",
+      coverage: { fromSeq: 0, toSeq: 4 },
+      retainedTail: { fromSeq: 5, toSeq: 6 },
+      diagnostics: { before: { tokens: 120, exact: false }, after: { tokens: 40, exact: false } },
+    }) as any;
+    const transcript = [user("u1"), asst("a1"), older, user("u2"), asst("a2"), newer, user("tail")];
+
+    const plan = buildContextPlan({ mountAncestors: false }, transcript);
+
+    expect(transcript).toHaveLength(7);
+    expect(plan.map((m) => [m.role, textOf(m as any)])).toEqual([
+      ["user", expect.stringContaining("new summary")],
+      ["user", "tail"],
+    ]);
+    expect(textOf(plan[0] as any)).not.toContain("old summary");
   });
 });

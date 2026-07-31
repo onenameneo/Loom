@@ -10,7 +10,7 @@ describe("acceptTraceSnapshot", () => {
     expect(acceptTraceSnapshot(current, { nodeId: "node-1", sequence: 5, records: [] }, "node-1")).toEqual({ nodeId: "node-1", sequence: 5, records: [] });
   });
 
-  it("merges newer partial trace records instead of dropping earlier entries", () => {
+  it("treats newer trace snapshots as authoritative so truncated entries stay evicted", () => {
     const current = {
       nodeId: "node-1",
       sequence: 1,
@@ -18,30 +18,33 @@ describe("acceptTraceSnapshot", () => {
         turnId: "turn-1",
         state: "running",
         operation: "send",
-        entries: [{ sequence: 1, kind: "request", payload: { model: "gpt-5" } }],
+        entries: [
+          { sequence: 1, kind: "event", payload: { type: "message_update" } },
+          { sequence: 2, kind: "event", payload: { type: "message_update" } },
+          { sequence: 3, kind: "event", payload: { type: "message_update" } },
+        ],
       }],
     };
 
     expect(acceptTraceSnapshot(current, {
       nodeId: "node-1",
-      sequence: 2,
+      sequence: 4,
       records: [{
         turnId: "turn-1",
-        state: "completed",
+        state: "running",
         operation: "send",
-        entries: [{ sequence: 2, kind: "response", payload: { message: "done" } }],
+        truncated: true,
+        entries: [{ sequence: 4, kind: "event", payload: { type: "message_update" } }],
       }],
     }, "node-1")).toEqual({
       nodeId: "node-1",
-      sequence: 2,
+      sequence: 4,
       records: [{
         turnId: "turn-1",
-        state: "completed",
+        state: "running",
         operation: "send",
-        entries: [
-          { sequence: 1, kind: "request", payload: { model: "gpt-5" } },
-          { sequence: 2, kind: "response", payload: { message: "done" } },
-        ],
+        truncated: true,
+        entries: [{ sequence: 4, kind: "event", payload: { type: "message_update" } }],
       }],
     });
   });

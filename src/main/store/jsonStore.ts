@@ -13,6 +13,7 @@ import {
   type Project,
 } from "./store";
 import type { StoredModelSelection } from "../modelConfig/modelRef";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 // JSON-file 实现（原子写）。仓储接口的一个后端；之后可换 better-sqlite3，
 // 上层不变。数据落在 app.getPath('userData')/canvas-data.json。
@@ -190,12 +191,14 @@ export class JsonStore implements Store {
     title: string;
     seed?: unknown;
     mountAncestors?: boolean;
+    forkContextSnapshot?: AgentMessage[];
+    frozenBranchSummary?: AgentMessage;
   }): NodeRecord {
     throw new Error("JsonStore does not implement canvas node persistence.");
   }
   updateNode(
     _id: string,
-    _patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; systemPrompt: string; model: StoredModelSelection; color: string }>,
+    _patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; frozenBranchSummary: AgentMessage; systemPrompt: string; model: StoredModelSelection; color: string }>,
   ): void {}
   updateNodeLayout(_id: string, _layout: NodeLayout): boolean {
     return false;

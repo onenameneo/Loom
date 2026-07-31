@@ -28,6 +28,16 @@ describe("sanitizeTraceValue", () => {
       data: { omitted: "binary", bytes: 64 },
     });
   });
+
+  it("bounds large arrays and deep objects", () => {
+    expect(sanitizeTraceValue({ items: Array.from({ length: 8 }, (_, index) => ({ index })) }, { maxArrayLength: 3 })).toEqual({
+      items: [{ index: 0 }, { index: 1 }, { index: 2 }, { omitted: 5 }],
+    });
+
+    expect(sanitizeTraceValue({ a: { b: { c: { d: "too deep" } } } }, { maxDepth: 2 })).toEqual({
+      a: { b: { truncated: "depth" } },
+    });
+  });
 });
 
 describe("createTraceRepository", () => {

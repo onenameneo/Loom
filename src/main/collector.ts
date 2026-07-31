@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
 import { app, BrowserWindow, Notification, ipcMain } from "electron";
 import type { Store } from "./store/store";
+import { sendToWindow } from "./ipcSafeSend";
 
 const DEFAULT_PORT = 31_577;
 const MAX_PORT_PROBES = 32;
@@ -608,7 +609,7 @@ export function registerCollector(opts: { getWin: () => BrowserWindow | null; st
   }
 
   function send(event: ActivityEvent) {
-    getWin()?.webContents.send("activity:event", event);
+    sendToWindow(getWin, "activity:event", event);
   }
 
   // agent 答完一轮 / 需要输入时响一声——这是用户该回去看一眼的时刻。

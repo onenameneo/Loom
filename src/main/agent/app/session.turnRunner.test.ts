@@ -6,6 +6,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { createAgentSession } from "./session";
 import type { EngineHandle, EventSinkPort, LlmEnginePort, NodeInit } from "../ports";
 import type { AgentTool } from "../core/tool";
+import { createLoomContextCheckpoint } from "../core/messages";
 import type { NodeLayout, NodeRecord, PersistedMessage, SessionRecord, Settings, Store, Project } from "../../store/store";
 import { DEFAULT_SETTINGS } from "../../store/store";
 
@@ -68,7 +69,7 @@ class MemoryStore implements Store {
   deleteSession() {}
   listNodes(sessionId: string) { return [...this.nodes.values()].filter((n) => n.sessionId === sessionId); }
   getNode(id: string) { return this.nodes.get(id); }
-  createNode(input: { sessionId?: string; projectId?: string; parentId?: string; title: string; seed?: unknown; mountAncestors?: boolean; forkContextSnapshot?: AgentMessage[] }): NodeRecord {
+  createNode(input: { sessionId?: string; projectId?: string; parentId?: string; title: string; seed?: unknown; mountAncestors?: boolean; forkContextSnapshot?: AgentMessage[]; frozenBranchSummary?: AgentMessage }): NodeRecord {
     const session = (input.sessionId ? this.getSession(input.sessionId) : this.ensureDefaultSession(input.projectId ?? "ws")) ?? this.sessions[0];
     const node: NodeRecord = {
       id: `n${this.nodes.size + 1}`,
@@ -79,12 +80,16 @@ class MemoryStore implements Store {
       seed: input.seed,
       mountAncestors: Boolean(input.mountAncestors),
       forkContextSnapshot: input.forkContextSnapshot,
+      frozenBranchSummary: input.frozenBranchSummary,
       messages: [],
     };
     this.nodes.set(node.id, node);
     return node;
   }
-  updateNode() {}
+  updateNode(id: string, patch: Partial<{ frozenBranchSummary: AgentMessage }>) {
+    const node = this.nodes.get(id) as (NodeRecord & { frozenBranchSummary?: AgentMessage }) | undefined;
+    if (node && Object.prototype.hasOwnProperty.call(patch, "frozenBranchSummary")) node.frozenBranchSummary = patch.frozenBranchSummary;
+  }
   updateNodeLayout(_id: string, _layout: NodeLayout) { return true; }
   updateNodeLayouts(items: Array<{ id: string; layout: NodeLayout }>) { return items.map((i) => i.id); }
   deleteNode(id: string) { this.nodes.delete(id); }
@@ -93,6 +98,14 @@ class MemoryStore implements Store {
     if (!node) return;
     for (const msg of msgs) {
       node.messages.push({ ...msg, seq: node.messages.length });
+    }
+  }
+  replaceMessageContent(nodeId: string, seq: number, content: AgentMessage) {
+    const node = this.nodes.get(nodeId);
+    const msg = node?.messages[seq];
+    if (msg) {
+      msg.role = String((content as any).role);
+      msg.content = content;
     }
   }
   deleteMessagesFrom(nodeId: string, seq: number) {
@@ -132,6 +145,9 @@ function createHandle(messages: AgentMessage[], prompt: EngineHandle["prompt"]):
     },
   };
 }
+
+const user = (text: string): AgentMessage => ({ role: "user", content: text, timestamp: 0 }) as AgentMessage;
+const assistant = (text: string): AgentMessage => ({ role: "assistant", content: text, timestamp: 0 }) as unknown as AgentMessage;
 
 describe("createAgentSession turn runner integration", () => {
   it("does not resolve local coding tools for an unlinked project", () => {
@@ -314,6 +330,156 @@ describe("createAgentSession turn runner integration", () => {
     ]);
   });
 
+  it("initializes a mounted branch agent with the parent history followed by its seed", () => {
+    const store = new MemoryStore([
+      user("message a"),
+      assistant("message b"),
+      user("message c"),
+    ]);
+    let getNodeInit: ((nodeId: string) => NodeInit | undefined) | undefined;
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: (hooks) => {
+        getNodeInit = hooks.getNodeInit;
+        return createEngine(createHandle([], vi.fn()));
+      },
+    });
+
+    const child = session.create({
+      sessionId: "sess",
+      parentId: "n1",
+      seed: { text: "selected seed", from: "Node", parent: "n1" },
+      mountAncestors: true,
+    });
+
+    const init = getNodeInit!(child.id)!;
+    expect(init.messages.map((message: any) => String(message.content))).toEqual([
+      "message a",
+      "message b",
+      "message c",
+      expect.stringContaining("selected seed"),
+    ]);
+  });
+
+  it("initializes an unmounted branch agent with only its seed", () => {
+    const store = new MemoryStore([user("parent history")]);
+    let getNodeInit: ((nodeId: string) => NodeInit | undefined) | undefined;
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: (hooks) => {
+        getNodeInit = hooks.getNodeInit;
+        return createEngine(createHandle([], vi.fn()));
+      },
+    });
+
+    const child = session.create({
+      sessionId: "sess",
+      parentId: "n1",
+      seed: { text: "only seed", from: "Node", parent: "n1" },
+      mountAncestors: false,
+    });
+
+    const init = getNodeInit!(child.id)!;
+    expect(init.messages).toHaveLength(1);
+    expect(String((init.messages[0] as any).content)).toContain("only seed");
+    expect(JSON.stringify(init.messages)).not.toContain("parent history");
+  });
+
+  it("inherits a mounted parent's custom system prompt", () => {
+    const store = new MemoryStore();
+    store.nodes.get("n1")!.systemPrompt = "parent persona";
+    let getNodeInit: ((nodeId: string) => NodeInit | undefined) | undefined;
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: (hooks) => {
+        getNodeInit = hooks.getNodeInit;
+        return createEngine(createHandle([], vi.fn()));
+      },
+    });
+
+    const child = session.create({ sessionId: "sess", parentId: "n1", mountAncestors: true });
+
+    expect(getNodeInit!(child.id)?.systemPrompt).toBe("parent persona");
+  });
+
+  it("does not let later parent checkpoints change an existing mounted child", async () => {
+    const store = new MemoryStore([user("parent question"), assistant("parent answer")]);
+    let buildContext: ((nodeId: string, own: AgentMessage[]) => any) | undefined;
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: (hooks) => {
+        buildContext = hooks.buildContext;
+        return createEngine(createHandle([], vi.fn()));
+      },
+    });
+    const child = session.create({ sessionId: "sess", parentId: "n1", seed: { text: "selected", from: "Node", parent: "n1" }, mountAncestors: true });
+    store.appendMessages("n1", [
+      {
+        id: "parent-cp",
+        seq: 2,
+        role: "loomContextCheckpoint",
+        content: createLoomContextCheckpoint({
+          id: "parent-cp",
+          nodeId: "n1",
+          createdAt: 2,
+          reason: "threshold",
+          summary: "PARENT CHECKPOINT AFTER CHILD",
+          coverage: { fromSeq: 0, toSeq: 1 },
+          retainedTail: { fromSeq: 2, toSeq: 2 },
+          diagnostics: { before: { tokens: 100, exact: true }, after: { tokens: 20, exact: true } },
+        }) as unknown as AgentMessage,
+      },
+    ]);
+
+    expect(JSON.stringify(await buildContext!(child.id, []))).not.toContain("PARENT CHECKPOINT AFTER CHILD");
+  });
+
+  it("persists a child-owned frozen branch summary when mounted ancestor context exceeds budget", async () => {
+    const long = "x".repeat(20_000);
+    const store = new MemoryStore([user(`parent question ${long}`), assistant(`parent answer ${long}`), user(`followup ${long}`), assistant(`final ${long}`)]);
+    let buildContext: ((nodeId: string, own: AgentMessage[]) => any) | undefined;
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 77 },
+      getApiKey: () => "key",
+      createEngine: (hooks) => {
+        buildContext = hooks.buildContext;
+        return createEngine(createHandle([], vi.fn()));
+      },
+    });
+
+    const child = session.create({ sessionId: "sess", parentId: "n1", seed: { text: "selected", from: "Node", parent: "n1" }, mountAncestors: true });
+    store.appendMessages("n1", [{ id: "late", seq: 4, role: "user", content: user("AFTER_CHILD_PARENT_MUTATION") }]);
+
+    const storedChild = store.getNode(child.id)! as any;
+    const projected = await buildContext!(child.id, []);
+
+    expect(storedChild.forkContextSnapshot).toBeUndefined();
+    expect(storedChild.frozenBranchSummary).toMatchObject({ role: "loomFrozenBranchSummary", childNodeId: child.id });
+    const projectedText = projected.map((message: any) => String(message.content));
+    expect(projectedText[0]).toEqual(expect.stringContaining("Frozen mounted-ancestor context"));
+    expect(projectedText[projectedText.length - 1]).toEqual(expect.stringContaining("selected"));
+    expect(JSON.stringify(projected)).not.toContain("AFTER_CHILD_PARENT_MUTATION");
+  });
+
   it("does not hydrate Loom skill events into the provider transcript after enabling a skill", () => {
     const root = mkdtempSync(join(tmpdir(), "loom-session-skill-init-"));
     const skillRoot = join(root, "research");
@@ -373,6 +539,104 @@ describe("createAgentSession turn runner integration", () => {
     }
   });
 
+  it("restores derived checkpoint records as preload-safe timeline messages", () => {
+    const checkpoint = createLoomContextCheckpoint({
+      id: "cp-1",
+      nodeId: "n1",
+      createdAt: 10,
+      reason: "threshold",
+      summary: "Goal\n- continue the task",
+      coverage: { fromSeq: 0, toSeq: 1 },
+      retainedTail: { fromSeq: 2, toSeq: 2 },
+      diagnostics: { before: { tokens: 100, exact: true }, after: { tokens: 40, exact: false } },
+      summaryUsage: { inputTokens: 20, outputTokens: 5, totalTokens: 25, exact: true },
+    }) as unknown as AgentMessage;
+    const store = new MemoryStore([user("before"), assistant("covered"), checkpoint, user("tail")]);
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    const [node] = session.open("sess");
+
+    expect(node.messages.map((message: any) => message.role)).toEqual(["user", "assistant", "checkpoint", "user"]);
+    expect(node.messages[2]).toMatchObject({
+      role: "checkpoint",
+      text: "Goal\n- continue the task",
+      checkpoint: {
+        id: "cp-1",
+        kind: "context",
+        reason: "threshold",
+        coverage: { fromSeq: 0, toSeq: 1 },
+        diagnostics: { before: { tokens: 100, exact: true }, after: { tokens: 40, exact: false } },
+      },
+    });
+  });
+
+  it("invalidates retained checkpoints that cover an edit-resend truncation without rewriting source messages", async () => {
+    const checkpoint = createLoomContextCheckpoint({
+      id: "cp-1",
+      nodeId: "n1",
+      createdAt: 10,
+      reason: "threshold",
+      summary: "covered",
+      coverage: { fromSeq: 0, toSeq: 3 },
+      retainedTail: { fromSeq: 4, toSeq: 4 },
+      diagnostics: { before: { tokens: 100, exact: true }, after: { tokens: 40, exact: true } },
+    }) as unknown as AgentMessage;
+    const store = new MemoryStore([user("first"), checkpoint, user("edit me"), assistant("old answer")]);
+    const engineMessages: AgentMessage[] = [];
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 99 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle(engineMessages, vi.fn(async (message) => {
+        engineMessages.push(message);
+      }))),
+    });
+
+    await session.editResend({ nodeId: "n1", seq: 2, text: "edited" });
+
+    const messages = store.getNode("n1")!.messages;
+    expect(messages[0]?.content).toMatchObject({ role: "user", content: "first" });
+    expect(messages[1]?.content).toMatchObject({ role: "loomContextCheckpoint", invalidatedAt: 99 });
+  });
+
+  it("invalidates retained checkpoints that cover a regenerate truncation", async () => {
+    const checkpoint = createLoomContextCheckpoint({
+      id: "cp-1",
+      nodeId: "n1",
+      createdAt: 10,
+      reason: "threshold",
+      summary: "covered",
+      coverage: { fromSeq: 0, toSeq: 3 },
+      retainedTail: { fromSeq: 4, toSeq: 4 },
+      diagnostics: { before: { tokens: 100, exact: true }, after: { tokens: 40, exact: true } },
+    }) as unknown as AgentMessage;
+    const store = new MemoryStore([user("first"), checkpoint, user("again"), assistant("old answer")]);
+    const engineMessages: AgentMessage[] = [];
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 123 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle(engineMessages, vi.fn(async () => {
+        engineMessages.push(assistant("new answer"));
+      }))),
+    });
+
+    await session.regenerate("n1");
+
+    expect(store.getNode("n1")!.messages[1]?.content).toMatchObject({ role: "loomContextCheckpoint", invalidatedAt: 123 });
+  });
+
   it("applies composer-selected skills to only the current prompt without persisting skill events", async () => {
     const root = mkdtempSync(join(tmpdir(), "loom-session-prompt-skill-"));
     const skillRoot = join(root, "research");
@@ -405,6 +669,311 @@ describe("createAgentSession turn runner integration", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("runs threshold compaction after a completed turn and appends the checkpoint to the node cache", async () => {
+    const store = new MemoryStore([user("old question"), assistant("old answer")]);
+    const engineMessages = store.listMessages("n1").map((message) => message.content);
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "cp-threshold" },
+      clock: { now: () => 200 },
+      getApiKey: () => "key",
+      compaction: {
+        thresholdTokens: 5_000,
+        tailBudgetTokens: 2,
+        summarize: vi.fn(async () => ({ summary: "## Goal\nthreshold summary" })),
+      },
+      createEngine: () => createEngine(createHandle(engineMessages, vi.fn(async (message) => {
+        engineMessages.push(message, assistant("new answer " + "x".repeat(30_000)));
+      }))),
+    });
+
+    await expect(session.send({ nodeId: "n1", text: "new question" })).resolves.toEqual({ ok: true });
+
+    const roles = store.listMessages("n1").map((message) => (message.content as any).role);
+    expect(roles).toContain("loomContextCheckpoint");
+    expect(session.list("sess")[0]!.messages.at(-1)).toMatchObject({ role: "checkpoint", text: "## Goal\nthreshold summary" });
+  });
+
+  it("does not append a checkpoint when automatic threshold summarization fails", async () => {
+    const store = new MemoryStore([user("old question"), assistant("old answer")]);
+    const engineMessages = store.listMessages("n1").map((message) => message.content);
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "cp-threshold" },
+      clock: { now: () => 202 },
+      getApiKey: () => "key",
+      compaction: {
+        thresholdTokens: 5_000,
+        tailBudgetTokens: 2,
+        summarize: vi.fn(async () => {
+          throw new Error("summary failed");
+        }),
+      },
+      createEngine: () => createEngine(createHandle(engineMessages, vi.fn(async (message) => {
+        engineMessages.push(message, assistant("new answer " + "x".repeat(30_000)));
+      }))),
+    });
+
+    await expect(session.send({ nodeId: "n1", text: "new question" })).resolves.toEqual({ ok: true });
+    expect(store.listMessages("n1").map((message) => (message.content as any).role)).not.toContain("loomContextCheckpoint");
+  });
+
+  it("runs preflight compaction before appending a new prompt when existing context is already over threshold", async () => {
+    const store = new MemoryStore([user("old question " + "x".repeat(30_000)), assistant("old answer " + "x".repeat(30_000))]);
+    const engineMessages = store.listMessages("n1").map((message) => message.content);
+    const observedPromptOrder: string[] = [];
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "cp-preflight" },
+      clock: { now: () => 201 },
+      getApiKey: () => "key",
+      compaction: {
+        thresholdTokens: 10_000,
+        tailBudgetTokens: 2,
+        summarize: vi.fn(async () => ({ summary: "## Goal\npreflight summary" })),
+      },
+      createEngine: () => createEngine(createHandle(engineMessages, vi.fn(async (message) => {
+        observedPromptOrder.push(String((message as any).content));
+        engineMessages.push(message, assistant("new answer"));
+      }))),
+    });
+
+    await expect(session.send({ nodeId: "n1", text: "fresh prompt" })).resolves.toEqual({ ok: true });
+
+    expect(observedPromptOrder).toEqual(["fresh prompt"]);
+    expect(store.listMessages("n1").map((message) => (message.content as any).role).slice(0, 4)).toEqual([
+      "user",
+      "assistant",
+      "loomContextCheckpoint",
+      "user",
+    ]);
+  });
+
+  it("supports manual compaction requests for a node", async () => {
+    const store = new MemoryStore([user("old question " + "x".repeat(30_000)), assistant("old answer " + "x".repeat(30_000))]);
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "cp-manual" },
+      clock: { now: () => 250 },
+      getApiKey: () => "key",
+      compaction: {
+        thresholdTokens: 10_000,
+        tailBudgetTokens: 2,
+        summarize: vi.fn(async () => ({ summary: "## Goal\nmanual summary" })),
+      },
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    await expect((session as any).compact("n1")).resolves.toMatchObject({ ok: true, node: { id: "n1" } });
+    expect(store.listMessages("n1").map((message) => (message.content as any).role)).toContain("loomContextCheckpoint");
+    expect(session.list("sess")[0]!.messages.at(-1)).toMatchObject({ role: "checkpoint", text: "## Goal\nmanual summary" });
+  });
+
+  it("reports projected send budget after checkpoint projection instead of raw retained history", async () => {
+    const store = new MemoryStore([user("old question " + "x".repeat(30_000)), assistant("old answer " + "x".repeat(30_000)), user("fresh tail")]);
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "cp-budget" },
+      clock: { now: () => 250 },
+      getApiKey: () => "key",
+      compaction: {
+        thresholdTokens: 10_000,
+        tailBudgetTokens: 20,
+        summarize: vi.fn(async () => ({ summary: "## Goal\nshort summary" })),
+      },
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    expect(session.budget("n1").withoutAncestors).toBeGreaterThan(20_000);
+    await expect((session as any).compact("n1")).resolves.toMatchObject({ ok: true, node: { id: "n1" } });
+    expect(session.budget("n1").withoutAncestors).toBeLessThan(1_000);
+  });
+
+  it("includes system prompt and skill index in the visible send budget", () => {
+    const root = mkdtempSync(join(tmpdir(), "loom-session-budget-skills-"));
+    const skillRoot = join(root, "long-skill");
+    mkdirSync(skillRoot, { recursive: true });
+    writeFileSync(join(skillRoot, "SKILL.md"), "---\nname: long-skill\ndescription: " + "skill context ".repeat(400) + "\n---\n# Long Skill\n", "utf-8");
+    const store = new MemoryStore([user("short")]);
+    store.settings = { ...DEFAULT_SETTINGS, skills: { globalSources: [root] } };
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "budget-system" },
+      clock: { now: () => 260 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    try {
+      expect(session.budget("n1").withoutAncestors).toBeGreaterThan(1_000);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("lets manual compaction bypass the automatic threshold gate", async () => {
+    const store = new MemoryStore([user("manual old question " + "x".repeat(20_000)), assistant("manual old answer " + "x".repeat(20_000))]);
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "cp-manual-low" },
+      clock: { now: () => 251 },
+      getApiKey: () => "key",
+      compaction: {
+        thresholdTokens: 100_000,
+        tailBudgetTokens: 2,
+        summarize: vi.fn(async () => ({ summary: "## Goal\nmanual low summary" })),
+      },
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    await expect((session as any).compact("n1")).resolves.toMatchObject({ ok: true, node: { id: "n1" } });
+    expect(store.listMessages("n1").map((message) => (message.content as any).role)).toContain("loomContextCheckpoint");
+  });
+
+  it("uses a more aggressive default tail budget for manual compaction", async () => {
+    const store = new MemoryStore([
+      user("old " + "x".repeat(8_000)),
+      assistant("old answer " + "x".repeat(8_000)),
+      user("middle " + "x".repeat(8_000)),
+      assistant("middle answer " + "x".repeat(8_000)),
+      user("recent " + "x".repeat(8_000)),
+      assistant("recent answer " + "x".repeat(8_000)),
+    ]);
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "cp-manual-budget" },
+      clock: { now: () => 252 },
+      getApiKey: () => "key",
+      compaction: {
+        thresholdTokens: 100_000,
+        summarize: vi.fn(async () => ({ summary: "## Goal\nmanual budget summary" })),
+      },
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    await expect((session as any).compact("n1")).resolves.toMatchObject({ ok: true, node: { id: "n1" } });
+    const checkpoint = store.listMessages("n1").find((message) => (message.content as any).role === "loomContextCheckpoint")?.content as any;
+    expect(checkpoint.retainedTail.fromSeq).toBeGreaterThanOrEqual(5);
+    expect(checkpoint.diagnostics.after.tokens).toBeLessThan(7_000);
+  });
+
+  it("aborts an in-flight manual compaction without persisting a partial checkpoint", async () => {
+    const store = new MemoryStore([user("old question " + "x".repeat(30_000)), assistant("old answer " + "x".repeat(30_000))]);
+    const gate = deferred<{ summary: string }>();
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "cp-manual" },
+      clock: { now: () => 251 },
+      getApiKey: () => "key",
+      compaction: {
+        thresholdTokens: 10_000,
+        tailBudgetTokens: 2,
+        summarize: vi.fn(() => gate.promise),
+      },
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    const run = (session as any).compact("n1");
+    session.abort("n1");
+    gate.resolve({ summary: "## Goal\nlate manual summary" });
+
+    await expect(run).resolves.toEqual({ ok: false, reason: "aborted" });
+    expect(store.listMessages("n1").map((message) => (message.content as any).role)).not.toContain("loomContextCheckpoint");
+  });
+
+  it("reports manual compaction summarization failures instead of not_needed", async () => {
+    const store = new MemoryStore([user("old question " + "x".repeat(30_000)), assistant("old answer " + "x".repeat(30_000))]);
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "cp-manual" },
+      clock: { now: () => 252 },
+      getApiKey: () => "key",
+      compaction: {
+        thresholdTokens: 10_000,
+        tailBudgetTokens: 2,
+        summarize: vi.fn(async () => {
+          throw new Error("summary model unavailable");
+        }),
+      },
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    await expect((session as any).compact("n1")).resolves.toEqual({
+      ok: false,
+      reason: "failed",
+      error: "summary model unavailable",
+    });
+    expect(store.listMessages("n1").map((message) => (message.content as any).role)).not.toContain("loomContextCheckpoint");
+  });
+
+  it("recovers from context overflow once by compacting and retrying the originating send", async () => {
+    const store = new MemoryStore([user("old question " + "x".repeat(30_000)), assistant("old answer " + "x".repeat(30_000))]);
+    const engineMessages = store.listMessages("n1").map((message) => message.content);
+    const prompt = vi.fn(async () => {
+      throw new Error("context overflow");
+    });
+    const cont = vi.fn(async () => {
+      engineMessages.push(assistant("retry answer"));
+    });
+    const handle = createHandle(engineMessages, prompt);
+    handle.continue = cont;
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "cp-overflow" },
+      clock: { now: () => 260 },
+      getApiKey: () => "key",
+      compaction: {
+        thresholdTokens: 10_000,
+        tailBudgetTokens: 2,
+        summarize: vi.fn(async () => ({ summary: "## Goal\noverflow summary" })),
+      },
+      createEngine: () => createEngine(handle),
+    });
+
+    await expect(session.send({ nodeId: "n1", text: "fresh prompt" })).resolves.toEqual({ ok: true, recovered: "overflow" });
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(cont).toHaveBeenCalledTimes(1);
+    expect(store.listMessages("n1").map((message) => (message.content as any).role)).toContain("loomContextCheckpoint");
+  });
+
+  it("does not retry indefinitely when overflow recovery also overflows", async () => {
+    const store = new MemoryStore([user("old question " + "x".repeat(30_000)), assistant("old answer " + "x".repeat(30_000))]);
+    const engineMessages = store.listMessages("n1").map((message) => message.content);
+    const handle = createHandle(engineMessages, vi.fn(async () => {
+      throw new Error("context overflow");
+    }));
+    handle.continue = vi.fn(async () => {
+      throw new Error("context overflow");
+    });
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "cp-overflow" },
+      clock: { now: () => 261 },
+      getApiKey: () => "key",
+      compaction: {
+        thresholdTokens: 10_000,
+        tailBudgetTokens: 2,
+        summarize: vi.fn(async () => ({ summary: "## Goal\noverflow summary" })),
+      },
+      createEngine: () => createEngine(handle),
+    });
+
+    await expect(session.send({ nodeId: "n1", text: "fresh prompt" })).resolves.toEqual({ ok: false, reason: "overflow" });
+    expect(handle.continue).toHaveBeenCalledTimes(1);
   });
 
   it("pauses project mutation tools for approval, then persists the tool result transcript", async () => {

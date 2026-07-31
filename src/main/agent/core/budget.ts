@@ -1,5 +1,6 @@
 import type { CanvasNodeModel } from "./graph";
 import { textOf } from "./context";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 // ---------------------------------------------------------------------------
 // ① 领域核心 · token 预算规则（纯 TS，零基础设施依赖）。
@@ -15,8 +16,125 @@ export interface Budget {
   estimated: boolean;
 }
 
+export type TokenAccountingSource = "exact" | "mixed" | "estimated";
+
+export interface TranscriptTokenAccounting {
+  tokens: number;
+  exact: boolean;
+  providerTokens: number;
+  estimatedTokens: number;
+  providerMessageIndex?: number;
+  source: TokenAccountingSource;
+}
+
+export const MAX_ESTIMATED_MESSAGE_TOKENS = 8192;
+
+export interface TokenDiagnosticInput {
+  tokens: number;
+  exact: boolean;
+}
+
+export interface FinalRequestBudgetInput {
+  contextWindowTokens: number;
+  reserveTokens: number;
+  systemTokens: TokenDiagnosticInput;
+  frozenBranchTokens: TokenDiagnosticInput;
+  seedTokens: TokenDiagnosticInput;
+  dynamicTailAllowanceTokens: number;
+  pendingUserInputTokens: TokenDiagnosticInput;
+  checkpointSummaryAllowanceTokens: number;
+}
+
+export interface FinalRequestBudgetAllocation {
+  status: "ok" | "fixed-context-overflow";
+  safeInputBudget: number;
+  fixedContextTokens: number;
+  nodeLocalTailBudget: number;
+  overflowTokens: number;
+  exact: boolean;
+  parts: {
+    system: TokenDiagnosticInput;
+    frozenBranch: TokenDiagnosticInput;
+    seed: TokenDiagnosticInput;
+    dynamicTailAllowance: TokenDiagnosticInput;
+    pendingUserInput: TokenDiagnosticInput;
+    checkpointSummaryAllowance: TokenDiagnosticInput;
+  };
+}
+
 export function estTokens(chars: number): number {
   return Math.round(chars / 2);
+}
+
+export function estimateMessageTokens(msg: AgentMessage): number {
+  const text = textOf(msg);
+  if (text.length === 0) return 0;
+  return Math.min(MAX_ESTIMATED_MESSAGE_TOKENS, Math.max(1, estTokens(text.length)));
+}
+
+export function estimateMessageTokensUnbounded(msg: AgentMessage): number {
+  const text = textOf(msg);
+  if (text.length === 0) return 0;
+  return Math.max(1, estTokens(text.length));
+}
+
+export function validUsageTokens(msg: AgentMessage): number | undefined {
+  const usage = (msg as any)?.usage;
+  const total = usage?.totalTokens ?? usage?.inputTokens ?? usage?.promptTokens;
+  return typeof total === "number" && Number.isFinite(total) && total >= 0 ? total : undefined;
+}
+
+export function accountTranscriptTokens(messages: AgentMessage[]): TranscriptTokenAccounting {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const providerTokens = validUsageTokens(messages[i]!);
+    if (providerTokens === undefined) continue;
+    const estimatedTokens = messages.slice(i + 1).reduce((sum, msg) => sum + estimateMessageTokens(msg), 0);
+    return {
+      tokens: providerTokens + estimatedTokens,
+      exact: estimatedTokens === 0,
+      providerTokens,
+      estimatedTokens,
+      providerMessageIndex: i,
+      source: estimatedTokens === 0 ? "exact" : "mixed",
+    };
+  }
+  const estimatedTokens = messages.reduce((sum, msg) => sum + estimateMessageTokens(msg), 0);
+  return {
+    tokens: estimatedTokens,
+    exact: false,
+    providerTokens: 0,
+    estimatedTokens,
+    source: "estimated",
+  };
+}
+
+export function allocateFinalRequestBudget(input: FinalRequestBudgetInput): FinalRequestBudgetAllocation {
+  const safeInputBudget = Math.max(0, input.contextWindowTokens - input.reserveTokens);
+  const parts: FinalRequestBudgetAllocation["parts"] = {
+    system: normalizeDiagnostic(input.systemTokens),
+    frozenBranch: normalizeDiagnostic(input.frozenBranchTokens),
+    seed: normalizeDiagnostic(input.seedTokens),
+    dynamicTailAllowance: { tokens: nonNegative(input.dynamicTailAllowanceTokens), exact: false },
+    pendingUserInput: normalizeDiagnostic(input.pendingUserInputTokens),
+    checkpointSummaryAllowance: { tokens: nonNegative(input.checkpointSummaryAllowanceTokens), exact: false },
+  };
+  const fixedContextTokens =
+    parts.system.tokens +
+    parts.frozenBranch.tokens +
+    parts.seed.tokens +
+    parts.dynamicTailAllowance.tokens +
+    parts.pendingUserInput.tokens +
+    parts.checkpointSummaryAllowance.tokens;
+  const overflowTokens = Math.max(0, fixedContextTokens - safeInputBudget);
+  return {
+    status: overflowTokens > 0 ? "fixed-context-overflow" : "ok",
+    safeInputBudget,
+    fixedContextTokens,
+    nodeLocalTailBudget: Math.max(0, safeInputBudget - fixedContextTokens),
+    overflowTokens,
+    exact: Object.values(parts).every((part) => part.exact),
+    parts,
+  };
 }
 
 /** 本节点自身内容字符数（seed + 各消息文本）。 */
@@ -35,4 +153,12 @@ export function budget(node: Pick<CanvasNodeModel, "seed" | "messages">, ancesto
   let anc = 0;
   for (const n of ancestors) for (const m of n.messages) anc += textOf(m).length;
   return { withoutAncestors: estTokens(own), withAncestors: estTokens(own + anc), estimated: true };
+}
+
+function normalizeDiagnostic(input: TokenDiagnosticInput): TokenDiagnosticInput {
+  return { tokens: nonNegative(input.tokens), exact: Boolean(input.exact) };
+}
+
+function nonNegative(value: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
 }

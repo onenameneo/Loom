@@ -26,6 +26,46 @@ import type { RegistryProvider } from "../../modelConfig/types";
 // ---------------------------------------------------------------------------
 
 const SYSTEM_PROMPT = "你是一个冷静、精确、克制的思考助手。回答直接，不啰嗦。";
+const TRACE_TEXT_PREVIEW = 600;
+const TRACE_MESSAGE_HEAD = 8;
+const TRACE_MESSAGE_TAIL = 12;
+
+function previewText(value: unknown, max = TRACE_TEXT_PREVIEW): string | undefined {
+  if (typeof value === "string") return value.length <= max ? value : `${value.slice(0, max)}...`;
+  if (Array.isArray(value)) {
+    const text = value
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "text" in item && typeof (item as any).text === "string") return (item as any).text;
+        if (item && typeof item === "object" && "type" in item) return `[${String((item as any).type)}]`;
+        return "";
+      })
+      .filter(Boolean)
+      .join("");
+    return text.length <= max ? text : `${text.slice(0, max)}...`;
+  }
+  return undefined;
+}
+
+function summarizeMessage(message: unknown) {
+  const msg = message as { role?: unknown; content?: unknown; usage?: unknown } | undefined;
+  if (!msg || typeof msg !== "object") return { type: typeof message };
+  const content = Array.isArray(msg.content) ? msg.content : undefined;
+  return {
+    role: typeof msg.role === "string" ? msg.role : undefined,
+    text: previewText(msg.content),
+    contentParts: content?.map((part) => typeof part === "object" && part ? (part as any).type ?? typeof part : typeof part),
+    usage: msg.usage,
+  };
+}
+
+function summarizeMessages(messages: unknown[]) {
+  const omittedMiddle = Math.max(0, messages.length - TRACE_MESSAGE_HEAD - TRACE_MESSAGE_TAIL);
+  const selected = omittedMiddle > 0
+    ? [...messages.slice(0, TRACE_MESSAGE_HEAD), { role: "trace", content: `[${omittedMiddle} messages omitted]` }, ...messages.slice(-TRACE_MESSAGE_TAIL)]
+    : messages;
+  return selected.map(summarizeMessage);
+}
 
 export function modelsForSwitching(providers: RegistryProvider[]) {
   return providers.flatMap((provider) =>
@@ -174,7 +214,8 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
         captureTrace?.(nodeId, "request", {
           model: { provider: ref.providerId, id: ref.modelId },
           systemPrompt: init?.systemPrompt || SYSTEM_PROMPT,
-          messages: context,
+          messages: summarizeMessages(context.messages),
+          messageCount: context.messages.length,
           tools: getTools(nodeId).map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })),
           options,
         });
@@ -217,7 +258,7 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
     });
 
     agent.subscribe((event: AgentEvent) => {
-      captureTrace?.(nodeId, "event", { type: event.type, detail: event });
+      captureTrace?.(nodeId, "event", { type: event.type });
       switch (event.type) {
         case "agent_start":
           events.emit(nodeId, "thinking");
@@ -230,7 +271,7 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
             events.emit(nodeId, "delta", event.assistantMessageEvent.delta);
           break;
         case "message_end":
-          if (event.message?.role === "assistant") captureTrace?.(nodeId, "response", { message: event.message });
+          if (event.message?.role === "assistant") captureTrace?.(nodeId, "response", { message: summarizeMessage(event.message) });
           break;
         case "agent_end":
           events.emit(nodeId, "done");
