@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useContext, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Handle, NodeResizeControl, Position, type ResizeParams } from "@xyflow/react";
 import { Check, ChevronDown, MessageSquareText, Pencil, Trash2 } from "lucide-react";
 import type { ApprovalRequestPayload, ModelSelection, NodeBudget, NodeMsg, SkillEffectiveDto, TurnCanvasEventPayload } from "../env";
@@ -76,11 +76,13 @@ const NODE_COLORS = ["gray", "red", "orange", "yellow", "green", "blue", "purple
 
 // 画布节点 = 一个活的 pi 对话线程（「索引卡片」）。发消息走 window.api.canvas，
 // 订阅本 nodeId 的流式事件；头部显示 token 预算（含/不含祖先）与挂载开关。
-export function ChatThreadNode(props: any) {
+export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   const { id, data } = props;
   const branch = useContext(BranchContext);
   const cardRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const bodyScrollTopRef = useRef(0);
+  const resizeScrollStateRef = useRef<{ active: boolean; top: number; atLatest: boolean }>({ active: false, top: 0, atLatest: true });
   const footRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(1);
@@ -442,6 +444,7 @@ export function ChatThreadNode(props: any) {
   function onBodyScroll() {
     const el = bodyRef.current;
     if (!el) return;
+    bodyScrollTopRef.current = el.scrollTop;
     setTb(null);
     setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
   }
@@ -458,6 +461,28 @@ export function ChatThreadNode(props: any) {
   const hasChildren = Boolean(data.hasChildren);
   const treeCollapsed = Boolean(data.isTreeCollapsed);
   const collapsedCount = Number(data.collapsedCount ?? 0);
+  const isResizing = Boolean(data.isResizing);
+
+  useEffect(() => {
+    if (isResizing && !resizeScrollStateRef.current.active) {
+      resizeScrollStateRef.current = {
+        active: true,
+        top: bodyScrollTopRef.current,
+        atLatest: autoScroll,
+      };
+      return;
+    }
+    if (!isResizing && resizeScrollStateRef.current.active) {
+      const saved = resizeScrollStateRef.current;
+      resizeScrollStateRef.current.active = false;
+      requestAnimationFrame(() => {
+        const el = bodyRef.current;
+        if (!el) return;
+        el.scrollTop = saved.atLatest ? el.scrollHeight : saved.top;
+        bodyScrollTopRef.current = el.scrollTop;
+      });
+    }
+  }, [autoScroll, isResizing]);
 
   return (
     <div className={`card ${data.fresh ? "card--fresh" : ""}`} ref={cardRef}>
@@ -480,6 +505,13 @@ export function ChatThreadNode(props: any) {
           }}
           className="node-resize-control nodrag nopan"
           onResizeStart={(_, params: ResizeParams) => {
+            const body = bodyRef.current;
+            if (body) bodyScrollTopRef.current = body.scrollTop;
+            resizeScrollStateRef.current = {
+              active: true,
+              top: bodyScrollTopRef.current,
+              atLatest: autoScroll,
+            };
             resizeTokenRef.current = data.onResizeStart?.(id, params) ?? null;
           }}
           shouldResize={(_, params: ResizeParams) => {
@@ -626,6 +658,13 @@ export function ChatThreadNode(props: any) {
         onScroll={onBodyScroll}
         onBlur={() => setTb(null)}
       >
+        {isResizing ? (
+          <div className="card__resize-preview" aria-label="正在调整窗口">
+            <span className="card__resize-preview-label">调整窗口</span>
+            <strong>{msgs.length ? `${msgs.length} 条消息` : "暂无消息"}</strong>
+          </div>
+        ) : (
+          <>
           {data.seed && (
             <button
               className="seed seed--chip nodrag"
@@ -694,6 +733,8 @@ export function ChatThreadNode(props: any) {
               </button>
             </div>
           )}
+          </>
+        )}
       </div>
 
       {!autoScroll && (
@@ -731,6 +772,7 @@ export function ChatThreadNode(props: any) {
           ) : undefined}
           activeSkills={draftSkills}
           canRegenerate={msgs.some((m) => m.role === "user") && !busy}
+          model={nodeModel}
           onSubmit={submit}
           onStop={stop}
           onOpenPersona={() => setPersonaOpen(true)}
@@ -747,4 +789,11 @@ export function ChatThreadNode(props: any) {
       <Handle type="source" position={Position.Right} className="h" />
     </div>
   );
-}
+}, (previous, next) => (
+  previous.id === next.id &&
+  previous.selected === next.selected &&
+  previous.data === next.data &&
+  previous.className === next.className &&
+  previous.width === next.width &&
+  previous.height === next.height
+));

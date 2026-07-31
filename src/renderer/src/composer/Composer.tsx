@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { BookOpen, Square, X } from "lucide-react";
-import type { SkillEffectiveDto } from "../env";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ClipboardEvent } from "react";
+import { BookOpen, ChevronDown, Square, X } from "lucide-react";
+import type { ModelListItem, SkillEffectiveDto } from "../env";
 import { IconSend } from "../icons";
 import type { CmdCtx } from "./commands";
 import { CommandMenu } from "./CommandMenu";
@@ -15,6 +15,7 @@ export function Composer({
   busy,
   placeholder,
   canRegenerate,
+  model,
   budgetLine,
   activeSkills,
   topAccessory,
@@ -34,6 +35,7 @@ export function Composer({
   busy: boolean;
   placeholder: string;
   canRegenerate: boolean;
+  model?: string;
   budgetLine?: string;
   activeSkills?: SkillEffectiveDto[];
   topAccessory?: ReactNode;
@@ -52,8 +54,12 @@ export function Composer({
   const slashRef = useRef<SlashPaletteHandle>(null);
   const [slashOpen, setSlashOpen] = useState(false);
   const [images, setImages] = useState<ComposerImage[]>([]);
-  const [modelOptions, setModelOptions] = useState<{ id: string; name: string }[]>([]);
+  const [modelOptions, setModelOptions] = useState<ModelListItem[]>([]);
   const composingRef = useRef(false);
+  const [modelOpen, setModelOpen] = useState(false);
+  const [modelActive, setModelActive] = useState(0);
+  const modelRootRef = useRef<HTMLDivElement>(null);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
 
   const insertText = useCallback(
     (text: string) => {
@@ -105,6 +111,26 @@ export function Composer({
     };
   }, [slashOpen, value]);
 
+  useEffect(() => {
+    let alive = true;
+    window.api?.canvas.models().then((items) => {
+      if (alive) setModelOptions(items);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!modelOpen) return;
+    requestAnimationFrame(() => modelMenuRef.current?.focus());
+    const onPointerDown = (event: PointerEvent) => {
+      if (!modelRootRef.current?.contains(event.target as Node)) setModelOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [modelOpen]);
+
   async function onFiles(files: FileList | null) {
     if (!files?.length) return;
     const next = await Promise.all(
@@ -122,6 +148,36 @@ export function Composer({
       ),
     );
     setImages((current) => current.concat(next));
+  }
+
+  const handlePaste = useCallback(
+    (event: ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = event.clipboardData?.items;
+      if (!items) return;
+      const files: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === "file" && item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) files.push(file);
+        }
+      }
+      if (files.length === 0) return;
+      event.preventDefault();
+      try {
+        const dt = new DataTransfer();
+        files.forEach((f) => dt.items.add(f));
+        void onFiles(dt.files);
+      } catch {
+        onFiles(files as unknown as FileList);
+      }
+    },
+    [onFiles],
+  );
+
+  function selectModel(model: ModelListItem) {
+    onSetModel(model.id);
+    setModelOpen(false);
   }
 
   function submit() {
@@ -193,6 +249,7 @@ export function Composer({
             setSlashOpen(next.startsWith("/"));
           }}
           onFocus={() => setSlashOpen(value.startsWith("/"))}
+          onPaste={handlePaste}
           onBlur={() => window.setTimeout(() => setSlashOpen(false), 120)}
           onCompositionStart={() => {
             composingRef.current = true;
@@ -228,6 +285,68 @@ export function Composer({
             }}
           />
           <CommandMenu ctx={ctx} />
+          <div className="model-switcher-root nodrag" ref={modelRootRef}>
+            <button
+              type="button"
+              className={`model-switcher ${modelOpen ? "is-open" : ""}`}
+              title={model ?? "切换模型"}
+              aria-haspopup="menu"
+              aria-expanded={modelOpen}
+              onClick={() => {
+                setModelActive(0);
+                setModelOpen((v) => !v);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setModelActive(0);
+                  setModelOpen(true);
+                }
+              }}
+            >
+              <span className="model-switcher__label">{model ?? "选择模型"}</span>
+              <ChevronDown size={13} />
+            </button>
+            {modelOpen && (
+              <div
+                ref={modelMenuRef}
+                className="composer-popover model-switcher-menu"
+                role="menu"
+                tabIndex={-1}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    setModelActive((i) => (i + 1) % modelOptions.length);
+                  } else if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setModelActive((i) => (i - 1 + modelOptions.length) % modelOptions.length);
+                  } else if (event.key === "Enter") {
+                    event.preventDefault();
+                    const item = modelOptions[modelActive];
+                    if (item) selectModel(item);
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    setModelOpen(false);
+                  }
+                }}
+              >
+                {modelOptions.length === 0 && <div className="cmd-empty">没有可用的模型</div>}
+                {modelOptions.map((item, index) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="menuitem"
+                    className={`cmd-row ${index === modelActive ? "is-active" : ""}`}
+                    onMouseEnter={() => setModelActive(index)}
+                    onClick={() => selectModel(item)}
+                  >
+                    <span>{item.name || item.id}</span>
+                    <small>{item.providerId ?? ""}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             type="button"
             className={`round-send ${busy ? "is-stop" : ""}`}

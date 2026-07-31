@@ -503,6 +503,7 @@ export default function ChatView({
           ) : undefined}
           activeSkills={draftSkills}
           canRegenerate={msgs.some((m) => m.role === "user") && !busy}
+          model={nodeModel}
           budgetLine={`将发送 ~${(initialMount ? budget?.withAncestors : budget?.withoutAncestors) ?? 0} tokens`}
           onSubmit={submit}
           onStop={stop}

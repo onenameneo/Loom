@@ -4,11 +4,14 @@ import {
   BackgroundVariant,
   MiniMap,
   ReactFlow,
+  ReactFlowProvider,
+  applyNodeChanges,
   type ReactFlowInstance,
   type ResizeParams,
   type NodeChange,
   useEdgesState,
   useNodesState,
+  useStoreApi,
   type Edge,
   type Node,
 } from "@xyflow/react";
@@ -25,6 +28,7 @@ import { ResizeSession } from "./resizeSession";
 
 const nodeTypes = { chatThread: ChatThreadNode };
 const defaultEdgeOptions = { type: "default" as const };
+const proOptions = { hideAttribution: true };
 
 const ROOT_X = 240;
 const ROOT_Y = 48;
@@ -127,15 +131,7 @@ function classNames(...items: Array<string | false | null | undefined>) {
   return value || undefined;
 }
 
-export default function Canvas({
-  sessionId,
-  model,
-  focusNodeId,
-  onFocused,
-  onSelectedNode,
-  onReturnChat,
-  onTreeChange,
-}: {
+type CanvasProps = {
   sessionId: string;
   model?: ModelSelection;
   focusNodeId?: string | null;
@@ -143,32 +139,78 @@ export default function Canvas({
   onSelectedNode?: (nodeId: string | null) => void;
   onReturnChat?: (nodeId: string) => void;
   onTreeChange?: () => void;
-}) {
+};
+
+export default function Canvas(props: CanvasProps) {
+  return (
+    <ReactFlowProvider>
+      <CanvasContent {...props} />
+    </ReactFlowProvider>
+  );
+}
+
+function CanvasContent({
+  sessionId,
+  model,
+  focusNodeId,
+  onFocused,
+  onSelectedNode,
+  onReturnChat,
+  onTreeChange,
+}: CanvasProps) {
   const [nodes, setNodes, applyNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [interaction, setInteraction] = useState<CanvasInteraction>({ kind: "idle" });
+  const interactionRef = useRef<CanvasInteraction>({ kind: "idle" });
   const [zoom, setZoom] = useState(1);
   const titleRef = useRef(new Map<string, string>());
-  const flowRef = useRef<ReactFlowInstance | null>(null);
   const flashTimerRef = useRef<number | null>(null);
   const zoomFrameRef = useRef<number | null>(null);
   const pendingZoomRef = useRef(1);
+  const resizeFrameRef = useRef<number | null>(null);
+  const pendingResizeRef = useRef<{ id: string; next: ResizeParams } | null>(null);
+  const displayNodeCacheRef = useRef(
+    new Map<
+      string,
+      {
+        source: Node;
+        dataSource: Node["data"];
+        hasChildren: boolean;
+        isTreeCollapsed: boolean;
+        collapsedCount: number;
+        className?: string;
+        display: Node;
+      }
+    >(),
+  );
   const treeChangeRef = useRef(onTreeChange);
   const modelRef = useRef(model);
   const layoutStore = useCanvasLayoutStore();
   const layoutPersistence = useCanvasLayoutPersistence(sessionId);
   const resizeSessionRef = useRef(new ResizeSession());
+  const flowStore = useStoreApi<Node, Edge>();
   treeChangeRef.current = onTreeChange;
   modelRef.current = model;
 
+  const setCanvasInteraction = useCallback((next: CanvasInteraction) => {
+    interactionRef.current = next;
+    setInteraction(next);
+  }, []);
+
   const onNodesChange = useCallback(
     (changes: NodeChange<Node>[]) => {
-      applyNodesChange(guardResizeNodeChanges(changes, resizeSessionRef.current));
+      const guarded = guardResizeNodeChanges(changes, resizeSessionRef.current);
+      if (interactionRef.current.kind === "dragging") {
+        const current = flowStore.getState().nodes;
+        flowStore.getState().setNodes(applyNodeChanges(guarded, current));
+        return;
+      }
+      applyNodesChange(guarded);
     },
-    [applyNodesChange],
+    [applyNodesChange, flowStore],
   );
 
   const pathIds = useCallback((targetId: string) => {
@@ -259,26 +301,61 @@ export default function Canvas({
     () =>
       nodes.filter((node) => !hiddenNodeIds.has(node.id)).map((node) => {
         const onPath = highlightPath?.nodeIds.has(node.id) ?? false;
-        const dimmed = Boolean(highlightPath) && !onPath;
+        const dimmed = Boolean(highlightPath) && !onPath && !node.selected;
         const collapsedCount = descendantCounts.get(node.id) ?? 0;
-        return {
+        const isResizing = interaction.kind === "resizing" && interaction.nodeId === node.id;
+        const className = classNames(
+          node.className,
+          node.selected && "is-selected",
+          onPath && "is-onpath",
+          dimmed && "is-dimmed",
+          flashId === node.id && "is-flash",
+          interaction.kind === "dragging" && interaction.nodeId === node.id && "is-dragging",
+          interaction.kind === "resizing" && interaction.nodeId === node.id && "is-resizing",
+        );
+        const isTreeCollapsed = collapsed.has(node.id);
+        const cached = displayNodeCacheRef.current.get(node.id);
+        if (
+          cached &&
+          cached.source === node &&
+          cached.hasChildren === collapsedCount > 0 &&
+          cached.isTreeCollapsed === isTreeCollapsed &&
+          cached.collapsedCount === collapsedCount &&
+          cached.className === className
+        ) {
+          return cached.display;
+        }
+        const displayData =
+          cached &&
+          cached.dataSource === node.data &&
+          cached.hasChildren === collapsedCount > 0 &&
+          cached.isTreeCollapsed === isTreeCollapsed &&
+          cached.collapsedCount === collapsedCount &&
+          cached.className === className
+            ? cached.display.data
+            : {
+                ...node.data,
+                hasChildren: collapsedCount > 0,
+                isTreeCollapsed,
+                collapsedCount,
+                isResizing,
+                onToggleCollapse,
+              };
+        const display = {
           ...node,
-          data: {
-            ...node.data,
-            hasChildren: collapsedCount > 0,
-            isTreeCollapsed: collapsed.has(node.id),
-            collapsedCount,
-            onToggleCollapse,
-          },
-          className: classNames(
-            node.className,
-            onPath && "is-onpath",
-            dimmed && "is-dimmed",
-            flashId === node.id && "is-flash",
-            interaction.kind === "dragging" && interaction.nodeId === node.id && "is-dragging",
-            interaction.kind === "resizing" && interaction.nodeId === node.id && "is-resizing",
-          ),
+          data: displayData,
+          className,
         };
+        displayNodeCacheRef.current.set(node.id, {
+          source: node,
+          dataSource: node.data,
+          hasChildren: collapsedCount > 0,
+          isTreeCollapsed,
+          collapsedCount,
+          className,
+          display,
+        });
+        return display;
       }),
     [collapsed, descendantCounts, flashId, hiddenNodeIds, highlightPath, interaction, nodes, onToggleCollapse],
   );
@@ -295,6 +372,10 @@ export default function Canvas({
       }),
     [edges, hiddenNodeIds, highlightPath],
   );
+
+  // Structural changes are projected into React Flow explicitly, while the
+  // engine keeps transient pointer positions in its own internal store.
+  const flowRef = useRef<ReactFlowInstance | null>(null);
 
   const removeIds = useCallback(
     (ids: string[]) => {
@@ -322,16 +403,14 @@ export default function Canvas({
           return next;
         });
       }
-      setNodes((nds) => {
-        const target = nds.find((n) => n.id === id);
-        if (target && flowRef.current) {
-          flowRef.current.setCenter(target.position.x + CARD_W / 2, target.position.y + 120, {
-            zoom: 1,
-            duration: opts?.duration ?? 260,
-          });
-        }
-        return nds.map((n) => ({ ...n, selected: n.id === id }));
-      });
+      const target = nodes.find((node) => node.id === id);
+      if (target && flowRef.current) {
+        flowRef.current.setCenter(target.position.x + CARD_W / 2, target.position.y + 120, {
+          zoom: 1,
+          duration: opts?.duration ?? 260,
+        });
+      }
+      setNodes((nds) => nds.map((node) => ({ ...node, selected: node.id === id })));
       if (opts?.flash) {
         if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
         setFlashId(id);
@@ -341,13 +420,14 @@ export default function Canvas({
         }, 1200);
       }
     },
-    [ancestorIds, collapsed, setNodes],
+    [ancestorIds, collapsed, nodes, setNodes],
   );
 
   useEffect(
     () => () => {
       if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
       if (zoomFrameRef.current) window.cancelAnimationFrame(zoomFrameRef.current);
+      if (resizeFrameRef.current) window.cancelAnimationFrame(resizeFrameRef.current);
     },
     [],
   );
@@ -363,23 +443,50 @@ export default function Canvas({
 
   const applyResizeLayout = useCallback(
     (id: string, next: ResizeParams) => {
-      setNodes((nds) =>
-        nds.map((node) =>
-          node.id === id
-            ? {
-                ...node,
-                position: { x: next.x, y: next.y },
-                style: { ...node.style, width: next.width, height: next.height },
-              }
-            : node,
-        ),
+      const update = (current: Node[]) => current.map((node) =>
+        node.id === id
+          ? {
+              ...node,
+              position: { x: next.x, y: next.y },
+              style: { ...node.style, width: next.width, height: next.height },
+            }
+          : node,
       );
+      if (interactionRef.current.kind === "resizing") {
+        pendingResizeRef.current = { id, next };
+        if (resizeFrameRef.current) return;
+        resizeFrameRef.current = window.requestAnimationFrame(() => {
+          resizeFrameRef.current = null;
+          const pending = pendingResizeRef.current;
+          pendingResizeRef.current = null;
+          if (!pending) return;
+          const store = flowStore.getState();
+          store.setNodes(store.nodes.map((node) =>
+            node.id === pending.id
+              ? {
+                  ...node,
+                  position: { x: pending.next.x, y: pending.next.y },
+                  style: {
+                    ...node.style,
+                    width: pending.next.width,
+                    height: pending.next.height,
+                  },
+                }
+              : node,
+          ));
+        });
+        return;
+      }
+      setNodes(update);
     },
-    [setNodes],
+    [flowStore, setNodes],
   );
 
   useEffect(() => {
     const cancelResize = () => {
+      if (resizeFrameRef.current) window.cancelAnimationFrame(resizeFrameRef.current);
+      resizeFrameRef.current = null;
+      pendingResizeRef.current = null;
       const cancelled = resizeSessionRef.current.cancel();
       if (cancelled) {
         setNodes((nds) =>
@@ -400,20 +507,20 @@ export default function Canvas({
         );
         layoutStore.enqueue(sessionId, cancelled.nodeId, cancelled.layout);
       }
-      setInteraction({ kind: "idle" });
+      setCanvasInteraction({ kind: "idle" });
     };
     window.addEventListener("blur", cancelResize);
     return () => {
       window.removeEventListener("blur", cancelResize);
       cancelResize();
     };
-  }, [layoutStore, setNodes, sessionId]);
+  }, [layoutStore, setCanvasInteraction, setNodes, sessionId]);
 
   const actions = useCallback(
     () => ({
       onTreeChange: () => treeChangeRef.current?.(),
       onSelect: (id: string) => {
-        setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })));
+        setNodes((nds) => nds.map((node) => ({ ...node, selected: node.id === id })));
       },
       onResizeStart: (id: string, params: ResizeParams) =>
         resizeSessionRef.current.start(id, params),
@@ -423,7 +530,7 @@ export default function Canvas({
         const next = resizeSessionRef.current.update(token, id, params);
         if (next) {
           applyResizeLayout(id, next);
-          setInteraction({ kind: "resizing", nodeId: id });
+          setCanvasInteraction({ kind: "resizing", nodeId: id });
           return;
         }
         const recovered = resizeSessionRef.current.recover(token, id);
@@ -443,7 +550,19 @@ export default function Canvas({
           if (recovered) applyResizeLayout(id, recovered);
           return;
         }
-        setInteraction({ kind: "idle" });
+        if (resizeFrameRef.current) window.cancelAnimationFrame(resizeFrameRef.current);
+        resizeFrameRef.current = null;
+        pendingResizeRef.current = null;
+        setNodes((nds) => nds.map((node) =>
+          node.id === id
+            ? {
+                ...node,
+                position: { x: next.x, y: next.y },
+                style: { ...node.style, width: next.width, height: next.height },
+              }
+            : node,
+        ));
+        setCanvasInteraction({ kind: "idle" });
       },
       onRename: async (id: string, title: string) => {
         if (window.api) await window.api.canvas.update(id, { title });
@@ -651,6 +770,40 @@ export default function Canvas({
 
   const branchContext = useMemo(() => ({ onBranch, onFocusNode: focusNode }), [focusNode, onBranch]);
 
+  // React Flow calls these handlers during high-frequency pointer updates.
+  // Keep their identities stable so a controlled drag does not also look like
+  // a complete prop configuration change to React Flow.
+  const onPaneClick = useCallback(() => {
+    setNodes((nds) => nds.map((node) => (node.selected ? { ...node, selected: false } : node)));
+    onSelectedNode?.(null);
+  }, [onSelectedNode, setNodes]);
+  const onNodeClick = useCallback((_: unknown, node: Node) => {
+    setNodes((current) => current.map((candidate) => ({
+      ...candidate,
+      selected: candidate.id === node.id,
+    })));
+    onSelectedNode?.(node.id);
+  }, [onSelectedNode, setNodes]);
+  const onNodeMouseEnter = useCallback((_: unknown, node: Node) => {
+    if (interactionRef.current.kind === "dragging") return;
+    setHoverId(node.id);
+  }, []);
+  const onNodeMouseLeave = useCallback(() => {
+    if (interactionRef.current.kind === "dragging") return;
+    setHoverId(null);
+  }, []);
+  const onNodeDragStart = useCallback((_: unknown, node: Node) => {
+    setCanvasInteraction({ kind: "dragging", nodeId: node.id });
+  }, [setCanvasInteraction]);
+  const onNodeDragStop = useCallback((_: unknown, node: Node) => {
+    layoutStore.enqueue(sessionId, node.id, readNodeLayout(node));
+    setNodes((current) => current.map((candidate) => (
+      candidate.id === node.id
+        ? { ...candidate, position: node.position }
+        : candidate
+    )));
+    setCanvasInteraction({ kind: "idle" });
+  }, [layoutStore, sessionId, setCanvasInteraction, setNodes]);
   return (
     <BranchContext.Provider value={branchContext}>
       {layoutPersistence.error && (
@@ -686,20 +839,12 @@ export default function Canvas({
         multiSelectionKeyCode={null}
         selectionKeyCode={null}
         selectionOnDrag={false}
-        onPaneClick={() => {
-          setNodes((nds) => nds.map((node) => (node.selected ? { ...node, selected: false } : node)));
-          onSelectedNode?.(null);
-        }}
-        onNodeClick={(_, node) => onSelectedNode?.(node.id)}
-        onNodeMouseEnter={(_, node) => setHoverId(node.id)}
-        onNodeMouseLeave={() => setHoverId(null)}
-        onNodeDragStart={(_, node) => {
-          setInteraction({ kind: "dragging", nodeId: node.id });
-        }}
-        onNodeDragStop={(_, node) => {
-          layoutStore.enqueue(sessionId, node.id, readNodeLayout(node));
-          setInteraction({ kind: "idle" });
-        }}
+        onPaneClick={onPaneClick}
+        onNodeClick={onNodeClick}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseLeave={onNodeMouseLeave}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDragStop={onNodeDragStop}
         onInit={(instance) => {
           flowRef.current = instance;
         }}
@@ -707,7 +852,8 @@ export default function Canvas({
         defaultEdgeOptions={defaultEdgeOptions}
         minZoom={0.55}
         maxZoom={1.6}
-        proOptions={{ hideAttribution: true }}
+        onlyRenderVisibleElements
+        proOptions={proOptions}
       >
         <CanvasZoomControls
           zoom={zoom}

@@ -44,7 +44,8 @@ export function readApiKey(store: Store): string {
 // 设置优先、env 回退。沿用 P0 的 baseUrl/model 语义。
 export function resolveModelConfig(store: Store): ResolvedModel {
   const a = store.getSettings().access;
-  const model = a.model || process.env.MODEL_ID || DEFAULT_MODEL;
+  // 模型名已迁移到 models.json 全局默认（resolveSelectedModel），不再回退 env MODEL_ID。
+  const model = a.model || DEFAULT_MODEL;
   const baseUrl = a.baseUrl || process.env.ANTHROPIC_BASE_URL || "";
   const apiKey = process.env.ANTHROPIC_API_KEY || "";
   return { provider: a.provider || "anthropic", baseUrl, model, apiKey };
@@ -54,7 +55,7 @@ export function accessSources(store: Store): AccessSource {
   const a = store.getSettings().access;
   return {
     baseUrl: a.baseUrl ? "settings" : process.env.ANTHROPIC_BASE_URL ? "env" : "default",
-    model: a.model ? "settings" : process.env.MODEL_ID ? "env" : "default",
+    model: a.model ? "settings" : "default",
     key: process.env.ANTHROPIC_API_KEY ? "env" : "none",
   };
 }

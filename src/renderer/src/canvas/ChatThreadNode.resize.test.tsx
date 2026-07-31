@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useLayoutEffect } from "react";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { ReactFlowProvider, useStoreApi } from "@xyflow/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatThreadNode, selectionToolbarFromRects } from "./ChatThreadNode";
@@ -93,5 +93,26 @@ describe("ChatThreadNode selection toolbar geometry", () => {
       y: 144,
       place: "top",
     });
+  });
+});
+
+describe("ChatThreadNode resize preview", () => {
+  it("renders a bounded body preview while resizing instead of the full message tree", () => {
+    render(
+      <ChatThreadNode
+        id="n1"
+        className="is-resizing"
+        data={{
+          title: "Main",
+          messages: [{ id: 1, role: "assistant", text: "A long response that should be summarized during resize." }],
+          mountAncestors: false,
+          isResizing: true,
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText("正在调整窗口")).toBeTruthy();
+    expect(screen.getByText("1 条消息")).toBeTruthy();
+    expect(document.querySelector(".m")).toBeNull();
   });
 });

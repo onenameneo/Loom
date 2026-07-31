@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Canvas from "./Canvas";
 import { TitlebarProvider } from "../titlebar/Titlebar";
 
-const harness = vi.hoisted(() => ({ props: null as any }));
+const harness = vi.hoisted(() => ({ props: null as any, node: null as any }));
 const layoutStore = vi.hoisted(() => ({
   enqueue: vi.fn(),
   enqueueMany: vi.fn(),
@@ -33,9 +33,12 @@ vi.mock("@xyflow/react", async (importOriginal) => {
           zoomIn: vi.fn(),
           zoomOut: vi.fn(),
           zoomTo: vi.fn(),
+          setNodes: vi.fn(),
+          setEdges: vi.fn(),
         });
       }, [props.onInit]);
-      const node = props.nodes[0];
+      const node = props.nodes?.[0];
+      harness.node = node;
       const width = node?.width ?? node?.style?.width;
       const height = node?.height ?? node?.style?.height;
       return (
@@ -66,7 +69,7 @@ const moved = { ...initial, width: 470, height: 520 };
 const stale = { ...initial, width: 650, height: 645 };
 
 function nodeActions() {
-  return harness.props.nodes[0].data as Record<string, (...args: any[]) => any>;
+  return harness.node.data as Record<string, (...args: any[]) => any>;
 }
 
 async function renderCanvas() {
@@ -100,6 +103,7 @@ afterEach(cleanup);
 
 beforeEach(() => {
   harness.props = null;
+  harness.node = null;
   layoutStore.enqueue.mockReset();
   layoutStore.enqueueMany.mockReset();
   layoutStore.getDirty.mockReset();
@@ -175,12 +179,7 @@ describe("Canvas resize lifecycle", () => {
 
     act(() => {
       harness.props.onNodesChange([
-        {
-          id: "n1",
-          type: "position",
-          position: { x: dragged.x, y: dragged.y },
-          dragging: true,
-        },
+        { id: "n1", type: "position", position: { x: dragged.x, y: dragged.y }, dragging: true },
       ]);
     });
     await waitFor(() => {
@@ -188,8 +187,8 @@ describe("Canvas resize lifecycle", () => {
       expect(screen.getByTestId("displayed-node").dataset.y).toBe("96");
     });
 
-    act(() => harness.props.onNodeDragStart(null, harness.props.nodes[0]));
-    act(() => harness.props.onNodeDragStop(null, harness.props.nodes[0]));
+    act(() => harness.props.onNodeDragStart(null, harness.node));
+    act(() => harness.props.onNodeDragStop(null, { ...harness.node, position: { x: dragged.x, y: dragged.y } }));
 
     expect(layoutStore.enqueue).toHaveBeenCalledOnce();
     expect(layoutStore.enqueue).toHaveBeenCalledWith("session-1", "n1", dragged);

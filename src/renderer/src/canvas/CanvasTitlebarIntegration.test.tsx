@@ -12,6 +12,8 @@ const flow = vi.hoisted(() => ({
   zoomIn: vi.fn(),
   zoomOut: vi.fn(),
   zoomTo: vi.fn(),
+  setNodes: vi.fn(),
+  setEdges: vi.fn(),
 }));
 
 const reactFlowProps = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
@@ -33,19 +35,21 @@ vi.mock("./CanvasLayoutContext", () => ({
   useCanvasLayoutPersistence: () => layoutPersistence.current,
 }));
 
-vi.mock("@xyflow/react", async () => {
+vi.mock("@xyflow/react", async (importOriginal) => {
   const React = await import("react");
   const { BranchContext } = await import("./branch");
+  const actual = await importOriginal<typeof import("@xyflow/react")>();
   return {
+    ...actual,
     Background: () => <div data-testid="background" />,
     BackgroundVariant: { Dots: "dots" },
     MiniMap: () => <div data-testid="minimap" />,
     ReactFlow: (props: {
       children: ReactNode;
       onInit?: (instance: typeof flow) => void;
-      onMove?: (event: unknown, viewport: { zoom: number }) => void;
+      onMoveEnd?: (event: unknown, viewport: { zoom: number }) => void;
     }) => {
-      const { children, onInit, onMove } = props;
+      const { children, onInit } = props;
       reactFlowProps.current = props as unknown as Record<string, unknown>;
       React.useLayoutEffect(() => onInit?.(flow), [onInit]);
       return (
@@ -58,19 +62,11 @@ vi.mock("@xyflow/react", async () => {
               </button>
             )}
           </BranchContext.Consumer>
-          <button type="button" onClick={() => onMove?.(null, { zoom: 0.75 })}>
+          <button type="button" onClick={() => props.onMoveEnd?.(null, { zoom: 0.75 })}>
             模拟画布移动
           </button>
         </div>
       );
-    },
-    useEdgesState: (initial: unknown[]) => {
-      const [state, setState] = React.useState(initial);
-      return [state, setState, vi.fn()] as const;
-    },
-    useNodesState: (initial: unknown[]) => {
-      const [state, setState] = React.useState(initial);
-      return [state, setState, vi.fn()] as const;
     },
   };
 });
@@ -244,11 +240,14 @@ describe("Canvas titlebar integration", () => {
       </TitlebarProvider>,
     );
 
-    await waitFor(() => expect((reactFlowProps.current?.nodes as any[])?.[0]?.id).toBe("root"));
+    await waitFor(() => expect(reactFlowProps.current?.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "root" }),
+    ])));
     fireEvent.click(screen.getByRole("button", { name: "模拟新建分支" }));
 
     await waitFor(() => {
-      const branch = (reactFlowProps.current?.nodes as any[]).find((node) => node.id === "branch-1");
+      const latest = reactFlowProps.current?.nodes as any[];
+      const branch = latest.find((node) => node.id === "branch-1");
       expect(branch?.data.projectId).toBe("project-1");
       expect(branch?.data.sessionId).toBe("session-1");
     });

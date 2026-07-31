@@ -18,7 +18,7 @@ pnpm dev                              # 启动 Electron 应用
 ```
 也可直接 `export ANTHROPIC_API_KEY=...` 走 shell 环境变量，不用 .env。
 用自定义 endpoint / 代理时设 `ANTHROPIC_BASE_URL=...`（Anthropic 兼容的 messages API）。
-- 模型默认 `claude-sonnet-4-5`，可用 `MODEL_ID=... pnpm dev` 覆盖（取值见 pi-ai 的 anthropic 模型表）。
+- 模型默认 `claude-sonnet-4-5`，全局默认模型在应用「设置」中配置（写入 models.json，解析走 resolveSelectedModel）。
 - `pnpm build` 构建，`pnpm typecheck` 严格类型检查。
 - 注意：若你的 shell 全局设了 `ELECTRON_RUN_AS_NODE=1`，dev/start 脚本已自动清除它（否则 Electron 会以纯 Node 模式启动主进程而报错）。
 

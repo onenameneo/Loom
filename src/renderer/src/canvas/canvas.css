@@ -363,7 +363,7 @@
 }
 /* 祖先路径高亮：不给节点描蓝边（那会和「选中光晕」撞、且看起来像多选）；
    路径感由「连线走 accent + 无关节点淡化」承载，节点本身保持常态。 */
-.react-flow__node.is-dimmed {
+.react-flow__node.is-dimmed:not(.is-selected) {
   opacity: 0.4;
   filter: saturate(0.6);
 }
@@ -374,10 +374,48 @@
 .react-flow__node.is-resizing {
   z-index: 20 !important;
 }
+.react-flow__node.is-dragging {
+  will-change: transform;
+}
 .react-flow__node.is-dragging .card,
 .react-flow__node.is-resizing .card {
   box-shadow: var(--shadow-float);
 }
+.loom-canvas.is-resizing .card,
+.loom-canvas.is-resizing .card:hover,
+.loom-canvas.is-resizing .react-flow__node.selected .card {
+  transition: none;
+  box-shadow: none;
+}
+.loom-canvas.is-resizing .card__body {
+  contain: layout paint;
+}
+.card__resize-preview {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 5px;
+  box-sizing: border-box;
+  padding: 16px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  color: var(--muted);
+  pointer-events: none;
+  text-align: center;
+}
+.card__resize-preview-label {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.card__resize-preview strong {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+/* 拖拽时保留索引卡片的轮廓和标题，暂时跳过消息/Composer 的绘制；
+   位置更新仍由 React Flow 实时处理，松手后内容立即恢复。 */
 .loom-canvas.is-resizing,
 .loom-canvas.is-resizing * {
   user-select: none !important;
@@ -436,6 +474,7 @@
   -webkit-user-select: text;
 }
 .card__body {
+  position: relative;
   cursor: auto;
 }
 /* 节点颜色标签（macOS Finder 式）：头部左侧圆点 + 取色浮层 */
@@ -1294,6 +1333,58 @@
   padding: 10px;
   font-size: 12px;
   color: var(--faint);
+}
+.model-switcher-root {
+  position: relative;
+  flex: none;
+  max-width: 180px;
+}
+.model-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.model-switcher__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-switcher:hover,
+.model-switcher:focus-visible,
+.model-switcher.is-open {
+  color: var(--text);
+  border-color: var(--border-strong);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.model-switcher svg {
+  flex: none;
+}
+.model-switcher-menu {
+  right: 0;
+  left: auto;
+  width: max-content;
+  min-width: 220px;
+  max-width: min(300px, calc(100vw - 32px));
+}
+.model-switcher-menu .cmd-row small {
+  font-family: var(--font-mono);
+}
+.model-switcher-menu .cmd-row {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "label"
+    "hint";
 }
 .composer-images {
   display: flex;

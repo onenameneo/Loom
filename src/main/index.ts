@@ -1,4 +1,4 @@
-import "dotenv/config"; // 先加载 .env（ANTHROPIC_API_KEY / MODEL_ID / BASE_URL）
+import "dotenv/config"; // 先加载 .env（ANTHROPIC_API_KEY / BASE_URL）
 import { existsSync, writeFileSync } from "fs";
 import { join } from "path";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from "electron";
@@ -17,7 +17,7 @@ import {
 import { addProviderModelConfig, deleteProviderModelConfig, ensureLoomAgentDefaults, writeGlobalDefaultModel } from "./modelConfig/files";
 import { modelsJsonPath } from "./modelConfig/paths";
 import { ModelRegistry } from "./modelConfig/registry";
-import { loadScopedModelSettings } from "./modelConfig/scopes";
+import { loadScopedModelSettings, resolveSelectedModel } from "./modelConfig/scopes";
 import { platformWindowOptions } from "./windowOptions";
 import { addGlobalSkillSource, buildSkillCatalog, openSkillSource, removeGlobalSkillSource } from "./agent/skills";
 import { markRendererNotReady, markRendererReady, sendToWindow } from "./ipcSafeSend";
@@ -70,11 +70,18 @@ function registerIpc() {
       skills: s.skills,
       modelRegistry: registry.toRendererDTO(),
       globalDefaultModel: scoped.globalSettings.defaults?.model,
+      // 左上角模型名必须与实际运行模型一致：buildModel 走 resolveSelectedModel
+      //（解析 models.json 全局默认），故此处复用同一解析，不再取 resolveModelConfig/env。
+      resolvedModel: (() => {
+        const selected = resolveSelectedModel({ registry, scoped });
+        return selected.model
+          ? `${selected.ref.providerId}/${selected.ref.modelId}`
+          : resolveModelConfig(store).model;
+      })(),
       sources: accessSources(store),
       hasKey: Boolean(process.env.ANTHROPIC_API_KEY),
       legacyKeyPresent: Boolean(store.getApiKeyEnc()),
       keyStorage: keyStorageKind(),
-      resolvedModel: resolveModelConfig(store).model,
       resolvedTheme: resolvedTheme(),
     };
   });

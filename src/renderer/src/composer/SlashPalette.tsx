@@ -140,7 +140,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
               <small>{model.name}</small>
             </button>
           ))}
-          {modelItems.length === 0 && <div className="cmd-row muted">没有匹配的已添加模型</div>}
+          {modelItems.length === 0 && <div className="cmd-empty">没有匹配的已添加模型</div>}
         </>
       ) : skillMode ? (
         <>
@@ -161,7 +161,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
               <small>{skill.scope} · {skill.hash}</small>
             </button>
           ))}
-          {skillItems.length === 0 && <div className="cmd-row muted">没有匹配的 Skill</div>}
+          {skillItems.length === 0 && <div className="cmd-empty">没有匹配的 Skill</div>}
         </>
       ) : filtered.length ? (
         filtered.map((cmd, index) => {
