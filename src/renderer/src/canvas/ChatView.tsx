@@ -24,8 +24,8 @@ function parseModelSelection(value: string): ModelSelection {
   return providerId && modelId ? { providerId, modelId } : value.trim();
 }
 
-// 对话优先视图：单条主线摊开成经典居中聊天（「聊天 = 只有一个节点的画布」）。
-// 走同一套 window.api.canvas；在回复里划词 → 岔出第一个分支 → 上层切成画布视图。
+// 对话优先视图：单个起点摊开成经典居中聊天（「聊天 = 只有一个节点的画布」）。
+// 走同一套 window.api.canvas；在回复里划词 → 从这里展开 → 上层切成画布视图。
 export default function ChatView({
   nodeId,
   initialMessages,
@@ -34,6 +34,7 @@ export default function ChatView({
   model,
   onBranch,
   onExpandCanvas,
+  onTreeChange,
   noKey,
   goSettings,
 }: {
@@ -44,6 +45,7 @@ export default function ChatView({
   model?: ModelSelection;
   onBranch: (seedText: string, mountAncestors: boolean) => void;
   onExpandCanvas: () => void;
+  onTreeChange?: () => void;
   noKey: boolean;
   goSettings: () => void;
 }) {
@@ -216,6 +218,7 @@ export default function ChatView({
           setThinking(false);
           setBusy(false);
           refreshBudget();
+          onTreeChange?.();
           break;
         case "error":
           setThinking(false);
@@ -460,7 +463,7 @@ export default function ChatView({
               onPointerDown={(e) => e.stopPropagation()}
             >
               <button onClick={doBranch}>
-                <span><IconSplit size={13} /> 岔出分支</span>
+                <span><IconSplit size={13} /> 从这里展开</span>
                 <small>{tb.text.length > 40 ? `${tb.text.slice(0, 40)}…` : tb.text}</small>
               </button>
               <button

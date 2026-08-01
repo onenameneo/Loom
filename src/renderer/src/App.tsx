@@ -87,8 +87,8 @@ export default function App() {
     }
     if (!window.api) {
       const demo: SessionMeta[] = [
-        { id: `${projectId}:session-main`, projectId, title: "默认会话", createdAt: 0, updatedAt: 0, order: 0 },
-        { id: `${projectId}:session-notes`, projectId, title: "实验分支", createdAt: 0, updatedAt: 0, order: 1 },
+        { id: `${projectId}:session-main`, projectId, title: "新会话", createdAt: 0, updatedAt: 0, order: 0 },
+        { id: `${projectId}:session-notes`, projectId, title: "实验记录", createdAt: 0, updatedAt: 0, order: 1 },
       ];
       setSessions(demo);
       setActiveSessionId((cur) => (cur && demo.some((s) => s.id === cur) ? cur : demo[0]?.id ?? null));
@@ -189,10 +189,12 @@ export default function App() {
     setActiveSurface("project");
   }, [reloadProjects]);
 
-  const createSession = useCallback(async () => {
-    if (!window.api || !activeProjectId) return;
-    const session = await window.api.sessions.create(activeProjectId);
-    await reloadSessions(activeProjectId);
+  const createSession = useCallback(async (projectId?: string) => {
+    const targetProjectId = projectId ?? activeProjectId;
+    if (!window.api || !targetProjectId) return;
+    const session = await window.api.sessions.create(targetProjectId);
+    await reloadSessions(targetProjectId);
+    setActiveProjectId(targetProjectId);
     setActiveSessionId(session.id);
     setActiveNodeId(null);
     setActiveSurface("project");
@@ -230,6 +232,11 @@ export default function App() {
     reloadSettings();
   }, [theme, reloadSettings]);
 
+  const bumpProjectTree = useCallback(() => {
+    setTreeVersion((v) => v + 1);
+    if (activeProjectId) void reloadSessions(activeProjectId);
+  }, [activeProjectId, reloadSessions]);
+
   const ctx: SurfaceCtx = {
     projects,
     sessions,
@@ -246,7 +253,7 @@ export default function App() {
     sessionMode,
     setSessionMode,
     treeVersion,
-    bumpTreeVersion: () => setTreeVersion((v) => v + 1),
+    bumpTreeVersion: bumpProjectTree,
     agentCount: agents.length,
     activitySessions,
     agents,
@@ -293,7 +300,12 @@ export default function App() {
                   setActiveNodeId(root?.id ?? null);
                 }}
                 onFocusNode={(sessionId, nodeId) => {
+                  const session = sessions.find((item) => item.id === sessionId);
+                  const nextMode = "canvas" as const;
+                  sessionUiStateRef.current.set(sessionId, { nodeId, mode: nextMode });
+                  if (session) setActiveProjectId(session.projectId);
                   setActiveSessionId(sessionId);
+                  setSessionMode(nextMode);
                   setActiveSurface("project");
                   setActiveNodeId(nodeId);
                 }}

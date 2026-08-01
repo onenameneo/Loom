@@ -254,6 +254,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           setBusy(false);
           refreshBudget();
           reloadNode();
+          data.onTreeChange?.();
           break;
         case "error":
           setThinking(false);
@@ -297,7 +298,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   }, []);
 
   const doBranch = () => {
-    if (tb) branch?.onBranch(id, tb.text, tb.mountAncestors);
+    if (tb) branch?.onBranch(id, tb.text, tb.mountAncestors, tb.text);
     setTb(null);
     window.getSelection()?.removeAllRanges();
   };
@@ -622,7 +623,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           <MessageSquareText size={13} />
         </button>
         {!data.isRoot && (
-          <button className="head-icon danger nodrag" title="删除分支" onClick={() => data.onDelete?.(id)}>
+          <button className="head-icon danger nodrag" title="删除会话" onClick={() => data.onDelete?.(id)}>
             <Trash2 size={13} />
           </button>
         )}
@@ -679,7 +680,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           )}
 
           {msgs.length === 0 && !thinking && (
-            <div className="empty">{data.seed ? "顺着这个片段往下问…" : "从主线开始一段思考…"}</div>
+            <div className="empty">{data.seed ? "顺着这个片段往下问…" : "从起点开始一段思考…"}</div>
           )}
 
           {groupToolTimelineMessages(msgs).map((item) => (
@@ -719,7 +720,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
               onPointerDown={(e) => e.stopPropagation()}
             >
               <button onClick={doBranch}>
-                <span><IconSplit size={13} /> 岔出分支</span>
+                <span><IconSplit size={13} /> 从这里展开</span>
                 <small>{tb.text.length > 40 ? `${tb.text.slice(0, 40)}…` : tb.text}</small>
               </button>
               <button

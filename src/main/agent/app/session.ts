@@ -16,6 +16,14 @@ import { createApprovalPolicyStore } from "./approvalPolicy";
 import { createToolRegistry } from "./toolRuntime";
 import { createTurnRunner } from "./turnRunner";
 import { createNodeQueryEngine } from "./nodeQueryEngine";
+import {
+  branchTitleFromCandidates,
+  DEFAULT_ROOT_TITLE,
+  normalizeGeneratedTitle,
+  shouldAutoTitleSession,
+  shouldAutoTitleNode,
+  UNTITLED_SESSION_TITLE,
+} from "../../../common/titleDefaults";
 import { createTraceRepository } from "./traceRepository";
 import { createCompactionService, type CompactNodeResult, type CompactionServiceDeps } from "./compactionService";
 import { createApprovalGate } from "../hooks/tools/approvalGate";
@@ -81,6 +89,9 @@ export interface CanvasRuntimeDeps {
     manualTailBudgetTokens?: number;
     maxSummaryOutputTokens?: number;
   };
+  titleGenerator?: {
+    generate(input: { prompt: string; response?: string; signal?: AbortSignal }): Promise<string>;
+  };
   /** 注入引擎工厂：由组装根提供 pi 适配器；session 只认端口。 */
   createEngine: (hooks: {
     buildContext: (nodeId: string, own: AgentMessage[]) => Message[] | Promise<Message[]>;
@@ -142,6 +153,16 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   const pendingPromptSkillIds = new Map<string, string[]>();
   const manualCompactions = new Map<string, AbortController>();
   let activeSessionId: string | undefined;
+
+  async function generateTitle(input: { prompt: string; response?: string; signal?: AbortSignal }): Promise<string> {
+    if (!deps.titleGenerator) return normalizeGeneratedTitle(input.prompt, { fallback: UNTITLED_SESSION_TITLE });
+    try {
+      const title = normalizeGeneratedTitle(await deps.titleGenerator.generate(input), { fallback: "" });
+      return title || normalizeGeneratedTitle(input.prompt, { fallback: UNTITLED_SESSION_TITLE });
+    } catch {
+      return normalizeGeneratedTitle(input.prompt, { fallback: UNTITLED_SESSION_TITLE });
+    }
+  }
 
   // ---- 图缓存 & 映射 --------------------------------------------------------
 
@@ -591,12 +612,12 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return hydrateSession(sessionId).map(dto);
   }
 
-  // 打开产品 Session：返回已有节点，或没有则建一条主线。
+  // 打开产品 Session：返回已有节点，或没有则建一条起点。
   function open(sessionId: string) {
     activateSession(sessionId);
     let items = hydrateSession(sessionId);
     if (items.length === 0) {
-      const root = toCanvasNode(store.createNode({ sessionId, title: "主线", mountAncestors: false }));
+      const root = toCanvasNode(store.createNode({ sessionId, title: DEFAULT_ROOT_TITLE, titleState: "default", mountAncestors: false }));
       nodes.set(root.id, root);
       items = [root];
     }
@@ -622,7 +643,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       store.createNode({
         sessionId: arg.sessionId,
         parentId: arg.parentId,
-        title: arg.title ?? (arg.seed ? "新分支" : "主线"),
+        title: arg.title ?? (arg.seed ? branchTitleFromCandidates({ selectedText: arg.seed.text }) : DEFAULT_ROOT_TITLE),
+        titleState: "default",
         seed: arg.seed,
         mountAncestors: Boolean(arg.mountAncestors),
         forkContextSnapshot: branchPlan ? (branchPlan.kind === "raw-snapshot" ? branchPlan.rawSnapshot : undefined) : ancestorSnapshot,
@@ -653,6 +675,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     }
     let activeTurn: { turnId: string; signal: AbortSignal } | undefined;
     let promptFromSeq = node.messages.length;
+    const shouldNameSession = arg.text.trim().length > 0 && node.messages.length === 0;
     const query = await queries.run({
       nodeId: arg.nodeId,
       operation: "send",
@@ -688,6 +711,18 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       if (result.reason === "failed" && isContextOverflow(query.error)) return retrySendAfterOverflow(node, promptFromSeq);
       if (result.reason === "failed") events.emit(arg.nodeId, "error", String((query.error as any)?.message ?? query.error));
       return { ok: false, reason: result.reason };
+    }
+    if (shouldNameSession) {
+      const responseText = [...node.messages].reverse().map(textOf).find((text) => text.trim());
+      const title = await generateTitle({ prompt: arg.text, response: responseText, signal: activeTurn?.signal });
+      const session = store.getSession(node.sessionId);
+      if (session && shouldAutoTitleSession(session)) {
+        store.renameSession(node.sessionId, title, { titleState: "manual" });
+      }
+      if (shouldAutoTitleNode(node)) {
+        node.title = title;
+        store.updateNode(node.id, { title, titleState: "manual" });
+      }
     }
     await maybeCompactNode(node, "threshold", { turnId: result.turnId });
     return { ok: true };
@@ -810,7 +845,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     const title = arg.title?.trim();
     if (title) {
       node.title = title;
-      store.updateNode(arg.nodeId, { title });
+      store.updateNode(arg.nodeId, { title, titleState: "manual" });
     }
     if (Object.prototype.hasOwnProperty.call(arg, "color")) {
       const color = arg.color?.trim() ?? "";

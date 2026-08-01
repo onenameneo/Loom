@@ -21,6 +21,7 @@ import { loadScopedModelSettings, resolveSelectedModel } from "./modelConfig/sco
 import { platformWindowOptions } from "./windowOptions";
 import { addGlobalSkillSource, buildSkillCatalog, openSkillSource, removeGlobalSkillSource } from "./agent/skills";
 import { markRendererNotReady, markRendererReady, sendToWindow } from "./ipcSafeSend";
+import { DEFAULT_ROOT_TITLE, DEFAULT_SESSION_TITLE } from "../common/titleDefaults";
 
 // ---------------------------------------------------------------------------
 // 主进程：持久化(store) + 设置 + 会话 + 画布引擎(pi 多节点)。
@@ -142,7 +143,7 @@ function registerIpc() {
   const createProject = (input?: string | { name?: string; sourceRoots?: string[] }) => {
     const project = store.createProject(input);
     const session = store.ensureDefaultSession(project.id);
-    store.createNode({ sessionId: session.id, title: "主线", mountAncestors: false });
+    store.createNode({ sessionId: session.id, title: DEFAULT_ROOT_TITLE, titleState: "default", mountAncestors: false });
     return project;
   };
   ipcMain.handle("project:list", () => store.listProjects());
@@ -172,12 +173,12 @@ function registerIpc() {
     return store.listSessions(projectId);
   });
   ipcMain.handle("session:create", (_e, { projectId, title }: { projectId: string; title?: string }) => {
-    const session = store.createSession(projectId, title);
-    store.createNode({ sessionId: session.id, title: "主线", mountAncestors: false });
+    const session = store.createSession(projectId, title ?? DEFAULT_SESSION_TITLE, { titleState: title ? "manual" : "default" });
+    store.createNode({ sessionId: session.id, title: DEFAULT_ROOT_TITLE, titleState: "default", mountAncestors: false });
     return session;
   });
   ipcMain.handle("session:rename", (_e, { id, title }: { id: string; title: string }) => {
-    store.renameSession(id, title);
+    store.renameSession(id, title, { titleState: "manual" });
     return { ok: true };
   });
   ipcMain.handle("session:delete", (_e, id: string) => {
@@ -186,7 +187,7 @@ function registerIpc() {
     store.deleteSession(id);
     if (store.listSessions(session.projectId).length === 0) {
       const replacement = store.ensureDefaultSession(session.projectId);
-      store.createNode({ sessionId: replacement.id, title: "主线", mountAncestors: false });
+      store.createNode({ sessionId: replacement.id, title: DEFAULT_ROOT_TITLE, titleState: "default", mountAncestors: false });
     }
     return { ok: true };
   });

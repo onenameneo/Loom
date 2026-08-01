@@ -12,6 +12,7 @@ import {
   type StoreData,
   type Project,
 } from "./store";
+import { DEFAULT_SESSION_TITLE, type DefaultTitleState } from "../../common/titleDefaults";
 import type { StoredModelSelection } from "../modelConfig/modelRef";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
@@ -149,14 +150,15 @@ export class JsonStore implements Store {
     return (this.data.sessions ?? []).find((session) => session.id === id);
   }
   ensureDefaultSession(projectId: string): SessionRecord {
-    return this.listSessions(projectId)[0] ?? this.createSession(projectId, "默认会话");
+    return this.listSessions(projectId)[0] ?? this.createSession(projectId, DEFAULT_SESSION_TITLE, { titleState: "default" });
   }
-  createSession(projectId: string, title = "新会话"): SessionRecord {
+  createSession(projectId: string, title = "新会话", options: { titleState?: DefaultTitleState } = {}): SessionRecord {
     const now = Date.now();
     const session: SessionRecord = {
       id: this.id("session"),
       projectId,
       title,
+      titleState: options.titleState,
       createdAt: now,
       updatedAt: now,
       order: this.listSessions(projectId).length,
@@ -165,10 +167,11 @@ export class JsonStore implements Store {
     this.flush();
     return session;
   }
-  renameSession(id: string, title: string): void {
+  renameSession(id: string, title: string, options: { titleState?: DefaultTitleState } = {}): void {
     const session = this.getSession(id);
     if (session) {
       session.title = title;
+      if (options.titleState) session.titleState = options.titleState;
       session.updatedAt = Date.now();
       this.flush();
     }
@@ -189,6 +192,7 @@ export class JsonStore implements Store {
     projectId?: string;
     parentId?: string;
     title: string;
+    titleState?: DefaultTitleState;
     seed?: unknown;
     mountAncestors?: boolean;
     forkContextSnapshot?: AgentMessage[];
@@ -198,7 +202,7 @@ export class JsonStore implements Store {
   }
   updateNode(
     _id: string,
-    _patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; frozenBranchSummary: AgentMessage; systemPrompt: string; model: StoredModelSelection; color: string }>,
+    _patch: Partial<{ title: string; titleState: DefaultTitleState; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; frozenBranchSummary: AgentMessage; systemPrompt: string; model: StoredModelSelection; color: string }>,
   ): void {}
   updateNodeLayout(_id: string, _layout: NodeLayout): boolean {
     return false;

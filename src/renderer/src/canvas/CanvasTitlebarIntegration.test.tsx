@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import Canvas from "./Canvas";
+import SessionCanvas from "./SessionCanvas";
 import { AppTitlebar, TitlebarProvider, useTitlebarActions } from "../titlebar/Titlebar";
 
 const flow = vi.hoisted(() => ({
@@ -226,7 +227,7 @@ describe("Canvas titlebar integration", () => {
             sessionId: "session-1",
             projectId: "project-1",
             parentId: "root",
-            title: "新分支",
+            title: "新会话",
             seed: { text: "branch seed", from: "Main", parent: "root" },
             mountAncestors: false,
             messages: [],
@@ -251,6 +252,56 @@ describe("Canvas titlebar integration", () => {
       expect(branch?.data.projectId).toBe("project-1");
       expect(branch?.data.sessionId).toBe("session-1");
     });
+    expect(window.api?.canvas.create).toHaveBeenCalledWith(expect.objectContaining({
+      title: "branch seed",
+      seed: { text: "branch seed", from: "Main", parent: "root" },
+    }));
     expect(layoutStore.enqueue).toHaveBeenCalledWith("session-1", "branch-1", expect.any(Object));
+  });
+
+  it("keeps the externally focused canvas node selected after framing it", async () => {
+    Object.defineProperty(window, "api", {
+      configurable: true,
+      value: {
+        canvas: {
+          open: vi.fn(async () => [
+            {
+              id: "root",
+              sessionId: "session-1",
+              projectId: "project-1",
+              title: "起点",
+              mountAncestors: false,
+              messages: [],
+            },
+            {
+              id: "child",
+              sessionId: "session-1",
+              projectId: "project-1",
+              parentId: "root",
+              title: "新会话",
+              mountAncestors: false,
+              messages: [],
+            },
+          ]),
+        },
+      },
+    });
+    const onNodeChange = vi.fn();
+
+    render(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <SessionCanvas
+          sessionId="session-1"
+          sessionName="workspace"
+          noKey={false}
+          goSettings={vi.fn()}
+          activeNodeId="child"
+          onNodeChange={onNodeChange}
+        />
+      </TitlebarProvider>,
+    );
+
+    await waitFor(() => expect(flow.setCenter).toHaveBeenCalled());
+    expect(onNodeChange).not.toHaveBeenCalledWith(null);
   });
 });

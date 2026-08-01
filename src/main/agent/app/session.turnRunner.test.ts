@@ -65,7 +65,12 @@ class MemoryStore implements Store {
   getSession(id: string) { return this.sessions.find((session) => session.id === id); }
   ensureDefaultSession(projectId: string) { return this.listSessions(projectId)[0]; }
   createSession() { return this.sessions[0]; }
-  renameSession() {}
+  renameSession(id: string, title: string, options: { titleState?: "default" | "manual" } = {}) {
+    const session = this.getSession(id);
+    if (!session) return;
+    session.title = title;
+    if (options.titleState) session.titleState = options.titleState;
+  }
   deleteSession() {}
   listNodes(sessionId: string) { return [...this.nodes.values()].filter((n) => n.sessionId === sessionId); }
   getNode(id: string) { return this.nodes.get(id); }
@@ -86,8 +91,10 @@ class MemoryStore implements Store {
     this.nodes.set(node.id, node);
     return node;
   }
-  updateNode(id: string, patch: Partial<{ frozenBranchSummary: AgentMessage }>) {
+  updateNode(id: string, patch: Partial<{ title: string; titleState: "default" | "manual"; frozenBranchSummary: AgentMessage }>) {
     const node = this.nodes.get(id) as (NodeRecord & { frozenBranchSummary?: AgentMessage }) | undefined;
+    if (node && Object.prototype.hasOwnProperty.call(patch, "title")) node.title = patch.title!;
+    if (node && Object.prototype.hasOwnProperty.call(patch, "titleState")) node.titleState = patch.titleState;
     if (node && Object.prototype.hasOwnProperty.call(patch, "frozenBranchSummary")) node.frozenBranchSummary = patch.frozenBranchSummary;
   }
   updateNodeLayout(_id: string, _layout: NodeLayout) { return true; }
@@ -271,6 +278,69 @@ describe("createAgentSession turn runner integration", () => {
       rmSync(firstRoot, { recursive: true, force: true });
       rmSync(secondRoot, { recursive: true, force: true });
     }
+  });
+
+  it("uses the title model to name a default session and root node after the first prompt", async () => {
+    const store = new MemoryStore();
+    store.sessions[0].title = "新会话";
+    store.sessions[0].titleState = "default";
+    store.nodes.get("n1")!.title = "起点";
+    store.nodes.get("n1")!.titleState = "default";
+    store.nodes.get("n1")!.messages = [];
+    const titleGenerator = {
+      generate: vi.fn(async () => "BTC 策略研究"),
+    };
+    const messages: AgentMessage[] = [];
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle(messages, vi.fn(async (msg) => {
+        messages.push(msg, assistant("ok"));
+      }))),
+      titleGenerator,
+    });
+
+    await expect(session.send({ nodeId: "n1", text: "帮我分析 polymarket btc 5min 策略，先看数据结构" })).resolves.toMatchObject({ ok: true });
+
+    expect(titleGenerator.generate).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: "帮我分析 polymarket btc 5min 策略，先看数据结构",
+    }));
+    expect(store.getSession("sess")?.title).toBe("BTC 策略研究");
+    expect(store.getSession("sess")?.titleState).toBe("manual");
+    expect(store.getNode("n1")?.title).toBe("BTC 策略研究");
+    expect(store.getNode("n1")?.titleState).toBe("manual");
+  });
+
+  it("does not overwrite manually named sessions with the title model", async () => {
+    const store = new MemoryStore();
+    store.sessions[0].title = "用户标题";
+    store.sessions[0].titleState = "manual";
+    store.nodes.get("n1")!.title = "起点";
+    store.nodes.get("n1")!.titleState = "default";
+    store.nodes.get("n1")!.messages = [];
+    const titleGenerator = {
+      generate: vi.fn(async () => "模型标题"),
+    };
+    const messages: AgentMessage[] = [];
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle(messages, vi.fn(async (msg) => {
+        messages.push(msg, assistant("ok"));
+      }))),
+      titleGenerator,
+    });
+
+    await expect(session.send({ nodeId: "n1", text: "第一条问题" })).resolves.toMatchObject({ ok: true });
+
+    expect(store.getSession("sess")?.title).toBe("用户标题");
+    expect(store.getNode("n1")?.title).toBe("模型标题");
   });
 
   it("inherits skill context through branches independently of mounted ancestor dialogue", async () => {

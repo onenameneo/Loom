@@ -39,7 +39,7 @@ describe("main/preload project IPC contracts", () => {
     const mainSource = readSource("src/main/index.ts");
 
     expect(mainSource).toMatch(/const session = store\.ensureDefaultSession\(project\.id\)/);
-    expect(mainSource).toContain('store.createNode({ sessionId: session.id, title: "主线", mountAncestors: false })');
+    expect(mainSource).toContain("store.createNode({ sessionId: session.id, title: DEFAULT_ROOT_TITLE, titleState: \"default\", mountAncestors: false })");
   });
 
   it("exposes context compaction IPC through main, preload, and renderer contracts", () => {

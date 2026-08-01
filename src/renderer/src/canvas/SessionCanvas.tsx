@@ -3,10 +3,11 @@ import type { CanvasNodeDto, ModelSelection } from "../env";
 import { useTitlebarContext } from "../titlebar/Titlebar";
 import Canvas from "./Canvas";
 import ChatView from "./ChatView";
+import { branchTitleFromCandidates, DEFAULT_BRANCH_TITLE, DEFAULT_ROOT_TITLE } from "../../../common/titleDefaults";
 
 // 会话主视图：对话优先、按需成画布。
-//   · 只有主线（无分支）→ 居中聊天视图（ChatView）。
-//   · 划词岔出第一个分支，或手动「展开画布」→ 切成 React Flow 画布（Canvas）。
+//   · 只有起点（无分支）→ 居中聊天视图（ChatView）。
+//   · 划词展开第一个分支，或手动「展开画布」→ 切成 React Flow 画布（Canvas）。
 // 两个视图共用 window.api.canvas；root 节点消息主进程有镜像，切换不丢历史。
 export default function SessionCanvas({
   sessionId,
@@ -36,7 +37,7 @@ export default function SessionCanvas({
   const reload = useCallback(async () => {
     let dtos: CanvasNodeDto[];
     if (window.api) dtos = await window.api.canvas.open(sessionId);
-    else dtos = [{ id: "root", sessionId, projectId: "project_demo", title: "主线", mountAncestors: false, messages: [] }];
+    else dtos = [{ id: "root", sessionId, projectId: "project_demo", title: DEFAULT_ROOT_TITLE, mountAncestors: false, messages: [] }];
     setNodeList(dtos);
     setNodeCount(dtos.length);
   }, [sessionId]);
@@ -86,11 +87,16 @@ export default function SessionCanvas({
         await window.api.canvas.create({
           sessionId: sessionId,
           parentId: chatNode.id,
-          seed: { text: seedText, from: chatNode.title || "主线", parent: chatNode.id },
+          seed: { text: seedText, from: chatNode.title || DEFAULT_ROOT_TITLE, parent: chatNode.id },
+          title: branchTitleFromCandidates({
+            selectedText: seedText,
+            currentPrompt: [...chatNode.messages].reverse().find((msg) => msg.role === "user")?.text,
+            fallback: DEFAULT_BRANCH_TITLE,
+          }),
           mountAncestors,
         });
       }
-      setViewMode("canvas"); // 切到画布；Canvas 会自行 open 载入 root+新分支
+      setViewMode("canvas"); // 切到画布；Canvas 会自行 open 载入 root+新会话
       onTreeChange?.();
     },
     [chatNode, sessionId, onTreeChange],
@@ -104,7 +110,6 @@ export default function SessionCanvas({
             sessionId={sessionId}
             model={model}
             focusNodeId={activeNodeId}
-            onFocused={() => onNodeChange?.(null)}
             onSelectedNode={onNodeChange}
             onReturnChat={returnChat}
             onTreeChange={onTreeChange}
@@ -119,6 +124,7 @@ export default function SessionCanvas({
           model={chatNode.model || model}
           onBranch={branchFromChat}
           onExpandCanvas={expandCanvas}
+          onTreeChange={onTreeChange}
           noKey={noKey}
           goSettings={goSettings}
         />

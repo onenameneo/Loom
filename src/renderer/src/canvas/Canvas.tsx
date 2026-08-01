@@ -25,6 +25,7 @@ import { BranchContext } from "./branch";
 import { applyTidyPositions, findBranchPlacement, readNodeLayout, resolveNodeLayout } from "./layout";
 import { finishResizeInteraction, guardResizeNodeChanges } from "./resizeLifecycle";
 import { ResizeSession } from "./resizeSession";
+import { branchTitleFromCandidates, DEFAULT_BRANCH_TITLE, DEFAULT_ROOT_TITLE } from "../../../common/titleDefaults";
 
 const nodeTypes = { chatThread: ChatThreadNode };
 const defaultEdgeOptions = { type: "default" as const };
@@ -40,6 +41,14 @@ const READABLE_FIT_ZOOM = 0.82;
 
 function viewportDuration() {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : 220;
+}
+
+function latestUserPrompt(node: Node | undefined): string {
+  const messages = ((node?.data as any)?.messages ?? []) as CanvasNodeDto["messages"];
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role === "user" && messages[i].text.trim()) return messages[i].text;
+  }
+  return "";
 }
 
 type CanvasInteraction =
@@ -135,7 +144,6 @@ type CanvasProps = {
   sessionId: string;
   model?: ModelSelection;
   focusNodeId?: string | null;
-  onFocused?: () => void;
   onSelectedNode?: (nodeId: string | null) => void;
   onReturnChat?: (nodeId: string) => void;
   onTreeChange?: () => void;
@@ -153,7 +161,6 @@ function CanvasContent({
   sessionId,
   model,
   focusNodeId,
-  onFocused,
   onSelectedNode,
   onReturnChat,
   onTreeChange,
@@ -602,8 +609,8 @@ function CanvasContent({
         // 原子「打开」：主进程串行处理，避免 StrictMode 双挂载建出两个根。
         dtos = await window.api.canvas.open(sessionId);
       } else {
-        // 浏览器预览：本地起一条主线，画布仍可渲染
-        dtos = [{ id: "root", sessionId, projectId: "project_demo", title: "主线", mountAncestors: false, messages: [] }];
+        // 浏览器预览：本地起一个根节点，画布仍可渲染
+        dtos = [{ id: "root", sessionId, projectId: "project_demo", title: DEFAULT_ROOT_TITLE, mountAncestors: false, messages: [] }];
       }
       if (!alive) return;
       const pos = layout(dtos);
@@ -642,7 +649,6 @@ function CanvasContent({
         didInitialFrameRef.current = true;
         lastFramedRef.current = focusNodeId;
         focusNode(focusNodeId, { duration: 0 });
-        onFocused?.();
       } else {
         const root = nodes.find((n) => (n.data as { isRoot?: boolean })?.isRoot) ?? nodes[0];
         didInitialFrameRef.current = true;
@@ -658,27 +664,31 @@ function CanvasContent({
     if (focusNodeId && focusNodeId !== lastFramedRef.current && nodes.some((n) => n.id === focusNodeId)) {
       lastFramedRef.current = focusNodeId;
       focusNode(focusNodeId);
-      onFocused?.();
     }
-  }, [nodes, focusNodeId, focusNode, onFocused]);
+  }, [nodes, focusNodeId, focusNode]);
 
   const onBranch = useCallback(
-    async (sourceId: string, seedText: string, mountAncestors: boolean) => {
+    async (sourceId: string, seedText: string, mountAncestors: boolean, titleCandidate?: string) => {
       const from = titleRef.current.get(sourceId) ?? "";
+      const src = nodes.find((n) => n.id === sourceId);
+      const branchTitle = branchTitleFromCandidates({
+        selectedText: titleCandidate ?? seedText,
+        currentPrompt: latestUserPrompt(src),
+        fallback: DEFAULT_BRANCH_TITLE,
+      });
       const seed = { text: seedText, from, parent: sourceId };
       let id: string;
       let createdDto: CanvasNodeDto | undefined;
       if (window.api) {
-        const dto = await window.api.canvas.create({ sessionId, parentId: sourceId, seed, mountAncestors });
+        const dto = await window.api.canvas.create({ sessionId, parentId: sourceId, seed, title: branchTitle, mountAncestors });
         id = dto.id;
         createdDto = dto;
       } else {
         id = `local_${Math.round(performance.now())}`;
       }
-      const title = createdDto?.title ?? "新分支";
+      const title = createdDto?.title ?? branchTitle;
       titleRef.current.set(id, title);
       const nodeActions = actions();
-      const src = nodes.find((n) => n.id === sourceId);
       const baseX = src ? src.position.x : ROOT_X;
       const baseY = src ? src.position.y : ROOT_Y;
       const siblings = nodes.filter((n) => (n.data as any)?.seed?.parent === sourceId).length;

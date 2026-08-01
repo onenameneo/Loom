@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { DefaultTitleState } from "../../common/titleDefaults";
 import type { StoredModelSelection } from "../modelConfig/modelRef";
 
 // 持久化仓储契约。组件/服务只依赖这个接口；实现可从 JSON-file 换到 SQLite，
@@ -58,6 +59,7 @@ export interface SessionRecord {
   id: string;
   projectId: string;
   title: string;
+  titleState?: DefaultTitleState;
   createdAt: number;
   updatedAt: number;
   order: number;
@@ -111,6 +113,7 @@ export interface NodeRecord {
   projectId: string;
   parentId?: string;
   title: string;
+  titleState?: DefaultTitleState;
   seed?: unknown;
   systemPrompt?: string;
   model?: StoredModelSelection;
@@ -139,8 +142,8 @@ export interface Store {
   listSessions(projectId: string): SessionRecord[];
   getSession(id: string): SessionRecord | undefined;
   ensureDefaultSession(projectId: string): SessionRecord;
-  createSession(projectId: string, title?: string): SessionRecord;
-  renameSession(id: string, title: string): void;
+  createSession(projectId: string, title?: string, options?: { titleState?: DefaultTitleState }): SessionRecord;
+  renameSession(id: string, title: string, options?: { titleState?: DefaultTitleState }): void;
   deleteSession(id: string): void;
 
   listNodes(sessionId: string): NodeRecord[];
@@ -150,6 +153,7 @@ export interface Store {
     projectId?: string;
     parentId?: string;
     title: string;
+    titleState?: DefaultTitleState;
     seed?: unknown;
     mountAncestors?: boolean;
     forkContextSnapshot?: AgentMessage[];
@@ -157,7 +161,7 @@ export interface Store {
   }): NodeRecord;
   updateNode(
     id: string,
-    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; frozenBranchSummary: AgentMessage; systemPrompt: string; model: StoredModelSelection; color: string }>,
+    patch: Partial<{ title: string; titleState: DefaultTitleState; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; frozenBranchSummary: AgentMessage; systemPrompt: string; model: StoredModelSelection; color: string }>,
   ): void;
   updateNodeLayout(id: string, layout: NodeLayout): boolean;
   updateNodeLayouts(items: Array<{ id: string; layout: NodeLayout }>): string[];

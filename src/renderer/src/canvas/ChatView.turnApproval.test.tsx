@@ -98,7 +98,7 @@ describe("ChatView turn and approval controls", () => {
     fireEvent.mouseUp(target);
     const toggle = await screen.findByRole("button", { name: "挂载祖先" });
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
-    await userEvent.setup().click(screen.getByRole("button", { name: /岔出分支/ }));
+    await userEvent.setup().click(screen.getByRole("button", { name: /从这里展开/ }));
     expect(onBranch).toHaveBeenCalledWith("parent response", true);
   });
 

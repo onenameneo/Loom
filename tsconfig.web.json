@@ -11,5 +11,5 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src/renderer/**/*"]
+  "include": ["src/renderer/**/*", "src/common/**/*"]
 }

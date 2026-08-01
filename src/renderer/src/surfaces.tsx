@@ -36,7 +36,7 @@ export interface SurfaceCtx {
   activeProjectId: string | null;
   activeSessionId: string | null;
   createProject: (input?: { name?: string; sourceRoots?: string[] }) => void | Promise<void>;
-  createSession: () => void;
+  createSession: (projectId?: string) => void;
   goSettings: () => void;
   settings: SettingsPayload | null;
   reloadSettings: () => void;
@@ -87,7 +87,7 @@ function ProjectPanel({ ctx }: { ctx: SurfaceCtx }) {
       <div className="surface-empty">
         <div className="big">还没有会话</div>
         <div className="sub">一个会话 = 一张可分支的研究画布。</div>
-        <button className="btn" onClick={ctx.createSession}>
+        <button className="btn" onClick={() => ctx.createSession()}>
           <IconPlus /> 新建会话
         </button>
       </div>

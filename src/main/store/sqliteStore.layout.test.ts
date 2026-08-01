@@ -13,6 +13,24 @@ afterEach(() => {
 });
 
 describe("SqliteStore node layouts", () => {
+  it("persists default and manual title state for sessions and nodes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "loom-title-state-"));
+    dirs.push(dir);
+    const store = new SqliteStore(join(dir, "loom.db"));
+    const project = store.createProject("Project");
+    const session = store.ensureDefaultSession(project.id);
+    expect(session.title).toBe("新会话");
+    expect(session.titleState).toBe("default");
+
+    store.renameSession(session.id, "用户标题", { titleState: "manual" });
+    expect(store.getSession(session.id)?.titleState).toBe("manual");
+
+    const node = store.createNode({ sessionId: session.id, title: "起点", titleState: "default" });
+    expect(store.getNode(node.id)?.titleState).toBe("default");
+    store.updateNode(node.id, { title: "手动节点", titleState: "manual" });
+    expect(store.getNode(node.id)?.titleState).toBe("manual");
+  });
+
   it("keeps node graphs isolated by session inside one project", () => {
     const dir = mkdtempSync(join(tmpdir(), "loom-session-scope-"));
     dirs.push(dir);

@@ -6,6 +6,7 @@ import { createIpcEventSink } from "./agent/adapters/ipcEventSink";
 import { createPiEngine } from "./agent/adapters/piEngine";
 import { createIds, systemClock } from "./agent/adapters/runtime";
 import { createRuntimeSummarizer } from "./agent/adapters/summarizationAdapter";
+import { createRuntimeTitleGenerator } from "./agent/adapters/titleGenerator";
 import { createCanvasRuntime } from "./agent/app/session";
 import type { Seed } from "./agent/core/graph";
 import type { ApprovalDecision } from "./agent/ports";
@@ -45,6 +46,9 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
       return models.streamSimple(model, { messages }, { signal: options.signal, apiKey: options.apiKey, maxTokens: options.maxOutputTokens });
     },
   });
+  const titleGenerator = createRuntimeTitleGenerator({
+    loadRegistry: () => ModelRegistry.load(),
+  });
 
   const runtime = createCanvasRuntime({
     store,
@@ -55,6 +59,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     compaction: {
       summarize: (input, options) => summarizer.summarize(input, options),
     },
+    titleGenerator,
     // 注入 pi 引擎工厂：session 只认端口，pi 收敛在适配器。
     createEngine: (hooks) =>
       createPiEngine({

@@ -15,6 +15,7 @@ import {
   type Store,
   type Project,
 } from "./store";
+import { DEFAULT_SESSION_TITLE, type DefaultTitleState } from "../../common/titleDefaults";
 import { parseStoredModelRef, type StoredModelSelection } from "../modelConfig/modelRef";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
@@ -35,6 +36,7 @@ type SessionRow = {
   created_at: number;
   updated_at: number;
   order: number;
+  meta: string | null;
 };
 
 type NodeRow = {
@@ -94,10 +96,13 @@ function toProject(row: ProjectRow): Project {
 }
 
 function toSession(row: SessionRow): SessionRecord {
+  const meta = decode<Record<string, unknown>>(row.meta, {});
+  const titleState = meta.titleState === "default" || meta.titleState === "manual" ? meta.titleState : undefined;
   return {
     id: row.id,
     projectId: row.project_id,
     title: row.title,
+    titleState,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     order: row.order,
@@ -235,7 +240,7 @@ export class SqliteStore implements Store {
   listSessions(projectId: string): SessionRecord[] {
     const rows = this.db
       .prepare(
-        'SELECT id, project_id, title, created_at, updated_at, "order" FROM sessions WHERE project_id = ? ORDER BY "order", created_at, id',
+        'SELECT id, project_id, title, created_at, updated_at, "order", meta FROM sessions WHERE project_id = ? ORDER BY "order", created_at, id',
       )
       .all(projectId) as SessionRow[];
     return rows.map(toSession);
@@ -243,7 +248,7 @@ export class SqliteStore implements Store {
 
   getSession(id: string): SessionRecord | undefined {
     const row = this.db
-      .prepare('SELECT id, project_id, title, created_at, updated_at, "order" FROM sessions WHERE id = ?')
+      .prepare('SELECT id, project_id, title, created_at, updated_at, "order", meta FROM sessions WHERE id = ?')
       .get(id) as SessionRow | undefined;
     return row ? toSession(row) : undefined;
   }
@@ -251,10 +256,10 @@ export class SqliteStore implements Store {
   ensureDefaultSession(projectId: string): SessionRecord {
     const existing = this.listSessions(projectId)[0];
     if (existing) return existing;
-    return this.createSession(projectId, "默认会话");
+    return this.createSession(projectId, DEFAULT_SESSION_TITLE, { titleState: "default" });
   }
 
-  createSession(projectId: string, title = "新会话"): SessionRecord {
+  createSession(projectId: string, title = "新会话", options: { titleState?: DefaultTitleState } = {}): SessionRecord {
     const project = this.db.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId);
     if (!project) throw new Error("Project not found.");
     const now = Date.now();
@@ -266,6 +271,7 @@ export class SqliteStore implements Store {
       id: id("sess"),
       projectId,
       title,
+      titleState: options.titleState,
       createdAt: now,
       updatedAt: now,
       order,
@@ -274,12 +280,19 @@ export class SqliteStore implements Store {
       .prepare(
         'INSERT INTO sessions(id, project_id, title, created_at, updated_at, "order", meta) VALUES (?, ?, ?, ?, ?, ?, ?)',
       )
-      .run(session.id, session.projectId, session.title, session.createdAt, session.updatedAt, session.order, encode({}));
+      .run(session.id, session.projectId, session.title, session.createdAt, session.updatedAt, session.order, encode({
+        ...(session.titleState ? { titleState: session.titleState } : {}),
+      }));
     return session;
   }
 
-  renameSession(id: string, title: string): void {
-    this.db.prepare("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?").run(title, Date.now(), id);
+  renameSession(id: string, title: string, options: { titleState?: DefaultTitleState } = {}): void {
+    const row = this.db.prepare("SELECT meta FROM sessions WHERE id = ?").get(id) as
+      | { meta: string | null }
+      | undefined;
+    const meta = decode<Record<string, unknown>>(row?.meta, {});
+    if (options.titleState) meta.titleState = options.titleState;
+    this.db.prepare("UPDATE sessions SET title = ?, meta = ?, updated_at = ? WHERE id = ?").run(title, encode(meta), Date.now(), id);
   }
 
   deleteSession(id: string): void {
@@ -307,6 +320,7 @@ export class SqliteStore implements Store {
     projectId?: string;
     parentId?: string;
     title: string;
+    titleState?: DefaultTitleState;
     seed?: unknown;
     mountAncestors?: boolean;
     forkContextSnapshot?: AgentMessage[];
@@ -327,6 +341,7 @@ export class SqliteStore implements Store {
       projectId: session.projectId,
       parentId: input.parentId,
       title: input.title,
+      titleState: input.titleState,
       seed: input.seed,
       mountAncestors: Boolean(input.mountAncestors),
       forkContextSnapshot: input.forkContextSnapshot,
@@ -350,6 +365,7 @@ export class SqliteStore implements Store {
         now,
         now,
         encode({
+          ...(node.titleState ? { titleState: node.titleState } : {}),
           ...(node.forkContextSnapshot ? { forkContextSnapshot: node.forkContextSnapshot } : {}),
           ...(node.frozenBranchSummary ? { frozenBranchSummary: node.frozenBranchSummary } : {}),
         }),
@@ -359,7 +375,7 @@ export class SqliteStore implements Store {
 
   updateNode(
     id: string,
-    patch: Partial<{ title: string; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; frozenBranchSummary: AgentMessage; systemPrompt: string; model: StoredModelSelection; color: string }>,
+    patch: Partial<{ title: string; titleState: DefaultTitleState; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; frozenBranchSummary: AgentMessage; systemPrompt: string; model: StoredModelSelection; color: string }>,
   ): void {
     const current = this.getNode(id);
     if (!current) return;
@@ -388,6 +404,10 @@ export class SqliteStore implements Store {
       const color = patch.color?.trim() ?? "";
       if (color) meta.color = color;
       else delete meta.color;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "titleState")) {
+      if (patch.titleState) meta.titleState = patch.titleState;
+      else delete meta.titleState;
     }
     this.db
       .prepare("UPDATE nodes SET title = ?, seed = ?, mount_ancestors = ?, meta = ?, updated_at = ? WHERE id = ?")
@@ -505,6 +525,7 @@ export class SqliteStore implements Store {
     const parsedModel = parseStoredModelRef(meta.model);
     const model = parsedModel.kind === "ref" ? parsedModel.ref : parsedModel.kind === "legacy" ? parsedModel.legacyModel : undefined;
     const color = typeof meta.color === "string" ? meta.color : undefined;
+    const titleState = meta.titleState === "default" || meta.titleState === "manual" ? meta.titleState : undefined;
     const forkContextSnapshot = Array.isArray(meta.forkContextSnapshot) ? meta.forkContextSnapshot as AgentMessage[] : undefined;
     const frozenBranchSummary = meta.frozenBranchSummary && typeof meta.frozenBranchSummary === "object" ? meta.frozenBranchSummary as AgentMessage : undefined;
     return {
@@ -513,6 +534,7 @@ export class SqliteStore implements Store {
       projectId: row.project_id,
       parentId: row.parent_id ?? undefined,
       title: row.title,
+      titleState,
       seed: decode(row.seed, undefined),
       systemPrompt,
       model,

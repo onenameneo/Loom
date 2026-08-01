@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useState } from "react";
 import { Bot, ChevronDown, ChevronRight, Pencil, Pin, Terminal, Trash2 } from "lucide-react";
 import type { ActivityTool, AgentProc, CanvasNodeDto, ProjectMeta, SessionMeta, SettingsPayload } from "./env";
 import { IconMoon, IconPlus, IconSun } from "./icons";
+import { DEFAULT_ROOT_TITLE, DEFAULT_BRANCH_TITLE } from "../../common/titleDefaults";
 import {
   agentTitle,
   formatDuration,
@@ -18,7 +19,24 @@ import {
 } from "./surfaces";
 import { ConfirmDialog, CreateProjectDialog, RenameDialog, Tip } from "./ui/dialogs";
 
-// 由某会话的节点列表推导「主线→分支」的缩进行（父子关系，深度优先）。
+const SIDEBAR_PROJECT_EXPANSION_KEY = "loom:sidebar:expanded-projects";
+const SIDEBAR_SESSION_EXPANSION_KEY = "loom:sidebar:expanded-sessions";
+
+function readStoredSet(key: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeStoredSet(key: string, value: Set<string>) {
+  localStorage.setItem(key, JSON.stringify([...value]));
+}
+
+// 由某会话的节点列表推导「起点→新会话」的缩进行（父子关系，深度优先）。
 function outlineRows(nodes: CanvasNodeDto[]): Array<{ node: CanvasNodeDto; depth: number }> {
   const byParent = new Map<string | undefined, CanvasNodeDto[]>();
   for (const node of nodes) byParent.set(node.parentId, [...(byParent.get(node.parentId) ?? []), node]);
@@ -60,7 +78,7 @@ export default function Sidebar({
   onDeleteProject: (id: string) => void;
   onPinProject: (id: string, pinned: boolean) => void;
   onSelectProject?: (id: string) => void;
-  onCreateSession?: () => void;
+  onCreateSession?: (projectId?: string) => void;
   onRenameSession?: (id: string, title: string) => void;
   onDeleteSession?: (id: string) => void;
   theme: "light" | "dark";
@@ -72,23 +90,59 @@ export default function Sidebar({
   const [creatingProject, setCreatingProject] = useState(false);
   const [renamingSession, setRenamingSession] = useState<SessionMeta | null>(null);
   const [deletingSession, setDeletingSession] = useState<SessionMeta | null>(null);
-  // 每个会话独立展开：expanded 记哪些会话展开，outlines 存各自的节点列表。
+  const [projectExpanded, setProjectExpanded] = useState<Set<string>>(() => readStoredSet(SIDEBAR_PROJECT_EXPANSION_KEY));
+  const [sessionExpanded, setSessionExpanded] = useState<Set<string>>(() => readStoredSet(SIDEBAR_SESSION_EXPANSION_KEY));
+  const [projectSessionsByProject, setProjectSessionsByProject] = useState<Record<string, SessionMeta[]>>({});
+  // 每个会话独立展开：sessionExpanded 记哪些会话展开，outlines 存各自的节点列表。
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["agent:claude", "agent:codex"]));
   const [outlines, setOutlines] = useState<Record<string, CanvasNodeDto[]>>({});
 
-  // 活跃 Session 自动展开（切到它时把它的树打开）
+  // 活跃 Project / Session 自动展开（切到它时把层级打开）
   useEffect(() => {
-    if (ctx.activeSessionId) {
-      setExpanded((prev) => (prev.has(ctx.activeSessionId!) ? prev : new Set(prev).add(ctx.activeSessionId!)));
+    if (ctx.activeProjectId) {
+      setProjectExpanded((prev) => (prev.has(ctx.activeProjectId!) ? prev : new Set(prev).add(ctx.activeProjectId!)));
     }
-  }, [ctx.activeSessionId]);
+    if (ctx.activeSessionId) {
+      setSessionExpanded((prev) => (prev.has(ctx.activeSessionId!) ? prev : new Set(prev).add(ctx.activeSessionId!)));
+    }
+  }, [ctx.activeProjectId, ctx.activeSessionId]);
+
+  useEffect(() => {
+    const validProjects = new Set(ctx.projects.map((project) => project.id));
+    const validSessions = new Set(ctx.sessions.map((session) => session.id));
+    setProjectExpanded((prev) => new Set([...prev].filter((id) => validProjects.has(id))));
+    setSessionExpanded((prev) => new Set([...prev].filter((id) => validSessions.has(id))));
+    setProjectSessionsByProject((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => validProjects.has(id))));
+  }, [ctx.projects, ctx.sessions]);
+
+  useEffect(() => writeStoredSet(SIDEBAR_PROJECT_EXPANSION_KEY, projectExpanded), [projectExpanded]);
+  useEffect(() => writeStoredSet(SIDEBAR_SESSION_EXPANSION_KEY, sessionExpanded), [sessionExpanded]);
+
+  useEffect(() => {
+    if (!ctx.activeProjectId) return;
+    setProjectSessionsByProject((prev) => ({ ...prev, [ctx.activeProjectId!]: ctx.sessions }));
+  }, [ctx.activeProjectId, ctx.sessions]);
+
+  useEffect(() => {
+    if (!window.api?.sessions || activeSurface !== "project") return;
+    let alive = true;
+    const validProjects = new Set(ctx.projects.map((project) => project.id));
+    const ids = ctx.projects.map((project) => project.id).filter((id) => validProjects.has(id) && id !== ctx.activeProjectId);
+    Promise.all(ids.map((id) => window.api!.sessions.list(id).then((sessions) => [id, sessions] as const))).then((entries) => {
+      if (!alive || entries.length === 0) return;
+      setProjectSessionsByProject((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [activeSurface, ctx.projects, ctx.activeProjectId, ctx.treeVersion]);
 
   // 为所有「已展开」的 Session 拉取各自的节点（树变化时 treeVersion 触发重取）
   useEffect(() => {
     if (!window.api || activeSurface !== "project") return;
     let alive = true;
-    const sessionIds = new Set(ctx.sessions.map((session) => session.id));
-    const ids = [...expanded].filter((id) => sessionIds.has(id));
+    const cachedSessions = Object.values(projectSessionsByProject).flat();
+    const ids = [...new Set([...ctx.sessions, ...cachedSessions].map((session) => session.id).concat([...sessionExpanded]))];
     Promise.all(
       ids.map((id) => window.api!.canvas.list(id).then((nodes) => [id, nodes] as const)),
     ).then((entries) => {
@@ -97,7 +151,7 @@ export default function Sidebar({
     return () => {
       alive = false;
     };
-  }, [expanded, activeSurface, ctx.treeVersion, ctx.sessions]);
+  }, [sessionExpanded, projectSessionsByProject, activeSurface, ctx.treeVersion, ctx.sessions]);
 
   const toggleExpand = useCallback((id: string) => {
     setExpanded((prev) => {
@@ -107,6 +161,42 @@ export default function Sidebar({
       return next;
     });
   }, []);
+
+  const toggleProject = useCallback((id: string) => {
+    setProjectExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSession = useCallback((id: string) => {
+    setSessionExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const focusNode = useCallback((sessionId: string, nodeId: string) => {
+    const session = [
+      ...ctx.sessions,
+      ...Object.values(projectSessionsByProject).flat(),
+    ].find((item) => item.id === sessionId);
+    if (session) {
+      if (session.projectId !== ctx.activeProjectId) onSelectProject?.(session.projectId);
+      setProjectExpanded((prev) => new Set(prev).add(session.projectId));
+      setSessionExpanded((prev) => new Set(prev).add(sessionId));
+    }
+    ctx.setActiveNodeId(nodeId);
+    onFocusNode(sessionId, nodeId);
+  }, [ctx.activeProjectId, ctx.sessions, ctx.setActiveNodeId, onFocusNode, onSelectProject, projectSessionsByProject]);
+
+  const createSessionForProject = useCallback((projectId: string) => {
+    onCreateSession?.(projectId);
+  }, [onCreateSession]);
 
   const agentTools: ActivityTool[] = ["claude", "codex"];
   const sessionViews = getSessionViews(ctx.activitySessions, ctx.agents, "all", ctx.activityNow);
@@ -183,6 +273,124 @@ export default function Sidebar({
     );
   };
 
+  const renderProject = (w: ProjectMeta) => {
+    const isProjectExpanded = projectExpanded.has(w.id);
+    const projectSessions = w.id === ctx.activeProjectId ? ctx.sessions : projectSessionsByProject[w.id] ?? [];
+    const isProjectSelected = ctx.activeProjectId === w.id && !ctx.activeSessionId && !ctx.activeNodeId;
+    return (
+      <Fragment key={w.id}>
+        <div
+          className={`sb-project ${isProjectSelected ? "active" : ""}`}
+          onClick={() => {
+            toggleProject(w.id);
+          }}
+        >
+          <span className="sb-project-chev" aria-hidden="true">
+            {isProjectExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          </span>
+          <span className="project-name">
+            {w.name}
+            {w.sourceRoots?.[0] && <small>{w.sourceRoots[0]}</small>}
+          </span>
+          <span className="project-actions">
+            <Tip label="新建起点">
+              <button
+                aria-label="新建起点"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  createSessionForProject(w.id);
+                }}
+              >
+                <IconPlus />
+              </button>
+            </Tip>
+            <Tip label={w.pinned ? "取消置顶" : "置顶"}>
+              <button
+                aria-label={w.pinned ? "取消置顶" : "置顶"}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPinProject(w.id, !w.pinned);
+                }}
+              >
+                <Pin size={13} fill={w.pinned ? "currentColor" : "none"} />
+              </button>
+            </Tip>
+            <Tip label="重命名">
+              <button
+                aria-label="重命名"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRenaming(w);
+                }}
+              >
+                <Pencil size={13} />
+              </button>
+            </Tip>
+            <Tip label="删除">
+              <button
+                aria-label="删除"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeleting(w);
+                }}
+              >
+                <Trash2 size={13} />
+              </button>
+            </Tip>
+          </span>
+        </div>
+        <div className={`sb-collapse ${isProjectExpanded ? "open" : ""}`} aria-hidden={!isProjectExpanded}>
+          <div className="sb-collapse-inner sb-project-children">
+            {ctx.activeProjectId === w.id && projectSessions.length === 0 && (
+              <div className="sb-hint">一个会话 = 一张可分支的画布</div>
+            )}
+            {projectSessions.map((session) => {
+              const rows = outlineRows(outlines[session.id] ?? []);
+              const rootRow = rows[0];
+              const childRows = rows.slice(1);
+              const activeNodeId = ctx.activeNodeId;
+              if (!rootRow) return null;
+              const rootActive = ctx.activeSessionId === session.id && (activeNodeId === rootRow.node.id || !activeNodeId);
+              return (
+                <Fragment key={session.id}>
+                  <button
+                    className={`sb-branch sb-root-row ${rootActive ? "active" : ""}`}
+                    style={{ paddingLeft: 20 }}
+                    onClick={() => {
+                      onSelectSession(session.id);
+                      focusNode(session.id, rootRow.node.id);
+                    }}
+                    title={rootRow.node.title}
+                  >
+                    <span>{rootRow.node.title || DEFAULT_ROOT_TITLE}</span>
+                  </button>
+                  <div className={`sb-collapse ${childRows.length > 0 ? "open" : ""}`} aria-hidden={childRows.length === 0}>
+                    <div className="sb-collapse-inner sb-outline">
+                      {childRows.map(({ node, depth }) => (
+                        <button
+                          key={node.id}
+                          className={`sb-branch ${ctx.activeSessionId === session.id && activeNodeId === node.id ? "active" : ""}`}
+                          style={{ paddingLeft: 40 + Math.max(0, depth - 1) * 12 }}
+                          onClick={() => focusNode(session.id, node.id)}
+                          title={node.title}
+                        >
+                          <span>{depth === 0 ? (node.title || DEFAULT_ROOT_TITLE) : node.title || DEFAULT_BRANCH_TITLE}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </Fragment>
+              );
+            })}
+          </div>
+        </div>
+      </Fragment>
+    );
+  };
+
+  const pinnedProjects = ctx.projects.filter((project) => project.pinned);
+  const regularProjects = ctx.projects.filter((project) => !project.pinned);
+
   return (
     <div className="sidebar">
       <div className="sb-head">
@@ -213,7 +421,13 @@ export default function Sidebar({
       })}
 
       {activeSurface === "project" && (
-        <>
+        <div className="sb-tree-scroll" data-testid="project-tree-scroll">
+          {pinnedProjects.length > 0 && (
+            <>
+              <div className="sb-label">置顶</div>
+              {pinnedProjects.map(renderProject)}
+            </>
+          )}
           <div className="sb-label">
             项目
             <Tip label="新建项目">
@@ -223,140 +437,8 @@ export default function Sidebar({
             </Tip>
           </div>
           {ctx.projects.length === 0 && <div className="sb-hint">（还没有，点 + 新建）</div>}
-          {ctx.projects.map((w: ProjectMeta) => {
-            return (
-              <Fragment key={w.id}>
-                <div
-                  className={`sb-project ${ctx.activeProjectId === w.id ? "active" : ""}`}
-                  onClick={() => onSelectProject?.(w.id)}
-                  onDoubleClick={() => setRenaming(w)}
-                >
-                  <span className="sb-project-chev" />
-                  <span className={`sq ${w.pinned ? "pinned" : ""}`} />
-                  <span className="project-name">
-                    {w.name}
-                    {w.sourceRoots?.[0] && <small>{w.sourceRoots[0]}</small>}
-                  </span>
-                  <span className="project-actions">
-                    <Tip label={w.pinned ? "取消置顶" : "置顶"}>
-                      <button
-                        aria-label={w.pinned ? "取消置顶" : "置顶"}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onPinProject(w.id, !w.pinned);
-                        }}
-                      >
-                        <Pin size={13} fill={w.pinned ? "currentColor" : "none"} />
-                      </button>
-                    </Tip>
-                    <Tip label="重命名">
-                      <button
-                        aria-label="重命名"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setRenaming(w);
-                        }}
-                      >
-                        <Pencil size={13} />
-                      </button>
-                    </Tip>
-                    <Tip label="删除">
-                      <button
-                        aria-label="删除"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleting(w);
-                        }}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </Tip>
-                  </span>
-                </div>
-              </Fragment>
-            );
-          })}
-          {ctx.activeProjectId && (
-            <>
-              <div className="sb-label">
-                会话
-                <Tip label="新建会话 (⌘N)">
-                  <button className="sb-add" aria-label="新建会话" onClick={onCreateSession}>
-                    <IconPlus />
-                  </button>
-                </Tip>
-              </div>
-              {ctx.sessions.length === 0 && <div className="sb-hint">（当前项目还没有会话）</div>}
-              {ctx.sessions.map((session) => {
-                const isExp = expanded.has(session.id);
-                const rows = isExp ? outlineRows(outlines[session.id] ?? []) : [];
-                const activeNodeId = ctx.activeNodeId;
-                return (
-                  <Fragment key={session.id}>
-                    <div
-                      className={`sb-project ${ctx.activeSessionId === session.id ? "active" : ""}`}
-                      onClick={() => onSelectSession(session.id)}
-                      onDoubleClick={() => setRenamingSession(session)}
-                    >
-                      <button
-                        className="sb-project-chev"
-                        title={isExp ? "收起" : "展开分支"}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleExpand(session.id);
-                        }}
-                      >
-                        {isExp ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                      </button>
-                      <span className="sq" />
-                      <span className="project-name">{session.title}</span>
-                      <span className="project-actions">
-                        <Tip label="重命名">
-                          <button
-                            aria-label="重命名"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setRenamingSession(session);
-                            }}
-                          >
-                            <Pencil size={13} />
-                          </button>
-                        </Tip>
-                        <Tip label="删除">
-                          <button
-                            aria-label="删除"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeletingSession(session);
-                            }}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </Tip>
-                      </span>
-                    </div>
-                    {isExp && rows.length > 0 && (
-                      <div className="sb-outline">
-                        {rows.map(({ node, depth }) => (
-                          <button
-                            key={node.id}
-                            className={`sb-branch ${ctx.activeSessionId === session.id && (activeNodeId === node.id || (!activeNodeId && depth === 0)) ? "active" : ""}`}
-                            style={{ paddingLeft: 30 + depth * 14 }}
-                            onClick={() => onFocusNode(session.id, node.id)}
-                            title={node.title}
-                          >
-                            <span className="branch-dot" />
-                            <span>{depth === 0 ? "主线" : node.title || "分支"}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </>
-          )}
-        </>
+          {regularProjects.map(renderProject)}
+        </div>
       )}
 
       {activeSurface === "observatory" && (

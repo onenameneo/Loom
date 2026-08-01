@@ -363,7 +363,7 @@ body {
   height: 100%;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 6px 10px 10px;
   gap: 2px;
 }
@@ -465,10 +465,19 @@ body {
   color: var(--faint);
 }
 
+.sb-tree-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding-bottom: var(--s2);
+}
+
 .sb-project {
   display: flex;
   align-items: center;
   gap: 7px;
+  min-height: 38px;
+  box-sizing: border-box;
   padding: 6px 9px;
   border-radius: var(--r-sm);
   color: var(--muted);
@@ -487,12 +496,8 @@ body {
   border: none;
   border-radius: 3px;
   background: transparent;
-  color: var(--faint);
-  cursor: pointer;
-}
-.sb-project-chev:hover {
-  color: var(--text);
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--muted);
+  pointer-events: none;
 }
 .sb-project-chev svg {
   display: block;
@@ -504,16 +509,6 @@ body {
 .sb-project.active {
   background: color-mix(in srgb, var(--text) 9%, transparent);
   color: var(--text);
-}
-.sb-project .sq {
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
-  flex: none;
-  background: var(--border-strong);
-}
-.sb-project .sq.pinned {
-  background: var(--accent);
 }
 .sb-project .project-name {
   flex: 1;
@@ -534,24 +529,68 @@ body {
   font-weight: 450;
 }
 .sb-project .project-actions {
-  display: none;
+  display: flex;
+  visibility: hidden;
+  opacity: 0;
   gap: 2px;
+  margin-left: auto;
+  transition: opacity 120ms cubic-bezier(0.2, 0, 0, 1);
 }
 .sb-project:hover .project-actions {
-  display: flex;
+  visibility: visible;
+  opacity: 1;
 }
 .project-actions button {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
   border: none;
+  border-radius: 4px;
   background: transparent;
   color: var(--faint);
   cursor: pointer;
   font-size: 11px;
-  padding: 0 2px;
+  padding: 0;
 }
 .project-actions button:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--text);
 }
+.project-actions button svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+  stroke: currentColor;
+}
 
+.sb-project-children {
+  margin: 1px 0 7px 27px;
+  padding-left: 0;
+}
+.sb-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition:
+    grid-template-rows 220ms cubic-bezier(0.2, 0, 0, 1),
+    opacity 160ms cubic-bezier(0.2, 0, 0, 1),
+    transform 220ms cubic-bezier(0.2, 0, 0, 1);
+}
+.sb-collapse.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+}
+.sb-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+.sb-label-nested {
+  padding-top: 8px;
+  padding-left: 3px;
+}
 /* 明暗切换：并入顶部标题栏右侧的极简 ghost 按钮（底部用户区已移除）。 */
 .theme-toggle {
   margin-left: auto;
@@ -2070,10 +2109,7 @@ button.activity-session-card {
 .tip-arrow {
   fill: var(--text);
 }
-.project-actions button svg {
-  display: block;
-}
-/* 分支大纲 = 纯缩进嵌套（无竖线，靠缩进 + 圆点表达层级，贴 DESIGN.md 克制） */
+/* 分支大纲 = 纯缩进嵌套（无竖线，贴 DESIGN.md 克制） */
 .sb-outline {
   margin: 1px 0 6px;
   display: flex;
@@ -2082,8 +2118,10 @@ button.activity-session-card {
 .sb-branch {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
+  min-height: 30px;
+  box-sizing: border-box;
   border: none;
   background: transparent;
   color: var(--faint);
@@ -2092,6 +2130,13 @@ button.activity-session-card {
   border-radius: var(--r-sm);
   cursor: pointer;
   text-align: left;
+}
+.sb-root-row {
+  width: 100%;
+  color: var(--muted);
+  font-size: 12.5px;
+  min-height: 34px;
+  padding: 6px 8px 6px 0;
 }
 .sb-branch:hover {
   color: var(--text);
@@ -2102,18 +2147,13 @@ button.activity-session-card {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   font-weight: 500;
 }
-.sb-branch.active .branch-dot {
-  background: var(--accent);
-}
 .sb-branch span:last-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.branch-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 2px;
-  background: var(--border-strong);
-  flex: none;
+@media (prefers-reduced-motion: reduce) {
+  .sb-collapse {
+    transition: none;
+  }
 }
