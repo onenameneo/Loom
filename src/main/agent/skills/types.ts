@@ -12,6 +12,7 @@ export interface SkillSource {
   id: string;
   scope: SkillSourceScope;
   rootPath: string;
+  projectName?: string;
   trusted: boolean;
   registered: boolean;
   projectId?: string;
@@ -76,4 +77,3 @@ export interface EffectiveSkillState {
 export interface SkillSourceSettings {
   globalSources: string[];
 }
-

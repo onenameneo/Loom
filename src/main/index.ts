@@ -126,11 +126,11 @@ function registerIpc() {
     invalidateAgent();
     return { ok: true };
   });
-  ipcMain.handle("settings:skills", (_e, projectId?: string) => {
+  ipcMain.handle("settings:skills", () => {
     return buildSkillCatalog({
       settings: store.getSettings(),
       projects: store.listProjects(),
-      projectId,
+      allProjects: true,
       homeDir: app.getPath("home"),
     });
   });

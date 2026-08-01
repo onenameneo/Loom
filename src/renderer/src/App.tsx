@@ -24,6 +24,8 @@ export default function App() {
   const [sessionMode, setSessionMode] = useState<"chat" | "canvas">("chat");
   const sessionUiStateRef = useRef(new Map<string, { nodeId: string | null; mode: "chat" | "canvas" }>());
   const previousSessionIdRef = useRef<string | null>(null);
+  const sessionLoadRequestRef = useRef(0);
+  const pendingProjectIdRef = useRef<string | null>(null);
   const [treeVersion, setTreeVersion] = useState(0);
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -88,6 +90,7 @@ export default function App() {
   }, []);
 
   const reloadSessions = useCallback(async (projectId: string | null = activeProjectId) => {
+    const requestId = ++sessionLoadRequestRef.current;
     if (!projectId) {
       setSessions([]);
       setActiveSessionId(null);
@@ -103,6 +106,7 @@ export default function App() {
       return demo;
     }
     const list = await window.api.sessions.list(projectId);
+    if (requestId !== sessionLoadRequestRef.current) return list;
     setSessions(list);
     setActiveSessionId((cur) => (cur && list.some((s) => s.id === cur) ? cur : list[0]?.id ?? null));
     return list;
@@ -311,7 +315,9 @@ export default function App() {
                   const session = sessions.find((item) => item.id === sessionId);
                   const nextMode = "canvas" as const;
                   sessionUiStateRef.current.set(sessionId, { nodeId, mode: nextMode });
-                  if (session) setActiveProjectId(session.projectId);
+                  const nextProjectId = session?.projectId ?? pendingProjectIdRef.current;
+                  pendingProjectIdRef.current = null;
+                  if (nextProjectId) setActiveProjectId(nextProjectId);
                   setActiveSessionId(sessionId);
                   setSessionMode(nextMode);
                   setActiveSurface("project");
@@ -331,7 +337,10 @@ export default function App() {
                   await window.api.projects.pin(id, pinned);
                   reloadProjects();
                 }}
-                onSelectProject={(id) => setActiveProjectId(id)}
+                onSelectProject={(id) => {
+                  pendingProjectIdRef.current = id;
+                  setActiveProjectId(id);
+                }}
                 onCreateSession={createSession}
                 onRenameSession={async (id, title) => {
                   await window.api.sessions.rename(id, title);
@@ -341,6 +350,18 @@ export default function App() {
                   await window.api.sessions.delete(id);
                   setActiveSessionId((cur) => (cur === id ? null : cur));
                   reloadSessions(activeProjectId);
+                }}
+                onRenameNode={async (id, title) => {
+                  if (window.api) await window.api.canvas.update(id, { title });
+                  setTreeVersion((version) => version + 1);
+                }}
+                onDeleteNode={async (id) => {
+                  if (window.api) await window.api.canvas.delete(id);
+                  setActiveNodeId((current) => (current === id ? null : current));
+                  setTreeVersion((version) => version + 1);
+                }}
+                onSetSessionColor={async (_sessionId, nodeId, color) => {
+                  if (window.api) await window.api.canvas.update(nodeId, { color });
                 }}
                 theme={theme}
                 toggleTheme={toggleTheme}

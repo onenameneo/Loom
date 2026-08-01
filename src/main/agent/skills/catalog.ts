@@ -125,15 +125,20 @@ export function buildSkillCatalog(input: {
   settings: Pick<Settings, "skills">;
   projects?: Project[];
   projectId?: string;
+  allProjects?: boolean;
   homeDir?: string;
 }): SkillCatalog {
   const diagnostics: SkillDiagnostic[] = [];
   const globalSources = configuredGlobalSkillSources(input.settings, input.homeDir);
   const currentProject = input.projectId ? input.projects?.find((project) => project.id === input.projectId) : undefined;
-  const projectRoots = uniq(currentProject?.sourceRoots ?? []).map((root) => safeRealpath(join(root, ".loom", "skills")));
+  const projectEntries = input.allProjects ? (input.projects ?? []) : currentProject ? [currentProject] : [];
+  const projectRoots = projectEntries.flatMap((project) => uniq(project.sourceRoots).map((root) => ({
+    project,
+    rootPath: safeRealpath(join(root, ".loom", "skills")),
+  })));
   const sources: SkillSource[] = [
     ...globalSources.map((rootPath, index) => ({ id: `global:${rootPath}`, scope: "global" as const, rootPath, trusted: true, registered: index > 0 })),
-    ...projectRoots.map((rootPath) => ({ id: `project:${currentProject!.id}:${rootPath}`, scope: "project" as const, rootPath, trusted: true, registered: false, projectId: currentProject!.id })),
+    ...projectRoots.map(({ project, rootPath }) => ({ id: `project:${project.id}:${rootPath}`, scope: "project" as const, rootPath, projectName: project.name, trusted: true, registered: false, projectId: project.id })),
   ];
 
   const discovered: SkillCatalogItem[] = [];
@@ -187,4 +192,3 @@ export function skillSnapshot(skill: SkillCatalogItem) {
     hash: skill.hash,
   };
 }
-

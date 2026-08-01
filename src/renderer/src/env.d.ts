@@ -374,7 +374,7 @@ export interface SkillEffectiveDto {
 }
 
 export interface SkillCatalogDto {
-  sources: Array<{ id: string; scope: "global" | "project"; rootPath: string; trusted: boolean; registered: boolean; projectId?: string }>;
+  sources: Array<{ id: string; scope: "global" | "project"; rootPath: string; projectName?: string; trusted: boolean; registered: boolean; projectId?: string }>;
   skills: SkillCatalogItemDto[];
   activeSkills: SkillCatalogItemDto[];
   diagnostics: SkillDiagnosticDto[];

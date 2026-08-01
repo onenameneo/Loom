@@ -19,16 +19,21 @@ export function ConfirmDialog({
   confirmLabel?: string;
   onConfirm: () => void;
 }) {
+  const [displayDescription, setDisplayDescription] = useState(description);
+  useEffect(() => {
+    if (open) setDisplayDescription(description);
+  }, [open, description]);
+
   return (
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Portal>
-        <AlertDialog.Overlay className="dlg-overlay" />
-        <AlertDialog.Content className="dlg-content">
+        <AlertDialog.Overlay forceMount className="dlg-overlay" aria-hidden={!open} />
+        <AlertDialog.Content forceMount className="dlg-content" aria-hidden={!open}>
           <AlertDialog.Title className="dlg-title">{title}</AlertDialog.Title>
-          {description && <AlertDialog.Description className="dlg-desc">{description}</AlertDialog.Description>}
+          {displayDescription && <AlertDialog.Description className="dlg-desc">{displayDescription}</AlertDialog.Description>}
           <div className="dlg-actions">
             <AlertDialog.Cancel asChild>
-              <button className="btn">取消</button>
+              <button className="btn" onClick={() => onOpenChange(false)}>取消</button>
             </AlertDialog.Cancel>
             <AlertDialog.Action asChild>
               <button className="btn danger" onClick={onConfirm}>{confirmLabel}</button>
@@ -37,6 +42,30 @@ export function ConfirmDialog({
         </AlertDialog.Content>
       </AlertDialog.Portal>
     </AlertDialog.Root>
+  );
+}
+
+/** Shared animated modal shell for settings and other content-heavy dialogs. */
+export function Modal({
+  open,
+  onOpenChange,
+  ariaLabel,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  ariaLabel: string;
+  children: ReactNode;
+}) {
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay forceMount className="dlg-overlay" aria-hidden={!open} />
+        <Dialog.Content forceMount className="settings-dialog-content" aria-label={ariaLabel} aria-hidden={!open}>
+          {children}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -67,8 +96,8 @@ export function RenameDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="dlg-overlay" />
-        <Dialog.Content className="dlg-content">
+        <Dialog.Overlay forceMount className="dlg-overlay" aria-hidden={!open} />
+        <Dialog.Content forceMount className="dlg-content" aria-hidden={!open}>
           <Dialog.Title className="dlg-title">{title}</Dialog.Title>
           <input
             className="dlg-input"
@@ -147,8 +176,8 @@ export function CreateProjectDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="dlg-overlay" />
-        <Dialog.Content className="dlg-content project-create-dialog">
+        <Dialog.Overlay forceMount className="dlg-overlay" aria-hidden={!open} />
+        <Dialog.Content forceMount className="dlg-content project-create-dialog" aria-hidden={!open}>
           <div className="project-dialog-head">
             <Dialog.Title className="dlg-title">创建项目</Dialog.Title>
             <Dialog.Close asChild>

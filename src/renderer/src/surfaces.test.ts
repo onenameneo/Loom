@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -399,6 +399,8 @@ describe("SettingsPanel model registry", () => {
     expect(addProviderModel).toHaveBeenCalledWith(expect.objectContaining({ providerId: "openai", modelId: "gpt-5.2", baseUrl: "https://proxy.openai.test/v1", maxTokens: 16000 }));
 
     await user.click(screen.getByRole("button", { name: "删除" }));
+    const confirm = screen.getByRole("alertdialog");
+    await user.click(within(confirm).getByRole("button", { name: "删除" }));
     expect(deleteProviderModel).toHaveBeenCalledWith({ providerId: "openai", modelId: "gpt-5.2" });
   });
 

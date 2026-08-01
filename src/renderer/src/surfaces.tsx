@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BellRing,
-  BookOpen,
   CheckCircle2,
   Circle,
   Clock3,
   Copy,
+  Eye,
   FolderOpen,
   Power,
   PowerOff,
   Radio,
   RefreshCw,
   Settings,
+  Check,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
   Wrench,
 } from "lucide-react";
 import type {
@@ -29,6 +34,7 @@ import type {
 import { IconEye, IconPlus, IconSettings, IconProject } from "./icons";
 import SessionCanvas from "./canvas/SessionCanvas";
 import { useTitlebarActions, useTitlebarContext } from "./titlebar/Titlebar";
+import { ConfirmDialog, Modal } from "./ui/dialogs";
 
 export interface SurfaceCtx {
   projects: ProjectMeta[];
@@ -568,6 +574,9 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [saved, setSaved] = useState(false);
   const [skillCatalog, setSkillCatalog] = useState<SkillCatalogDto | null>(null);
   const [skillSourceDraft, setSkillSourceDraft] = useState("");
+  const [selectedSkillSource, setSelectedSkillSource] = useState<SkillCatalogDto["sources"][number] | null>(null);
+  const [skillModalOpen, setSkillModalOpen] = useState(false);
+  const [pendingDeleteModel, setPendingDeleteModel] = useState<{ providerId: string; modelId: string; name: string } | null>(null);
   const titlebarContext = useMemo(() => ({ title: "设置" }), []);
   const permissionDefaults = {
     sandboxMode: "workspace-write" as const,
@@ -782,14 +791,14 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
             <h3>Skills</h3>
             <p>管理全局与当前项目可用的 Agent Skills。</p>
           </div>
-          <button className="btn" type="button" onClick={reloadSkills}><RefreshCw size={14} /> 重新扫描</button>
+          <button className="icon-btn" type="button" onClick={reloadSkills} aria-label="重新扫描 Skills" title="重新扫描 Skills"><RefreshCw size={16} /></button>
         </div>
         <div className="settings-grid">
           <label className="field settings-grid__wide">
             <span>添加全局来源 <em className="src">不会复制或删除原目录</em></span>
             <div className="settings-inline">
               <input value={skillSourceDraft} onChange={(e) => setSkillSourceDraft(e.target.value)} placeholder="/path/to/skills" />
-              <button className="btn" type="button" onClick={addSkillSource}>添加</button>
+              <button className="icon-btn" type="button" onClick={addSkillSource} aria-label="添加 Skill 来源" title="添加 Skill 来源"><Plus size={16} /></button>
             </div>
           </label>
         </div>
@@ -799,38 +808,20 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
               <div className="connection-main">
                 <div className="connection-title-row">
                   <div>
-                    <div className="connection-name">{source.scope === "project" ? "当前项目" : source.registered ? "全局来源" : "默认全局来源"}</div>
+                    <div className="source-name-line">
+                      <div className="connection-name">{source.scope === "project" ? (source.projectName ?? "项目来源") : source.registered ? "全局来源" : "默认全局来源"}</div>
+                      <span className={`source-tag ${source.scope}`}>{source.scope}</span>
+                    </div>
                     <div className="connection-meta">{source.rootPath} · {source.trusted ? "trusted" : "untrusted"}</div>
                   </div>
-                  <span className={`status-pill ${source.trusted ? "available" : "unavailable"}`}>{source.scope}</span>
                 </div>
               </div>
-              <button className="icon-btn" type="button" title="打开目录" onClick={() => window.api.settings.openSkillSource(source.rootPath)}><FolderOpen size={15} /></button>
-              {source.registered && <button className="btn" type="button" onClick={() => removeSkillSource(source.rootPath)}>移除</button>}
+              <button className="icon-btn" type="button" aria-label="查看 Skills" title="查看 Skills" onClick={() => { setSelectedSkillSource(source); setSkillModalOpen(true); }}><Eye size={15} /></button>
+              <button className="icon-btn" type="button" aria-label="打开目录" title="打开目录" onClick={() => window.api.settings.openSkillSource(source.rootPath)}><FolderOpen size={15} /></button>
+              {source.registered && <button className="icon-btn danger" type="button" onClick={() => removeSkillSource(source.rootPath)} aria-label={`移除 ${source.rootPath}`} title="移除来源"><Trash2 size={15} /></button>}
             </div>
           ))}
           {(skillCatalog?.sources.length ?? 0) === 0 && <div className="empty-state compact"><div className="empty-state__title">暂无 Skill 来源</div></div>}
-        </div>
-        <div className="connection-list">
-          {(skillCatalog?.skills ?? []).map((skill) => (
-            <div key={`${skill.sourceId}:${skill.id}:${skill.rootPath}`} className={`connection-row ${skill.active ? "" : "muted"}`}>
-              <BookOpen size={16} />
-              <div className="connection-main">
-                <div className="connection-title-row">
-                  <div>
-                    <div className="connection-name">{skill.name}</div>
-                    <div className="connection-meta">{skill.id} · {skill.scope} · {skill.hash}</div>
-                  </div>
-                  <span className={`status-pill ${skill.active ? "available" : "unavailable"}`}>{skill.active ? "active" : "overridden"}</span>
-                </div>
-                <div className="ok-note">{skill.description}</div>
-                {skill.diagnostics.map((d) => (
-                  <div key={`${d.code}:${d.path ?? ""}`} className={d.level === "error" ? "warn-note" : "ok-note"}>{d.code}: {d.message}</div>
-                ))}
-              </div>
-            </div>
-          ))}
-          {(skillCatalog?.skills.length ?? 0) === 0 && <div className="empty-state compact"><div className="empty-state__title">没有发现可用 Skills</div><div className="empty-state__body">默认扫描 ~/.loom/skills，当前项目扫描已信任 source root 下的 .loom/skills。</div></div>}
         </div>
       </section>
 
@@ -840,7 +831,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
             <h3>模型配置</h3>
             <p>管理已连接 Provider 的模型，并设置全局默认模型。</p>
           </div>
-          <button className="btn primary" type="button" onClick={openAddForm}>添加模型</button>
+          <button className="icon-btn primary" type="button" onClick={openAddForm} aria-label="添加模型" title="添加模型"><Plus size={17} /></button>
         </div>
 
         <div className="model-config__block">
@@ -864,8 +855,8 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                       {configuredModels.map((model) => (
                         <span key={model.id} className={`model-chip ${model.available ? "" : "empty"}`}>
                           <span>{model.name}</span>
-                          <button type="button" onClick={() => editProviderModel(provider, model)}>编辑</button>
-                          <button type="button" onClick={() => deleteProviderModel(provider.id, model.id)}>删除</button>
+                          <button className="icon-btn" type="button" onClick={() => editProviderModel(provider, model)} aria-label="编辑" title={`编辑 ${model.name}`}><Pencil size={13} /></button>
+                          <button className="icon-btn danger" type="button" onClick={() => setPendingDeleteModel({ providerId: provider.id, modelId: model.id, name: model.name })} aria-label="删除" title={`删除 ${model.name}`}><Trash2 size={13} /></button>
                         </span>
                       ))}
                     </div>
@@ -908,12 +899,11 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
         {hasPlaintextSecret && <div className="warn-note">models.json 包含明文凭证；不要提交或同步到不可信位置。</div>}
       </section>
 
-      {addOpen && (
-        <div className="settings-modal" role="dialog" aria-modal="true" aria-label="添加模型配置">
+      <Modal open={addOpen} onOpenChange={setAddOpen} ariaLabel="添加模型配置">
           <div className="settings-modal__panel">
             <div className="settings-modal__head">
               <h3>{editingModel ? "编辑模型" : "添加模型"}</h3>
-              <button className="btn" type="button" onClick={() => setAddOpen(false)}>取消</button>
+              <button className="icon-btn" type="button" onClick={() => setAddOpen(false)} aria-label="关闭" title="关闭"><X size={16} /></button>
             </div>
             {providerOptions.length === 0 && (
               <div className="empty-state compact">
@@ -1046,11 +1036,10 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
               </div>
             )}
             <div className="settings-foot">
-              <button className="btn primary" type="button" onClick={addProviderModel} disabled={!canSaveModel}>保存模型</button>
+              <button className="icon-btn primary" type="button" onClick={addProviderModel} disabled={!canSaveModel} aria-label="保存模型" title="保存模型"><Check size={16} /></button>
             </div>
           </div>
-        </div>
-      )}
+        </Modal>
 
       <section>
         <h3>Agent 权限</h3>
@@ -1111,11 +1100,49 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
         </label>
       </section>
 
-      <div className="settings-foot">
+      <div className="settings-foot settings-actions">
         <button className="btn primary" onClick={save}>保存</button>
         {saved && <span className="saved">已保存</span>}
       </div>
       </div>
+      <Modal open={skillModalOpen} onOpenChange={setSkillModalOpen} ariaLabel={`${selectedSkillSource?.scope ?? ""} 来源 Skills`}>
+          <div className="settings-modal__panel" onClick={(event) => event.stopPropagation()}>
+            <div className="settings-modal__head">
+              <div>
+                <h3>{selectedSkillSource?.scope === "project" ? (selectedSkillSource.projectName ?? "项目来源") : "全局来源"} · Skills</h3>
+                <div className="connection-meta">{selectedSkillSource?.rootPath ?? ""} · {selectedSkillSource?.trusted ? "trusted" : "untrusted"}</div>
+              </div>
+              <button className="icon-btn" type="button" onClick={() => setSkillModalOpen(false)} aria-label="关闭 Skills 列表" title="关闭"><X size={16} /></button>
+            </div>
+            <div className="skills-list skill-detail__list">
+              {(skillCatalog?.skills ?? []).filter((skill) => selectedSkillSource && (skill.sourceId === selectedSkillSource.id || skill.rootPath === selectedSkillSource.rootPath)).map((skill) => (
+                <div key={`${skill.sourceId}:${skill.id}:${skill.rootPath}`} className={`skill-detail__row ${skill.active ? "" : "muted"}`}>
+                  <div className="connection-title-row">
+                    <div>
+                      <div className="connection-name">{skill.name}</div>
+                      <div className="connection-meta">{skill.id} · {skill.hash}</div>
+                    </div>
+                    <span className={`status-pill ${skill.active ? "available" : "unavailable"}`}>{skill.active ? "active" : "overridden"}</span>
+                  </div>
+                  <div className="ok-note skill-summary">{skill.description || "暂无描述"}</div>
+                  {skill.diagnostics.map((d) => <div key={`${d.code}:${d.path ?? ""}`} className={d.level === "error" ? "warn-note" : "ok-note"}>{d.code}: {d.message}</div>)}
+                </div>
+              ))}
+              {(skillCatalog?.skills ?? []).filter((skill) => selectedSkillSource && (skill.sourceId === selectedSkillSource.id || skill.rootPath === selectedSkillSource.rootPath)).length === 0 && <div className="empty-state compact"><div className="empty-state__title">没有发现可用 Skills</div></div>}
+            </div>
+          </div>
+        </Modal>
+      <ConfirmDialog
+        open={Boolean(pendingDeleteModel)}
+        onOpenChange={(open) => { if (!open) setPendingDeleteModel(null); }}
+        title="删除模型？"
+        description={pendingDeleteModel ? `确定要删除“${pendingDeleteModel.name}”吗？此操作会从当前 Provider 配置中移除模型。` : undefined}
+        onConfirm={() => {
+          if (!pendingDeleteModel) return;
+          void deleteProviderModel(pendingDeleteModel.providerId, pendingDeleteModel.modelId);
+          setPendingDeleteModel(null);
+        }}
+      />
     </div>
   );
 }

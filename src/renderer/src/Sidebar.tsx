@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
-import { Bot, ChevronDown, ChevronRight, Pencil, Pin, Terminal, Trash2 } from "lucide-react";
+import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
+import { Bot, Check, ChevronDown, ChevronRight, Folder, FolderOpen, PanelTopClose, Pencil, Pin, Terminal, Trash2 } from "lucide-react";
 import type { ActivityTool, AgentProc, CanvasNodeDto, ProjectMeta, SessionMeta, SettingsPayload } from "./env";
 import { IconMoon, IconPlus, IconSun } from "./icons";
 import { DEFAULT_ROOT_TITLE, DEFAULT_BRANCH_TITLE } from "../../common/titleDefaults";
@@ -21,6 +21,7 @@ import { ConfirmDialog, CreateProjectDialog, RenameDialog, Tip } from "./ui/dial
 
 const SIDEBAR_PROJECT_EXPANSION_KEY = "loom:sidebar:expanded-projects";
 const SIDEBAR_SESSION_EXPANSION_KEY = "loom:sidebar:expanded-sessions";
+const NODE_COLORS = ["gray", "red", "orange", "yellow", "green", "blue", "purple"] as const;
 
 function readStoredSet(key: string): Set<string> {
   try {
@@ -51,6 +52,42 @@ function outlineRows(nodes: CanvasNodeDto[]): Array<{ node: CanvasNodeDto; depth
   return outline;
 }
 
+function SidebarNodeRow({
+  active,
+  title,
+  colorControl,
+  onClick,
+  paddingLeft,
+  actions,
+  root = false,
+}: {
+  active: boolean;
+  title: string;
+  colorControl: ReactNode;
+  onClick: () => void;
+  paddingLeft?: number;
+  actions?: ReactNode;
+  root?: boolean;
+}) {
+  return (
+    <div
+      className={`sb-session-row ${root ? "is-root" : "is-child"} ${active ? "active" : ""}`}
+      style={!root && paddingLeft ? { paddingLeft } : undefined}
+    >
+      {colorControl}
+      <button
+        className={`sb-branch sb-root-row ${active ? "active" : ""}`}
+        style={root ? { paddingLeft: 20 } : undefined}
+        onClick={onClick}
+        aria-label={title}
+      >
+        <span>{title}</span>
+      </button>
+      {actions}
+    </div>
+  );
+}
+
 export default function Sidebar({
   activeSurface,
   setSurface,
@@ -65,6 +102,9 @@ export default function Sidebar({
   onCreateSession,
   onRenameSession,
   onDeleteSession,
+  onRenameNode,
+  onDeleteNode,
+  onSetSessionColor,
   theme,
   toggleTheme,
 }: {
@@ -81,6 +121,9 @@ export default function Sidebar({
   onCreateSession?: (projectId?: string) => void;
   onRenameSession?: (id: string, title: string) => void;
   onDeleteSession?: (id: string) => void;
+  onRenameNode?: (id: string, title: string) => void;
+  onDeleteNode?: (id: string) => void;
+  onSetSessionColor?: (sessionId: string, nodeId: string, color: string) => void | Promise<void>;
   theme: "light" | "dark";
   toggleTheme: () => void;
   settings?: SettingsPayload | null;
@@ -90,12 +133,15 @@ export default function Sidebar({
   const [creatingProject, setCreatingProject] = useState(false);
   const [renamingSession, setRenamingSession] = useState<SessionMeta | null>(null);
   const [deletingSession, setDeletingSession] = useState<SessionMeta | null>(null);
+  const [renamingNode, setRenamingNode] = useState<CanvasNodeDto | null>(null);
+  const [deletingNode, setDeletingNode] = useState<CanvasNodeDto | null>(null);
   const [projectExpanded, setProjectExpanded] = useState<Set<string>>(() => readStoredSet(SIDEBAR_PROJECT_EXPANSION_KEY));
   const [sessionExpanded, setSessionExpanded] = useState<Set<string>>(() => readStoredSet(SIDEBAR_SESSION_EXPANSION_KEY));
   const [projectSessionsByProject, setProjectSessionsByProject] = useState<Record<string, SessionMeta[]>>({});
   // 每个会话独立展开：sessionExpanded 记哪些会话展开，outlines 存各自的节点列表。
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["agent:claude", "agent:codex"]));
   const [outlines, setOutlines] = useState<Record<string, CanvasNodeDto[]>>({});
+  const [sessionColorOpen, setSessionColorOpen] = useState<string | null>(null);
 
   // 活跃 Project / Session 自动展开（切到它时把层级打开）
   useEffect(() => {
@@ -120,6 +166,8 @@ export default function Sidebar({
 
   useEffect(() => {
     if (!ctx.activeProjectId) return;
+    // 切换项目时 ctx.sessions 可能暂时还保留上一个项目的数据；不要用这份旧列表覆盖目标项目缓存。
+    if (ctx.sessions.some((session) => session.projectId !== ctx.activeProjectId)) return;
     setProjectSessionsByProject((prev) => ({ ...prev, [ctx.activeProjectId!]: ctx.sessions }));
   }, [ctx.activeProjectId, ctx.sessions]);
 
@@ -193,6 +241,40 @@ export default function Sidebar({
     ctx.setActiveNodeId(nodeId);
     onFocusNode(sessionId, nodeId);
   }, [ctx.activeProjectId, ctx.sessions, ctx.setActiveNodeId, onFocusNode, onSelectProject, projectSessionsByProject]);
+
+  const renderNodeColor = (sessionId: string, node: CanvasNodeDto) => {
+    const colorKey = `${sessionId}:${node.id}`;
+    const updateColor = (color: string) => {
+      void onSetSessionColor?.(sessionId, node.id, color);
+      setOutlines((current) => ({
+        ...current,
+        [sessionId]: (current[sessionId] ?? []).map((item) => item.id === node.id ? { ...item, color: color || undefined } : item),
+      }));
+      setSessionColorOpen(null);
+    };
+    return (
+      <div className="session-color">
+        <button
+          className={`color-dot ${node.color ? "is-set" : ""}`}
+          style={node.color ? { background: `var(--label-${node.color})` } : undefined}
+          title="会话颜色"
+          aria-label={`${node.title || DEFAULT_ROOT_TITLE} 会话颜色`}
+          onClick={(event) => {
+            event.stopPropagation();
+            setSessionColorOpen((current) => current === colorKey ? null : colorKey);
+          }}
+        />
+        <div className={`color-pop session-color-pop ${sessionColorOpen === colorKey ? "is-open" : ""}`}>
+          <button className="color-swatch is-none" title="无色" onClick={() => updateColor("")}>{!node.color && <Check size={11} />}</button>
+          {NODE_COLORS.map((color) => (
+            <button key={color} className="color-swatch" style={{ background: `var(--label-${color})` }} title={color} onClick={() => updateColor(color)}>
+              {node.color === color && <Check size={11} />}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   const createSessionForProject = useCallback((projectId: string) => {
     onCreateSession?.(projectId);
@@ -275,7 +357,11 @@ export default function Sidebar({
 
   const renderProject = (w: ProjectMeta) => {
     const isProjectExpanded = projectExpanded.has(w.id);
-    const projectSessions = w.id === ctx.activeProjectId ? ctx.sessions : projectSessionsByProject[w.id] ?? [];
+    const cachedSessions = projectSessionsByProject[w.id] ?? [];
+    const activeSessionsBelongToProject = ctx.sessions.length > 0 && ctx.sessions.every((session) => session.projectId === w.id);
+    const projectSessions = w.id === ctx.activeProjectId
+      ? (activeSessionsBelongToProject ? ctx.sessions : cachedSessions)
+      : cachedSessions;
     const isProjectSelected = ctx.activeProjectId === w.id && !ctx.activeSessionId && !ctx.activeNodeId;
     return (
       <Fragment key={w.id}>
@@ -286,7 +372,7 @@ export default function Sidebar({
           }}
         >
           <span className="sb-project-chev" aria-hidden="true">
-            {isProjectExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            {isProjectExpanded ? <FolderOpen size={15} /> : <Folder size={15} />}
           </span>
           <span className="project-name">
             {w.name}
@@ -353,29 +439,39 @@ export default function Sidebar({
               const rootActive = ctx.activeSessionId === session.id && (activeNodeId === rootRow.node.id || !activeNodeId);
               return (
                 <Fragment key={session.id}>
-                  <button
-                    className={`sb-branch sb-root-row ${rootActive ? "active" : ""}`}
-                    style={{ paddingLeft: 20 }}
+                  <SidebarNodeRow
+                    root
+                    active={rootActive}
+                    title={rootRow.node.title || DEFAULT_ROOT_TITLE}
+                    colorControl={renderNodeColor(session.id, rootRow.node)}
                     onClick={() => {
                       onSelectSession(session.id);
                       focusNode(session.id, rootRow.node.id);
                     }}
-                    title={rootRow.node.title}
-                  >
-                    <span>{rootRow.node.title || DEFAULT_ROOT_TITLE}</span>
-                  </button>
+                    actions={(
+                      <span className="session-actions">
+                        <Tip label="重命名"><button aria-label="重命名会话" onClick={() => setRenamingSession(session)}><Pencil size={13} /></button></Tip>
+                        <Tip label="删除"><button aria-label="删除会话" onClick={() => setDeletingSession(session)}><Trash2 size={13} /></button></Tip>
+                      </span>
+                    )}
+                  />
                   <div className={`sb-collapse ${childRows.length > 0 ? "open" : ""}`} aria-hidden={childRows.length === 0}>
                     <div className="sb-collapse-inner sb-outline">
                       {childRows.map(({ node, depth }) => (
-                        <button
+                        <SidebarNodeRow
                           key={node.id}
-                          className={`sb-branch ${ctx.activeSessionId === session.id && activeNodeId === node.id ? "active" : ""}`}
-                          style={{ paddingLeft: 40 + Math.max(0, depth - 1) * 12 }}
+                          active={ctx.activeSessionId === session.id && activeNodeId === node.id}
+                          title={depth === 0 ? (node.title || DEFAULT_ROOT_TITLE) : node.title || DEFAULT_BRANCH_TITLE}
+                          colorControl={renderNodeColor(session.id, node)}
+                          paddingLeft={40 + Math.max(0, depth - 1) * 12}
                           onClick={() => focusNode(session.id, node.id)}
-                          title={node.title}
-                        >
-                          <span>{depth === 0 ? (node.title || DEFAULT_ROOT_TITLE) : node.title || DEFAULT_BRANCH_TITLE}</span>
-                        </button>
+                          actions={(
+                            <span className="session-actions">
+                              <Tip label="重命名分支"><button aria-label="重命名分支" onClick={() => setRenamingNode(node)}><Pencil size={13} /></button></Tip>
+                              <Tip label="删除分支"><button aria-label="删除分支" onClick={() => setDeletingNode(node)}><Trash2 size={13} /></button></Tip>
+                            </span>
+                          )}
+                        />
                       ))}
                     </div>
                   </div>
@@ -390,6 +486,23 @@ export default function Sidebar({
 
   const pinnedProjects = ctx.projects.filter((project) => project.pinned);
   const regularProjects = ctx.projects.filter((project) => !project.pinned);
+  const collapseProjectsButton = (projects: ProjectMeta[], label: string) => {
+    const projectIds = new Set(projects.map((project) => project.id));
+    return (
+      <Tip label={`折叠${label}中的项目`}>
+      <button
+        className="sb-section-toggle"
+        aria-label={`折叠${label}中的项目`}
+        onClick={() => {
+          setProjectExpanded((current) => new Set([...current].filter((id) => !projectIds.has(id))));
+          setSessionColorOpen(null);
+        }}
+      >
+        <PanelTopClose />
+      </button>
+    </Tip>
+    );
+  };
 
   return (
     <div className="sidebar">
@@ -424,17 +537,25 @@ export default function Sidebar({
         <div className="sb-tree-scroll" data-testid="project-tree-scroll">
           {pinnedProjects.length > 0 && (
             <>
-              <div className="sb-label">置顶</div>
+              <div className="sb-label">
+                置顶
+                <span className="sb-section-actions">
+                  {collapseProjectsButton(pinnedProjects, "置顶")}
+                </span>
+              </div>
               {pinnedProjects.map(renderProject)}
             </>
           )}
           <div className="sb-label">
             项目
-            <Tip label="新建项目">
-              <button className="sb-add" aria-label="新建项目" onClick={() => setCreatingProject(true)}>
-                <IconPlus />
-              </button>
-            </Tip>
+            <span className="sb-section-actions">
+              {collapseProjectsButton(regularProjects, "普通项目")}
+              <Tip label="新建项目">
+                <button className="sb-add" aria-label="新建项目" onClick={() => setCreatingProject(true)}>
+                  <IconPlus />
+                </button>
+              </Tip>
+            </span>
           </div>
           {ctx.projects.length === 0 && <div className="sb-hint">（还没有，点 + 新建）</div>}
           {regularProjects.map(renderProject)}
@@ -463,6 +584,13 @@ export default function Sidebar({
         title="重命名会话"
         initial={renamingSession?.title ?? ""}
         onSubmit={(name) => renamingSession && onRenameSession?.(renamingSession.id, name)}
+      />
+      <RenameDialog
+        open={!!renamingNode}
+        onOpenChange={(o) => !o && setRenamingNode(null)}
+        title="重命名分支"
+        initial={renamingNode?.title ?? ""}
+        onSubmit={(name) => renamingNode && onRenameNode?.(renamingNode.id, name)}
       />
       <CreateProjectDialog
         open={creatingProject}
@@ -493,6 +621,16 @@ export default function Sidebar({
         onConfirm={() => {
           if (deletingSession) onDeleteSession?.(deletingSession.id);
           setDeletingSession(null);
+        }}
+      />
+      <ConfirmDialog
+        open={!!deletingNode}
+        onOpenChange={(o) => !o && setDeletingNode(null)}
+        title={`删除分支「${deletingNode?.title ?? ""}」？`}
+        description="此操作会删除该分支及其后代。"
+        onConfirm={() => {
+          if (deletingNode) onDeleteNode?.(deletingNode.id);
+          setDeletingNode(null);
         }}
       />
     </div>
