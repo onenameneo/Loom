@@ -99,6 +99,9 @@ export interface TurnCanvasEventPayload {
     requestId: string;
     toolName: string;
     toolCallId: string;
+    reason?: string;
+    sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
+    approvalPolicy?: "untrusted" | "on-request" | "never";
   };
 }
 
@@ -109,6 +112,11 @@ export interface ApprovalRequestPayload {
   toolCallId: string;
   toolName: string;
   target: string;
+  normalizedTarget?: string;
+  reason?: string;
+  sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
+  approvalPolicy?: "untrusted" | "on-request" | "never";
+  reviewer?: "user" | "auto-review";
   preview: {
     title: string;
     description?: string;
@@ -315,6 +323,14 @@ export interface SettingsPayload {
   appearance: { theme: "light" | "dark" | "system"; density: "comfortable" | "compact" };
   monitor: { notify: boolean };
   skills?: { globalSources: string[] };
+  permissions?: {
+    sandboxMode: "read-only" | "workspace-write" | "danger-full-access";
+    approvalPolicy: "untrusted" | "on-request" | "never";
+    approvalsReviewer: "user" | "auto-review";
+    networkAccess: boolean;
+    writableRoots: string[];
+    commandOutputLimit: number;
+  };
   modelRegistry?: ModelRegistryPayload;
   globalDefaultModel?: { providerId: string; modelId: string };
   sources: { baseUrl: string; model: string; key: string };
@@ -463,7 +479,9 @@ declare global {
       };
       settings: {
         get: () => Promise<SettingsPayload>;
-        set: (patch: any) => Promise<{ ok: boolean; appearance: any }>;
+        set: (patch: any) => Promise<{ ok: boolean; appearance: any; permissions: SettingsPayload["permissions"] }>;
+        getPermissions: () => Promise<NonNullable<SettingsPayload["permissions"]>>;
+        setPermissions: (patch: Partial<NonNullable<SettingsPayload["permissions"]>>) => Promise<{ ok: boolean; permissions: NonNullable<SettingsPayload["permissions"]> }>;
         setGlobalModel: (model: { providerId: string; modelId: string }) => Promise<{ ok: boolean }>;
         addProviderModel: (input: AddProviderModelPayload) => Promise<{ ok: boolean }>;
         deleteProviderModel: (model: { providerId: string; modelId: string }) => Promise<{ ok: boolean }>;

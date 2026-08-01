@@ -561,10 +561,22 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [images, setImages] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
   const [monitorNotify, setMonitorNotify] = useState(true);
+  const [sandboxMode, setSandboxMode] = useState<"read-only" | "workspace-write" | "danger-full-access">("workspace-write");
+  const [approvalPolicy, setApprovalPolicy] = useState<"untrusted" | "on-request" | "never">("on-request");
+  const [approvalsReviewer, setApprovalsReviewer] = useState<"user" | "auto-review">("user");
+  const [networkAccess, setNetworkAccess] = useState(false);
   const [saved, setSaved] = useState(false);
   const [skillCatalog, setSkillCatalog] = useState<SkillCatalogDto | null>(null);
   const [skillSourceDraft, setSkillSourceDraft] = useState("");
   const titlebarContext = useMemo(() => ({ title: "设置" }), []);
+  const permissionDefaults = {
+    sandboxMode: "workspace-write" as const,
+    approvalPolicy: "on-request" as const,
+    approvalsReviewer: "user" as const,
+    networkAccess: false,
+    writableRoots: [] as string[],
+    commandOutputLimit: 64_000,
+  };
   useTitlebarContext(titlebarContext);
 
   useEffect(() => {
@@ -574,6 +586,11 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
     );
     setTheme(s.appearance.theme);
     setMonitorNotify(s.monitor.notify);
+    const permissions = { ...permissionDefaults, ...(s.permissions ?? {}) };
+    setSandboxMode(permissions.sandboxMode);
+    setApprovalPolicy(permissions.approvalPolicy);
+    setApprovalsReviewer(permissions.approvalsReviewer);
+    setNetworkAccess(permissions.networkAccess);
   }, [s]);
 
   const reloadSkills = useCallback(async () => {
@@ -594,6 +611,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
       appearance: { theme },
       monitor: { notify: monitorNotify },
     });
+    await window.api.settings.setPermissions({ sandboxMode, approvalPolicy, approvalsReviewer, networkAccess });
     await window.api.monitor.setNotify(monitorNotify);
     setSaved(true);
     ctx.reloadSettings();
@@ -1033,6 +1051,41 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
           </div>
         </div>
       )}
+
+      <section>
+        <h3>Agent 权限</h3>
+        <p className="settings-help">权限范围和审批策略分别控制 agent 能做什么、什么时候需要停下来询问。</p>
+        <div className="settings-grid">
+          <label className="field">
+            <span>Sandbox 范围</span>
+            <select value={sandboxMode} onChange={(e) => setSandboxMode(e.target.value as typeof sandboxMode)}>
+              <option value="read-only">只读观察</option>
+              <option value="workspace-write">修改当前项目</option>
+              <option value="danger-full-access">完全访问</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Approval policy</span>
+            <select value={approvalPolicy} onChange={(e) => setApprovalPolicy(e.target.value as typeof approvalPolicy)}>
+              <option value="on-request">越界时询问</option>
+              <option value="untrusted">不可信命令询问</option>
+              <option value="never">从不询问</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>审批人</span>
+            <select value={approvalsReviewer} onChange={(e) => setApprovalsReviewer(e.target.value as typeof approvalsReviewer)}>
+              <option value="user">我</option>
+              <option value="auto-review">自动审查</option>
+            </select>
+          </label>
+        </div>
+        <label className="check-field">
+          <input type="checkbox" checked={networkAccess} onChange={(e) => setNetworkAccess(e.target.checked)} />
+          <span>允许命令联网（默认关闭）</span>
+        </label>
+        <div className="ok-note">推荐：修改当前项目 · 越界时询问 · 我 · 网络关闭。</div>
+      </section>
 
       <section>
         <h3>外观</h3>

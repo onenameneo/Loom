@@ -69,6 +69,7 @@ function registerIpc() {
       appearance: s.appearance,
       monitor: s.monitor,
       skills: s.skills,
+      permissions: s.permissions,
       modelRegistry: registry.toRendererDTO(),
       globalDefaultModel: scoped.globalSettings.defaults?.model,
       // 左上角模型名必须与实际运行模型一致：buildModel 走 resolveSelectedModel
@@ -90,7 +91,13 @@ function registerIpc() {
     store.patchSettings(patch ?? {});
     applyThemeSource();
     invalidateAgent();
-    return { ok: true, appearance: store.getSettings().appearance };
+    return { ok: true, appearance: store.getSettings().appearance, permissions: store.getSettings().permissions };
+  });
+  ipcMain.handle("settings:getPermissions", () => store.getSettings().permissions);
+  ipcMain.handle("settings:setPermissions", (_e, patch) => {
+    const next = store.patchSettings({ permissions: patch ?? {} });
+    invalidateAgent();
+    return { ok: true, permissions: next.permissions };
   });
   ipcMain.handle("settings:setKey", (_e, plain: string) => {
     const r = saveApiKey(store, plain ?? "");

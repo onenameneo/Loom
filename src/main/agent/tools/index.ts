@@ -4,6 +4,7 @@ import { createCalcTool } from "./calc";
 import { createNowTool } from "./now";
 import { createProjectFileTools, createProjectMutationTools } from "./projectFiles";
 import { createWebFetchTool } from "./webfetch";
+export { createCommandTool } from "./command";
 
 export function createDefaultReadonlyTools(clock: ClockPort): ReadonlyAgentTool[] {
   return [createNowTool(clock), createCalcTool(), createWebFetchTool()];

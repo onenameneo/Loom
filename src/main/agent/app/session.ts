@@ -9,8 +9,9 @@ import { estTokens, estimateMessageTokensUnbounded, type Budget } from "../core/
 import { isLoomContextCheckpoint, isLoomFrozenBranchSummary, type LoomBudgetDiagnostics, type LoomCompactionReason, type LoomUsageDiagnostic } from "../core/messages";
 import { planFrozenBranchContext } from "../core/compaction";
 import type { AgentTool } from "../core/tool";
+import type { CommandPort } from "../ports";
 import { createHookRegistry, createToolLifecycleHook } from "../hooks";
-import { createDefaultReadonlyTools, createProjectFileTools, createProjectMutationTools } from "../tools";
+import { createCommandTool, createDefaultReadonlyTools, createProjectFileTools, createProjectMutationTools } from "../tools";
 import { createApprovalBroker } from "./approvalBroker";
 import { createApprovalPolicyStore } from "./approvalPolicy";
 import { createToolRegistry } from "./toolRuntime";
@@ -82,6 +83,7 @@ export interface CanvasRuntimeDeps {
   clock: ClockPort;
   /** 现取 API key（未配置返回空），用于发送前拦截。 */
   getApiKey: () => string | undefined;
+  command?: CommandPort;
   compaction?: {
     summarize: CompactionServiceDeps["summarize"];
     thresholdTokens?: number;
@@ -326,7 +328,16 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
           createSkillReadTool(() => catalogFor(nodeId).activeSkills),
         ]
       : [];
-    return [...tools.list(), ...skillTools, ...createProjectFileTools(sourceRoots), ...createProjectMutationTools(sourceRoots)];
+    const commandTools = deps.command
+      ? [createCommandTool({
+          command: deps.command,
+          cwd: sourceRoots[0] ?? process.cwd(),
+          workspaceRoots: sourceRoots,
+          writableRoots: store.getSettings().permissions.writableRoots,
+          getPermissionContext: () => ({ ...store.getSettings().permissions }),
+        })]
+      : [];
+    return [...tools.list(), ...skillTools, ...createProjectFileTools(sourceRoots), ...createProjectMutationTools(sourceRoots), ...commandTools];
   }
 
   const tools = createToolRegistry(createDefaultReadonlyTools(clock));
@@ -349,6 +360,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       getTool: (nodeId, name) => toolsFor(nodeId).find((tool) => tool.name === name),
       setAwaitingApproval: (nodeId, turnId, approval) => queries.setAwaitingApproval(nodeId, turnId, approval),
       setRunning: (nodeId, turnId) => queries.setRunning(nodeId, turnId),
+      getPermissionContext: () => store.getSettings().permissions,
+      emitPermission: (nodeId, payload) => events.emit(nodeId, "permission", payload),
     }),
   );
   const engine = deps.createEngine({

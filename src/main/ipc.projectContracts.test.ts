@@ -80,4 +80,18 @@ describe("main/preload project IPC contracts", () => {
     expect(rendererSource).toContain("window.api?.lifecycle.ready()");
     for (const source of mainFiles) expect(source).not.toMatch(/webContents\.send\(/);
   });
+
+  it("exposes permission settings and approval metadata through the main/preload boundary", () => {
+    const mainSource = readSource("src/main/index.ts");
+    const preloadSource = readSource("src/preload/index.ts");
+    const envSource = readSource("src/renderer/src/env.d.ts");
+
+    expect(mainSource).toContain('ipcMain.handle("settings:getPermissions"');
+    expect(mainSource).toContain('ipcMain.handle("settings:setPermissions"');
+    expect(preloadSource).toContain('ipcRenderer.invoke("settings:getPermissions")');
+    expect(preloadSource).toContain('ipcRenderer.invoke("settings:setPermissions", patch)');
+    expect(envSource).toContain("sandboxMode");
+    expect(envSource).toContain("approvalPolicy");
+    expect(envSource).toContain("normalizedTarget");
+  });
 });

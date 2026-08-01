@@ -2,6 +2,8 @@ import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent, Usage } from "@earendil-works/pi-ai";
 import type { Store } from "../store/store";
 import type { StoredModelSelection } from "../modelConfig/modelRef";
+import type { ApprovalPolicy, ApprovalsReviewer, PermissionReason, SandboxMode } from "./core/permissions";
+import type { PermissionContext } from "./core/permissions";
 
 // ---------------------------------------------------------------------------
 // ③ 端口（契约）：由内圈（②应用编排）声明、外圈（④适配器）实现。
@@ -46,6 +48,9 @@ export interface TurnLifecycleEvent {
     requestId: string;
     toolName: string;
     toolCallId: string;
+    reason?: PermissionReason;
+    sandboxMode?: SandboxMode;
+    approvalPolicy?: ApprovalPolicy;
   };
 }
 
@@ -91,6 +96,35 @@ export interface LlmEnginePort {
   invalidateAll(): void;
   /** 可选模型列表（provider 注册表）。 */
   listModels(): Promise<Array<{ id: string; name: string; providerId?: string; modelId?: string; available?: boolean; availability?: string; capabilities?: unknown }>>;
+}
+
+export interface CommandExecutionRequest {
+  argv: string[];
+  cwd: string;
+  env?: Record<string, string | undefined>;
+  timeoutMs?: number;
+  maxOutputChars: number;
+  signal?: AbortSignal;
+  permission: PermissionContext;
+  workspaceRoots: string[];
+  writableRoots?: string[];
+}
+
+export interface CommandExecutionResult {
+  argv: string[];
+  cwd: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  signal?: string;
+  timedOut: boolean;
+  cancelled: boolean;
+  truncated: boolean;
+  blocked?: { reason: PermissionReason };
+}
+
+export interface CommandPort {
+  execute(request: CommandExecutionRequest): Promise<CommandExecutionResult>;
 }
 
 /** 事件汇：把引擎/编排事件推给 renderer。 */
@@ -158,6 +192,11 @@ export interface ApprovalRequest {
   toolCallId: string;
   toolName: string;
   target: string;
+  normalizedTarget?: string;
+  reason?: PermissionReason;
+  sandboxMode?: SandboxMode;
+  approvalPolicy?: ApprovalPolicy;
+  reviewer?: ApprovalsReviewer;
   preview: ToolApprovalRequirement["preview"];
   defaultScope: ApprovalScope;
   createdAt: number;

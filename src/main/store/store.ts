@@ -1,6 +1,14 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { DefaultTitleState } from "../../common/titleDefaults";
 import type { StoredModelSelection } from "../modelConfig/modelRef";
+import {
+  isApprovalPolicy,
+  isApprovalsReviewer,
+  isSandboxMode,
+  type ApprovalPolicy,
+  type ApprovalsReviewer,
+  type SandboxMode,
+} from "../agent/core/permissions";
 
 // 持久化仓储契约。组件/服务只依赖这个接口；实现可从 JSON-file 换到 SQLite，
 // 无需改上层。见 openspec/changes/app-shell/design.md D2/D6。
@@ -36,14 +44,50 @@ export interface SkillsSettings {
   globalSources: string[];
 }
 
+export interface PermissionSettings {
+  sandboxMode: SandboxMode;
+  approvalPolicy: ApprovalPolicy;
+  approvalsReviewer: ApprovalsReviewer;
+  networkAccess: boolean;
+  writableRoots: string[];
+  commandOutputLimit: number;
+}
+
+export function normalizePermissionSettings(value: unknown): PermissionSettings {
+  const raw = value && typeof value === "object" ? value as Partial<PermissionSettings> : {};
+  const commandOutputLimit = typeof raw.commandOutputLimit === "number" && Number.isFinite(raw.commandOutputLimit)
+    ? Math.max(1_024, Math.min(1_000_000, Math.floor(raw.commandOutputLimit)))
+    : DEFAULT_SETTINGS.permissions.commandOutputLimit;
+  return {
+    sandboxMode: isSandboxMode(raw.sandboxMode) ? raw.sandboxMode : DEFAULT_SETTINGS.permissions.sandboxMode,
+    approvalPolicy: isApprovalPolicy(raw.approvalPolicy) ? raw.approvalPolicy : DEFAULT_SETTINGS.permissions.approvalPolicy,
+    approvalsReviewer: isApprovalsReviewer(raw.approvalsReviewer) ? raw.approvalsReviewer : DEFAULT_SETTINGS.permissions.approvalsReviewer,
+    networkAccess: raw.networkAccess === true,
+    writableRoots: Array.isArray(raw.writableRoots)
+      ? [...new Set(raw.writableRoots.filter((item): item is string => typeof item === "string" && item.trim().length > 0))]
+      : [],
+    commandOutputLimit,
+  };
+}
+
 export interface Settings {
   access: AccessSettings;
   appearance: AppearanceSettings;
   monitor: MonitorSettings;
   activity: ActivitySettings;
   skills: SkillsSettings;
+  permissions: PermissionSettings;
   apiKeyEnc?: string; // 本地保存的 API key 载荷；字段名沿用旧 schema，避免迁移。
 }
+
+export type SettingsPatch = Partial<Omit<Settings, "apiKeyEnc" | "access" | "appearance" | "monitor" | "activity" | "skills" | "permissions">> & {
+  access?: Partial<AccessSettings>;
+  appearance?: Partial<AppearanceSettings>;
+  monitor?: Partial<MonitorSettings>;
+  activity?: Partial<ActivitySettings>;
+  skills?: Partial<SkillsSettings>;
+  permissions?: Partial<PermissionSettings>;
+};
 
 export interface Project {
   id: string;
@@ -129,7 +173,7 @@ export interface NodeRecord {
 
 export interface Store {
   getSettings(): Settings;
-  patchSettings(patch: Partial<Omit<Settings, "apiKeyEnc">>): Settings;
+  patchSettings(patch: SettingsPatch): Settings;
   getApiKeyEnc(): string | undefined;
   setApiKeyEnc(enc: string | undefined): void;
 
@@ -181,6 +225,14 @@ export const DEFAULT_SETTINGS: Settings = {
   monitor: { notify: true },
   activity: {},
   skills: { globalSources: [] },
+  permissions: {
+    sandboxMode: "workspace-write",
+    approvalPolicy: "on-request",
+    approvalsReviewer: "user",
+    networkAccess: false,
+    writableRoots: [],
+    commandOutputLimit: 64_000,
+  },
 };
 
 export const SCHEMA_VERSION = 2;

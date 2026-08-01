@@ -14,6 +14,18 @@ function previewArgsText(args: unknown): string | undefined {
   return entries.length ? entries.join(" · ") : undefined;
 }
 
+function permissionReasonLabel(reason?: string): string | undefined {
+  switch (reason) {
+    case "outside_workspace": return "工作区外访问";
+    case "network_access": return "网络访问";
+    case "destructive_command": return "破坏性操作";
+    case "external_mutation": return "外部系统变更";
+    case "permission_escalation": return "权限提升";
+    case "untrusted_command": return "不可信命令";
+    default: return reason;
+  }
+}
+
 export function ApprovalPrompt({
   approval,
   compact = false,
@@ -45,6 +57,11 @@ export function ApprovalPrompt({
         <div className="approval-prompt__title">{approval.preview.title}</div>
         {approval.preview.description && <div className="approval-prompt__desc">{approval.preview.description}</div>}
         {detail && <div className="approval-prompt__detail">{detail}</div>}
+        {(approval.reason || approval.sandboxMode) && (
+          <div className="approval-prompt__detail">
+            {[permissionReasonLabel(approval.reason), approval.sandboxMode && `sandbox: ${approval.sandboxMode}`].filter(Boolean).join(" · ")}
+          </div>
+        )}
         <div className="approval-prompt__target">{approval.target}</div>
       </div>
       <div className="approval-prompt__actions">

@@ -112,6 +112,8 @@ const api = {
   settings: {
     get: (): Promise<any> => ipcRenderer.invoke("settings:get"),
     set: (patch: any): Promise<any> => ipcRenderer.invoke("settings:set", patch),
+    getPermissions: (): Promise<any> => ipcRenderer.invoke("settings:getPermissions"),
+    setPermissions: (patch: any): Promise<any> => ipcRenderer.invoke("settings:setPermissions", patch),
     setGlobalModel: (model: { providerId: string; modelId: string }): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("settings:setGlobalModel", model),
     addProviderModel: (input: any): Promise<{ ok: boolean }> => ipcRenderer.invoke("settings:addProviderModel", input),

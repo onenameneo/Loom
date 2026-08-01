@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const DB_SCHEMA_VERSION = 5;
+export const DB_SCHEMA_VERSION = 6;
 
 const CANONICAL_TABLES = [
   "settings",
@@ -24,7 +24,7 @@ function isCanonical(db: Database.Database): boolean {
   const version = Number(db.pragma("user_version", { simple: true }) ?? 0);
   const columns = nodeColumns(db);
   return (
-    version === DB_SCHEMA_VERSION &&
+    version >= 5 &&
     tableExists(db, "projects") &&
     tableExists(db, "sessions") &&
     tableExists(db, "nodes") &&
@@ -127,5 +127,8 @@ export function migrate(db: Database.Database): void {
   }
 
   createCanonicalSchema(db);
+  // Canonical databases can be upgraded in place because settings are
+  // key/value rows; preserve existing projects, sessions, nodes and approvals.
+  if (isCanonical(db)) db.pragma(`user_version = ${DB_SCHEMA_VERSION}`);
   db.pragma("foreign_keys = ON");
 }

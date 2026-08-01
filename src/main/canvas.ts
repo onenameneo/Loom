@@ -7,6 +7,7 @@ import { createPiEngine } from "./agent/adapters/piEngine";
 import { createIds, systemClock } from "./agent/adapters/runtime";
 import { createRuntimeSummarizer } from "./agent/adapters/summarizationAdapter";
 import { createRuntimeTitleGenerator } from "./agent/adapters/titleGenerator";
+import { createCommandPort } from "./agent/adapters/commandExecutor";
 import { createCanvasRuntime } from "./agent/app/session";
 import type { Seed } from "./agent/core/graph";
 import type { ApprovalDecision } from "./agent/ports";
@@ -56,6 +57,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     ids,
     clock,
     getApiKey: () => "registry-managed",
+    command: createCommandPort(),
     compaction: {
       summarize: (input, options) => summarizer.summarize(input, options),
     },

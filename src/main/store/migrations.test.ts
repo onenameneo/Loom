@@ -22,7 +22,7 @@ describe("database migrations", () => {
       (column) => column.name,
     );
 
-    expect(version).toBe(5);
+    expect(version).toBe(6);
     expect(projectColumns).toEqual(expect.arrayContaining(["id", "name", "order", "meta"]));
     expect(columns).toEqual(
       expect.arrayContaining(["project_id", "session_id", "layout_x", "layout_y", "layout_width", "layout_height"]),
@@ -104,7 +104,7 @@ describe("database migrations", () => {
 
     migrate(db);
 
-    expect(Number(db.pragma("user_version", { simple: true }))).toBe(5);
+    expect(Number(db.pragma("user_version", { simple: true }))).toBe(6);
     expect(db.prepare("SELECT COUNT(*) AS count FROM projects").get()).toEqual({ count: 0 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 0 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM nodes").get()).toEqual({ count: 0 });
@@ -124,5 +124,19 @@ describe("database migrations", () => {
     migrate(db);
 
     expect(db.prepare("SELECT id FROM projects").all()).toEqual([{ id: "proj1" }]);
+  });
+
+  it("upgrades an existing canonical database without deleting records", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    db.prepare("INSERT INTO projects(id, name, created_at, updated_at, pinned, \"order\", meta) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+      "existing", "Existing", 1, 2, 0, 0, "{}",
+    );
+    db.pragma("user_version = 5");
+
+    migrate(db);
+
+    expect(Number(db.pragma("user_version", { simple: true }))).toBe(6);
+    expect(db.prepare("SELECT id FROM projects").all()).toEqual([{ id: "existing" }]);
   });
 });

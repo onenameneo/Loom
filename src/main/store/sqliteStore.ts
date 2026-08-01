@@ -6,12 +6,14 @@ import {
   DEFAULT_SETTINGS,
   MIN_NODE_HEIGHT,
   MIN_NODE_WIDTH,
+  normalizePermissionSettings,
   isValidNodeLayout,
   type NodeLayout,
   type NodeRecord,
   type PersistedMessage,
   type SessionRecord,
   type Settings,
+  type SettingsPatch,
   type Store,
   type Project,
 } from "./store";
@@ -137,11 +139,12 @@ export class SqliteStore implements Store {
       monitor: decode(values.get("monitor"), DEFAULT_SETTINGS.monitor),
       activity: decode(values.get("activity"), DEFAULT_SETTINGS.activity),
       skills: decode(values.get("skills"), DEFAULT_SETTINGS.skills),
+      permissions: normalizePermissionSettings(decode(values.get("permissions"), DEFAULT_SETTINGS.permissions)),
       apiKeyEnc: decode<string | undefined>(values.get("apiKeyEnc"), undefined),
     };
   }
 
-  patchSettings(patch: Partial<Omit<Settings, "apiKeyEnc">>): Settings {
+  patchSettings(patch: SettingsPatch): Settings {
     const current = this.getSettings();
     const next: Settings = {
       ...current,
@@ -150,6 +153,7 @@ export class SqliteStore implements Store {
       monitor: { ...current.monitor, ...(patch.monitor ?? {}) },
       activity: { ...current.activity, ...(patch.activity ?? {}) },
       skills: { ...current.skills, ...(patch.skills ?? {}) },
+      permissions: normalizePermissionSettings({ ...current.permissions, ...(patch.permissions ?? {}) }),
     };
     const stmt = this.db.prepare(`
       INSERT INTO settings(key, value) VALUES (?, ?)
@@ -161,6 +165,7 @@ export class SqliteStore implements Store {
       stmt.run("monitor", encode(next.monitor));
       stmt.run("activity", encode(next.activity));
       stmt.run("skills", encode(next.skills));
+      stmt.run("permissions", encode(next.permissions));
     });
     tx();
     return next;

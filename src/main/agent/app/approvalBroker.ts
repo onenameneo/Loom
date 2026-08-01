@@ -1,4 +1,5 @@
 import type { ApprovalDecision, ApprovalPort, ApprovalRequest, ClockPort, EventSinkPort, PendingApprovalDecision } from "../ports";
+import { DEFAULT_PERMISSION_CONTEXT } from "../core/permissions";
 
 interface PendingApproval {
   request: ApprovalRequest;
@@ -31,6 +32,11 @@ export function createApprovalBroker(deps: {
       const now = deps.clock.now();
       const request: ApprovalRequest = {
         ...input,
+        normalizedTarget: input.normalizedTarget ?? input.target,
+        reason: input.reason ?? "external_mutation",
+        sandboxMode: input.sandboxMode ?? DEFAULT_PERMISSION_CONTEXT.sandboxMode,
+        approvalPolicy: input.approvalPolicy ?? DEFAULT_PERMISSION_CONTEXT.approvalPolicy,
+        reviewer: input.reviewer ?? "user",
         requestId: requestId(),
         createdAt: now,
         expiresAt: now + timeoutMs,

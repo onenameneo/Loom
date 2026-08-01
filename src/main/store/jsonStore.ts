@@ -2,12 +2,14 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "path";
 import {
   DEFAULT_SETTINGS,
+  normalizePermissionSettings,
   SCHEMA_VERSION,
   type NodeLayout,
   type NodeRecord,
   type PersistedMessage,
   type SessionRecord,
   type Settings,
+  type SettingsPatch,
   type Store,
   type StoreData,
   type Project,
@@ -45,7 +47,12 @@ export class JsonStore implements Store {
         const raw = JSON.parse(readFileSync(this.file, "utf-8"));
         return {
           version: raw.version ?? SCHEMA_VERSION,
-          settings: { ...DEFAULT_SETTINGS, ...(raw.settings ?? {}), skills: { ...DEFAULT_SETTINGS.skills, ...(raw.settings?.skills ?? {}) } },
+          settings: {
+            ...DEFAULT_SETTINGS,
+            ...(raw.settings ?? {}),
+            skills: { ...DEFAULT_SETTINGS.skills, ...(raw.settings?.skills ?? {}) },
+            permissions: normalizePermissionSettings(raw.settings?.permissions),
+          },
           projects: (Array.isArray(raw.projects) ? raw.projects : [])
             .map((project: any) => this.normalizeProject(project))
             .filter((project: Project | undefined): project is Project => Boolean(project)),
@@ -74,7 +81,7 @@ export class JsonStore implements Store {
   getSettings(): Settings {
     return this.data.settings;
   }
-  patchSettings(patch: Partial<Omit<Settings, "apiKeyEnc">>): Settings {
+  patchSettings(patch: SettingsPatch): Settings {
     this.data.settings = {
       ...this.data.settings,
       access: { ...this.data.settings.access, ...(patch.access ?? {}) },
@@ -82,6 +89,7 @@ export class JsonStore implements Store {
       monitor: { ...this.data.settings.monitor, ...(patch.monitor ?? {}) },
       activity: { ...this.data.settings.activity, ...(patch.activity ?? {}) },
       skills: { ...this.data.settings.skills, ...(patch.skills ?? {}) },
+      permissions: normalizePermissionSettings({ ...this.data.settings.permissions, ...(patch.permissions ?? {}) }),
     };
     this.flush();
     return this.data.settings;

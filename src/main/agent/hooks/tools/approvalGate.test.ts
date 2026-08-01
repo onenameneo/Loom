@@ -195,4 +195,25 @@ describe("createApprovalGate", () => {
     });
     await expect(pending).resolves.toBeUndefined();
   });
+
+  it("does not open an approval prompt under never policy", async () => {
+    const eventLog = events();
+    const gate = createApprovalGate({
+      approvals: createApprovalBroker({ events: eventLog.sink, clock: { now: () => 1 } }),
+      policies: createApprovalPolicyStore(),
+      getTool: () => mutationTool,
+      getPermissionContext: () => ({ sandboxMode: "workspace-write", approvalPolicy: "never", networkAccess: false }),
+      setAwaitingApproval: () => true,
+      setRunning: () => true,
+    });
+
+    await expect(gate.onToolCall?.({
+      nodeId: "n1",
+      turnId: "t1",
+      toolName: "project_write_file",
+      toolCallId: "tc",
+      args: { path: "a.md", content: "x" },
+    })).resolves.toEqual({ block: true, reason: "approval policy never" });
+    expect(eventLog.items).toHaveLength(0);
+  });
 });

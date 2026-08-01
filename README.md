@@ -22,6 +22,12 @@ pnpm dev                              # 启动 Electron 应用
 - `pnpm build` 构建，`pnpm typecheck` 严格类型检查。
 - 注意：若你的 shell 全局设了 `ELECTRON_RUN_AS_NODE=1`，dev/start 脚本已自动清除它（否则 Electron 会以纯 Node 模式启动主进程而报错）。
 
+## Agent 权限
+
+本地命令工具采用 Codex 风格的两层权限模型：`sandboxMode` 控制技术边界，`approvalPolicy` 控制何时询问。默认配置是 `workspace-write + on-request + user reviewer + network disabled`；Bash、Python、Node、git 和包管理器都通过同一个主进程命令端口运行。
+
+当前 macOS 使用系统 `sandbox-exec` 约束进程树的文件和网络访问；其他平台在尚未提供强制沙箱适配器时会对受限模式 fail-closed，只有明确选择 `danger-full-access` 才允许运行不受沙箱约束的命令。命令参数采用 argv，不经过 renderer 或拼接 shell 字符串；输出、环境变量和执行时长均有上限。
+
 ## 结构
 ```
 src/
