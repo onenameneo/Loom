@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { AlertDialog, Dialog, Tooltip } from "radix-ui";
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { AlertDialog, Dialog, Popover, Tooltip } from "radix-ui";
 import { Folder, FolderPlus, X } from "lucide-react";
 
 // Radix Primitives（无样式、可访问）+ DESIGN.md token 样式。见 shell.css .dlg-*/.tip。
@@ -246,5 +246,43 @@ export function Tip({ label, children }: { label: string; children: ReactNode })
         </Tooltip.Portal>
       </Tooltip.Root>
     </Tooltip.Provider>
+  );
+}
+
+export function ClickTip({
+  label,
+  children,
+  content,
+  className = "click-tip",
+  side = "bottom",
+  align = "end",
+  sideOffset = 8,
+}: {
+  label: string;
+  children: ReactNode;
+  content: ReactNode;
+  className?: string;
+  side?: "top" | "right" | "bottom" | "left";
+  align?: "start" | "center" | "end";
+  sideOffset?: number;
+}) {
+  const descriptionId = useId();
+  return (
+    <Popover.Root>
+      <Popover.Trigger asChild>{children}</Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          className={className}
+          aria-label={label}
+          aria-describedby={descriptionId}
+          side={side}
+          align={align}
+          sideOffset={sideOffset}
+        >
+          <span id={descriptionId}>{content}</span>
+          <Popover.Arrow className="click-tip-arrow" />
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }

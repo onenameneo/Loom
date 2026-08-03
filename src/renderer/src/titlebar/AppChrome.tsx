@@ -20,6 +20,13 @@ function targetsExpanded(shell: ShellState): boolean {
   return shell.phase === "expanded" || shell.phase === "expanding";
 }
 
+function readStoredPanelWidth(key: string, fallback: number, min: number, max: number): number {
+  const raw = localStorage.getItem(key);
+  if (raw === null) return fallback;
+  const saved = Number(raw);
+  return Number.isFinite(saved) ? Math.min(max, Math.max(min, saved)) : fallback;
+}
+
 const ENDPOINT_EPSILON_PX = 0.5;
 const SHELL_TRANSITION_FALLBACK_MS = 360;
 
@@ -151,14 +158,14 @@ export function AppChrome({
   const sidebarMounted = shell.phase !== "collapsed";
   const shellRef = useRef<HTMLDivElement>(null);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const saved = Number(localStorage.getItem("loom:ui:sidebar-width"));
-    return Number.isFinite(saved) ? Math.min(420, Math.max(200, saved)) : 244;
+    return readStoredPanelWidth("loom:ui:sidebar-width", 244, 200, 420);
   });
   const [workbenchWidth, setWorkbenchWidth] = useState(() => {
-    const saved = Number(localStorage.getItem("loom:ui:workbench-width"));
-    return Number.isFinite(saved) ? Math.min(560, Math.max(300, saved)) : 380;
+    return readStoredPanelWidth("loom:ui:workbench-width", 380, 300, 560);
   });
   // macOS 窗口态：116px 预留红绿灯 + 开关（开关 left:80 + 28 + 8）；全屏后红绿灯消失，塌回到只容纳左移开关的 44px（与非 mac 同宽）。
+  const workbenchMounted = right !== undefined;
+  const workbenchInteractive = workbenchMounted && workbenchOpen;
   const shellStyle = {
     "--window-controls-width": platform === "darwin" && !fullscreen ? "116px" : "44px",
     "--sidebar-width": targetsExpanded(shell) ? "var(--sidebar-expanded-width)" : "0px",
@@ -234,6 +241,7 @@ export function AppChrome({
       className={`app-shell shell-${shell.phase} platform-${platform}`}
       data-shell-phase={shell.phase}
       data-transition-version={transitioning ? shell.version : undefined}
+      data-workbench-open={workbenchInteractive ? "true" : "false"}
       style={shellStyle}
     >
       <WindowControlsChrome
@@ -261,7 +269,16 @@ export function AppChrome({
         <AppTitlebar collapsed={shell.phase === "collapsed"} platform={platform} trailing={onToggleWorkbench && <button className="titlebar-button workbench-toggle" type="button" aria-label={workbenchOpen ? "关闭工作台" : "打开工作台"} aria-expanded={workbenchOpen} onClick={onToggleWorkbench}><PanelRight size={16} /></button>} />
         <main className="main">{main}</main>
       </section>
-      {workbenchOpen && <aside className="workbench-column"><div className="workbench-resize-handle" role="separator" aria-label="调整工作台宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize(event, "workbench")} />{right}</aside>}
+      {workbenchMounted && (
+        <aside
+          className="workbench-column"
+          aria-hidden={workbenchInteractive ? undefined : "true"}
+          {...(workbenchInteractive ? {} : ({ inert: "" } as Record<string, string>))}
+        >
+          <div className="workbench-resize-handle" role="separator" aria-label="调整工作台宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize(event, "workbench")} />
+          {right}
+        </aside>
+      )}
     </div>
   );
 }

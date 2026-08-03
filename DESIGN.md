@@ -69,6 +69,13 @@
 - **曲线**：默认 `cubic-bezier(0.2,0,0,1)`（阻尼、无过冲）；命令面板可留一丝极轻回弹。
 - **无弹跳、无缩放爆点、无发光脉冲**。流式：token 追加 + caret；连线流式时 marching-ants 虚线，完成转实线。
 - 尊重 `prefers-reduced-motion`（过冲/淡入降级为瞬时）。
+- **折叠面板动画纪律**：侧栏、右侧工作台、抽屉类 UI 必须优先保持稳定 DOM，通过 `data-*` 状态、可动画 CSS 变量、`opacity/transform` 过渡实现开合；不要用条件卸载作为动画开关，否则退出动画和连续切换容易丢失。
+
+## 组件实现规范
+- **Radix primitives 优先**：交互式基础组件先选 Radix，再做本地封装；不要手写已有 primitive 覆盖的 portal、focus trap、Escape 关闭、outside dismiss、ARIA role 或定位逻辑。
+- **本地组件库职责**：`src/renderer/src/ui/` 只封装产品语义 API 与 DESIGN.md token 样式，不重新实现无障碍交互内核。样式写在 CSS 中，组件只引用语义 token。
+- **组件映射**：确认/删除用 `AlertDialog`；模态内容用 `Dialog`/本地 `Modal`；点击后保持打开的帮助/轻量说明用 `Popover`；hover/focus 说明用 `Tooltip`；菜单用 `DropdownMenu`；列表选择优先用 Radix 对应 primitive。
+- **例外规则**：只有当 Radix 没有覆盖具体交互，或 Electron/React Flow 约束要求特殊处理时，才允许手写低层 overlay/portal/focus 逻辑，并在代码注释里说明原因。
 
 ## 画布 / 节点视觉语言
 - **节点 = 索引卡片**：发丝线边、`--r-lg` 圆角、静止无阴影、悬浮才浮起。
@@ -92,6 +99,7 @@
 | 2026-07-14 | accent 由石墨青绿改为**靛青**再定为 **Codex 蓝** `#0169cc`（暗 `#339cff`）；中性去暖调 | 用户参考 OpenAI Codex 配色；干净、专业、与"严肃思考工具"同频 |
 | 2026-07-14 | **产品定名 Loom**（织机/线/分支，呼应分支画布） | 用户拍板 |
 | 2026-07-14 | 图标统一 lucide-react；组件只用两层 token（改一处原始色即全局换 accent，本次已验证） | 最佳实践、可维护 |
+| 2026-08-02 | 交互式组件优先使用 Radix primitives，并在 `src/renderer/src/ui/` 做产品语义封装；禁止手写 Radix 已覆盖的 overlay、portal、focus、dismiss、ARIA 逻辑 | 保持无障碍与交互行为的最佳实践，同时让本地组件库只负责 Loom 的语义 API 与 token 化视觉 |
 | 2026-07-14 | 白为主 + 半透明侧栏 + 不花里胡哨 | 用户定；北极星=冷静克制 |
 | 2026-07-16 | 节点选中改为**均匀 accent 光晕**（覆盖原「绝不发光」），并关闭 React Flow 节点 focus 描边 | 用户明确要「之前的蓝色阴影」、不要蓝色线框 |
 | 2026-07-16 | 标题栏加 **macOS Finder 式颜色标签**（新增 `--label-*` token，存 `nodes.meta.color`）；去掉原装饰色块；模型名 ellipsis 收窄让位标题 | 用户：装饰块无用→改成有用的颜色分组；标题栏拥挤需理顺层级 |

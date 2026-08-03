@@ -3,9 +3,31 @@
   "version": "0.0.0",
   "description": "Loom — 个人 agent 思考工作台（Electron + React + pi-mono）",
   "main": "./out/main/index.js",
+  "build": {
+    "appId": "com.neoland.loom",
+    "productName": "Loom",
+    "directories": {
+      "buildResources": "build"
+    },
+    "mac": {
+      "icon": "build/icon.icns",
+      "sign": "scripts/mac-sign.cjs"
+    },
+    "win": {
+      "icon": "build/icon.ico"
+    },
+    "linux": {
+      "icon": "build/icon.png"
+    }
+  },
   "scripts": {
     "dev": "ELECTRON_RUN_AS_NODE= electron-vite dev",
     "build": "electron-vite build",
+    "pack": "electron-vite build && electron-builder --dir",
+    "dist": "electron-vite build && electron-builder",
+    "dist:mac": "electron-vite build && electron-builder --mac",
+    "dist:win": "electron-vite build && electron-builder --win",
+    "dist:linux": "electron-vite build && electron-builder --linux",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "start": "ELECTRON_RUN_AS_NODE= electron-vite preview",
     "test": "ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs run",
@@ -35,6 +57,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^43.2.0",
+    "electron-builder": "^26.0.0",
     "electron-vite": "^2.3.0",
     "jsdom": "^25.0.1",
     "react": "^18.3.1",

@@ -41,6 +41,32 @@ function ctx(): SurfaceCtx {
 }
 
 describe("Sidebar project session navigation", () => {
+  it("renders the Loom brand icon in the sidebar header", () => {
+    render(
+      <Sidebar
+        activeSurface="project"
+        setSurface={vi.fn()}
+        ctx={ctx()}
+        onSelectSession={vi.fn()}
+        onFocusNode={vi.fn()}
+        onCreateProject={vi.fn()}
+        onRenameProject={vi.fn()}
+        onDeleteProject={vi.fn()}
+        onPinProject={vi.fn()}
+        onCreateSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onDeleteSession={vi.fn()}
+        theme="light"
+        toggleTheme={vi.fn()}
+      />,
+    );
+
+    const brandIcon = screen.getByAltText("Loom") as HTMLImageElement;
+    expect(brandIcon.tagName).toBe("IMG");
+    expect(brandIcon.getAttribute("src")).toContain("icon.png");
+    expect(brandIcon.closest(".sb-mark")).toBeTruthy();
+  });
+
   it("renders node trees directly under the active project without an extra session row", async () => {
     const onSelectProject = vi.fn();
     const onSelectSession = vi.fn();

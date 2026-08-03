@@ -83,35 +83,24 @@ describe("canvas titlebar help", () => {
     );
   });
 
-  it("portals an accessible fixed panel to the App overlay root using the button rect", async () => {
+  it("uses Radix Popover positioning instead of inline fixed coordinates", async () => {
     renderTitlebarActions();
     const helpButton = screen.getByRole("button", { name: "画布帮助" });
-    vi.spyOn(helpButton, "getBoundingClientRect").mockReturnValue({
-      bottom: 40,
-      height: 28,
-      left: 872,
-      right: 900,
-      top: 12,
-      width: 28,
-      x: 872,
-      y: 12,
-      toJSON: () => ({}),
-    });
 
     expect(helpButton.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(helpButton);
 
     const panel = await screen.findByRole("dialog", { name: "画布帮助" });
-    const overlayRoot = document.querySelector("#app-overlay-root")!;
     expect(helpButton.getAttribute("aria-expanded")).toBe("true");
     expect(helpButton.getAttribute("aria-controls")).toBe(panel.id);
-    expect(panel.getAttribute("aria-labelledby")).toBe(helpButton.id);
-    expect(overlayRoot.contains(panel)).toBe(true);
+    expect(panel.getAttribute("data-state")).toBe("open");
+    expect(panel.getAttribute("data-side")).toBeTruthy();
+    expect(panel.closest("[data-radix-popper-content-wrapper]")).toBeTruthy();
     expect(panel.closest(".titlebar-actions")).toBeNull();
     expect(panel.classList.contains("chrome-no-drag")).toBe(true);
-    expect(panel.style.position).toBe("fixed");
-    expect(panel.style.top).toBe("48px");
-    expect(panel.style.right).toBe(`${window.innerWidth - 900}px`);
+    expect(panel.style.position).toBe("");
+    expect(panel.style.top).toBe("");
+    expect(panel.style.right).toBe("");
   });
 
   it("closes on Escape and restores focus to the connected help button", async () => {
@@ -121,7 +110,7 @@ describe("canvas titlebar help", () => {
     fireEvent.click(helpButton);
     await screen.findByRole("dialog", { name: "画布帮助" });
 
-    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.keyDown(document.activeElement ?? document, { key: "Escape" });
 
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "画布帮助" })).toBeNull());
     expect(document.activeElement).toBe(helpButton);
@@ -141,9 +130,7 @@ describe("canvas titlebar help", () => {
     expect(document.activeElement).toBe(outside);
   });
 
-  it("removes the panel and document listeners when its owner unmounts", async () => {
-    const add = vi.spyOn(document, "addEventListener");
-    const remove = vi.spyOn(document, "removeEventListener");
+  it("removes the panel when its owner unmounts", async () => {
     const view = renderTitlebarActions();
     fireEvent.click(screen.getByRole("button", { name: "画布帮助" }));
     await screen.findByRole("dialog", { name: "画布帮助" });
@@ -151,13 +138,5 @@ describe("canvas titlebar help", () => {
     view.unmount();
 
     expect(screen.queryByRole("dialog", { name: "画布帮助" })).toBeNull();
-    expect(remove.mock.calls.some(([type]) => type === "keydown")).toBe(true);
-    expect(remove.mock.calls.some(([type]) => type === "pointerdown")).toBe(true);
-    expect(add.mock.calls.filter(([type]) => type === "keydown").length).toBe(
-      remove.mock.calls.filter(([type]) => type === "keydown").length,
-    );
-    expect(add.mock.calls.filter(([type]) => type === "pointerdown").length).toBe(
-      remove.mock.calls.filter(([type]) => type === "pointerdown").length,
-    );
   });
 });

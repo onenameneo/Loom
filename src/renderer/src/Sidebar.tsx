@@ -3,6 +3,7 @@ import { Bot, Check, ChevronDown, ChevronRight, Folder, FolderOpen, PanelTopClos
 import type { ActivityTool, AgentProc, CanvasNodeDto, ProjectMeta, SessionMeta, SettingsPayload } from "./env";
 import { IconMoon, IconPlus, IconSun } from "./icons";
 import { DEFAULT_ROOT_TITLE, DEFAULT_BRANCH_TITLE } from "../../common/titleDefaults";
+import loomIconUrl from "../../../build/icon.png";
 import {
   agentTitle,
   formatDuration,
@@ -507,9 +508,11 @@ export default function Sidebar({
   return (
     <div className="sidebar">
       <div className="sb-head">
-        <span className="sb-mark" />
+        <span className="sb-mark">
+          <img src={loomIconUrl} alt="Loom" draggable={false} />
+        </span>
         <span className="sb-word">
-          Loom<small>思考工作台</small>
+          Loom<small>一起思考</small>
         </span>
         <Tip label="切换明暗">
           <button className="theme-toggle" onClick={toggleTheme}>

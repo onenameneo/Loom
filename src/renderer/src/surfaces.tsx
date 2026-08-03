@@ -490,50 +490,48 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
         </section>
         {!supported && (
           <div className="activity-empty monitor-support-note">本地进程发现仅在 macOS 桌面环境可用，活动流事件仍会显示。</div>
-          )}
+        )}
       </div>
 
-      {configOpen && (
-        <div className="activity-modal" role="dialog" aria-modal="true" aria-label="活动流配置">
-          <div className="activity-modal-backdrop" onClick={() => setConfigOpen(false)} />
-          <div className="activity-modal-content">
-            <div className="activity-modal-head">
-              <h3>活动流接入</h3>
-              <button onClick={() => setConfigOpen(false)}>关闭</button>
-            </div>
-            {(["claude", "codex"] as ActivityTool[]).map((tool) => {
-              const st = ctx.activityStatus?.tools[tool];
-              const state = linkState(st);
-              return (
-                <section className="activity-tool-card" key={tool}>
-                  <div className="activity-tool-head">
-                    <span className={`activity-status ${state}`} />
-                    <strong>{TOOL_LABEL[tool]}</strong>
-                    <small>{linkLabel(tool, st, ctx.activityNow)}</small>
-                  </div>
-                  <code>{st?.path}</code>
-                  {st?.actionRequired && <p className="activity-note">{st.actionRequired}</p>}
-                  <div className="activity-tool-actions">
-                    {state === "off" ? (
-                      <button className="btn primary" disabled={busyTool === tool} onClick={() => runConfig("enable", tool)}>
-                        <Power size={15} /> 启用
-                      </button>
-                    ) : (
-                      <button className="btn" disabled={busyTool === tool} onClick={() => runConfig("disable", tool)}>
-                        <PowerOff size={15} /> 断开接入
-                      </button>
-                    )}
-                  </div>
-                </section>
-              );
-            })}
-            <p className="activity-result-note">
-              只写全局配置，覆盖本机所有 agent。配置改动对正在运行的会话不生效，需重开该会话。
-            </p>
+      <Modal open={configOpen} onOpenChange={setConfigOpen} ariaLabel="活动流配置">
+        <div className="settings-modal__panel activity-config-panel">
+          <div className="settings-modal__head">
+            <h3>活动流接入</h3>
+            <button className="icon-btn" type="button" onClick={() => setConfigOpen(false)} aria-label="关闭" title="关闭">
+              <X size={16} />
+            </button>
           </div>
+          {(["claude", "codex"] as ActivityTool[]).map((tool) => {
+            const st = ctx.activityStatus?.tools[tool];
+            const state = linkState(st);
+            return (
+              <section className="activity-tool-card" key={tool}>
+                <div className="activity-tool-head">
+                  <span className={`activity-status ${state}`} />
+                  <strong>{TOOL_LABEL[tool]}</strong>
+                  <small>{linkLabel(tool, st, ctx.activityNow)}</small>
+                </div>
+                <code>{st?.path}</code>
+                {st?.actionRequired && <p className="activity-note">{st.actionRequired}</p>}
+                <div className="activity-tool-actions">
+                  {state === "off" ? (
+                    <button className="btn primary" disabled={busyTool === tool} onClick={() => runConfig("enable", tool)}>
+                      <Power size={15} /> 启用
+                    </button>
+                  ) : (
+                    <button className="btn" disabled={busyTool === tool} onClick={() => runConfig("disable", tool)}>
+                      <PowerOff size={15} /> 断开接入
+                    </button>
+                  )}
+                </div>
+              </section>
+            );
+          })}
+          <p className="activity-result-note">
+            只写全局配置，覆盖本机所有 agent。配置改动对正在运行的会话不生效，需重开该会话。
+          </p>
         </div>
-      )}
-
+      </Modal>
     </div>
   );
 }

@@ -22,6 +22,7 @@ import { platformWindowOptions } from "./windowOptions";
 import { addGlobalSkillSource, buildSkillCatalog, openSkillSource, removeGlobalSkillSource } from "./agent/skills";
 import { markRendererNotReady, markRendererReady, sendToWindow } from "./ipcSafeSend";
 import { DEFAULT_ROOT_TITLE, DEFAULT_SESSION_TITLE } from "../common/titleDefaults";
+import { developmentIconPath, PRODUCT_NAME } from "./appBranding";
 
 // ---------------------------------------------------------------------------
 // 主进程：持久化(store) + 设置 + 会话 + 画布引擎(pi 多节点)。
@@ -35,6 +36,11 @@ let canvas: ReturnType<typeof registerCanvas> | null = null;
 let monitor: ReturnType<typeof registerMonitor> | null = null;
 let acp: ReturnType<typeof registerAcp> | null = null;
 let collector: ReturnType<typeof registerCollector> | null = null;
+
+// productName 只在 electron-builder 打包时写入 Info.plist；开发态 Electron
+// 二进制没有 Info.plist，app.getName() 默认返回 "Electron"，必须显式覆盖。
+app.setName(PRODUCT_NAME);
+const developmentIcon = developmentIconPath(process.cwd(), app.isPackaged);
 
 function resolvedTheme(): "light" | "dark" {
   const t = store.getSettings().appearance.theme;
@@ -235,6 +241,8 @@ function buildMenu() {
 
 function createWindow() {
   win = new BrowserWindow({
+    title: PRODUCT_NAME,
+    icon: developmentIcon,
     width: 1160,
     height: 780,
     minWidth: 800,
@@ -249,6 +257,8 @@ function createWindow() {
   if (store && !acp) acp = registerAcp({ getWin: () => win, store });
   if (store && !collector) collector = registerCollector({ getWin: () => win, store });
   win.on("ready-to-show", () => win?.show());
+  // 阻止 HTML <title> 覆盖 BrowserWindow title，保持标题栏始终为产品名。
+  win.on("page-title-updated", (e) => e.preventDefault());
   // 全屏时 macOS 隐藏红绿灯，渲染层据此把侧栏开关移到左缘、收掉预留内边距。
   const emitFullScreen = () => sendToWindow(() => windowRef, "window:fullscreen", windowRef.isFullScreen());
   win.on("enter-full-screen", emitFullScreen);
@@ -277,6 +287,8 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // 开发态更新 Dock 图标（正式包由 electron-builder 写入 bundle，无需此调用）
+  if (process.platform === "darwin" && developmentIcon) app.dock?.setIcon(developmentIcon);
   store = new SqliteStore(dbPath(app.getPath("userData")));
   ensureLoomAgentDefaults({ homeDir: app.getPath("home"), legacyApiKeyPresent: Boolean(store.getApiKeyEnc()) });
   applyThemeSource();

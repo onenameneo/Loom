@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createRef, useRef } from "react";
+import { createRef, useRef, type ReactNode } from "react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -22,6 +22,7 @@ function renderChrome(
   shell: ShellState,
   platform: NodeJS.Platform | "browser" = "browser",
   fullscreen = false,
+  options: { right?: ReactNode; workbenchOpen?: boolean; onToggleWorkbench?: () => void } = {},
 ) {
   const toggleRef = createRef<HTMLButtonElement>();
   const sidebarContentRef = createRef<HTMLDivElement>();
@@ -39,6 +40,9 @@ function renderChrome(
         onTransitionComplete={onTransitionComplete}
         sidebar={<nav>导航</nav>}
         main={<section>主内容</section>}
+        right={options.right}
+        workbenchOpen={options.workbenchOpen}
+        onToggleWorkbench={options.onToggleWorkbench}
       />
     </TitlebarProvider>,
   );
@@ -105,9 +109,11 @@ describe("adaptive AppChrome", () => {
     );
 
     expect(css).toContain("@property --sidebar-width");
+    expect(css).toContain("@property --workbench-shell-width");
     expect(css).toMatch(/\.window-controls-chrome\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0 auto auto 0;/s);
     expect(css).toContain("max(0px, calc(var(--window-controls-width) - var(--sidebar-width)))");
-    expect(css).toContain("transition: --sidebar-width var(--panel-motion-duration) var(--panel-motion-curve)");
+    expect(css).toContain("--sidebar-width var(--panel-motion-duration) var(--panel-motion-curve)");
+    expect(css).toContain("--workbench-shell-width var(--panel-motion-duration) var(--panel-motion-curve)");
     expect(css).toMatch(/\.mac-window-controls \.chrome-drag-region\s*\{[^}]*right:\s*auto;[^}]*width:\s*76px;/s);
     // 关键回归防线：侧栏顶部拖拽区必须让出窗控宽度，否则它盖住开关、macOS 会把
     // 开关的真实鼠标事件当成窗口拖拽吃掉（hover/click 全无）。
@@ -117,6 +123,47 @@ describe("adaptive AppChrome", () => {
     expect(css).toMatch(/\.mac-window-controls\.fullscreen \.window-sidebar-toggle\s*\{[^}]*left:\s*8px;/s);
     expect(css).toMatch(/@media \(max-width: 800px\)[\s\S]*?\.titlebar-subtitle\s*\{[^}]*display:\s*none;/);
     expect(css).toMatch(/\.titlebar-actions\s*\{[^}]*flex:\s*none;/);
+  });
+
+  it("keeps the workbench column mounted while closed so the right panel can animate", () => {
+    const { container, rerender } = renderChrome(expanded, "browser", false, {
+      right: <aside>工作台内容</aside>,
+      workbenchOpen: false,
+      onToggleWorkbench: vi.fn(),
+    });
+    const shell = container.querySelector(".app-shell") as HTMLElement;
+    const column = container.querySelector(".workbench-column") as HTMLElement;
+
+    expect(shell.getAttribute("data-workbench-open")).toBe("false");
+    expect(shell.style.getPropertyValue("--workbench-width")).toBe("380px");
+    expect(column).toBeTruthy();
+    expect(column.getAttribute("aria-hidden")).toBe("true");
+    expect(column.hasAttribute("inert")).toBe(true);
+    expect(screen.getByRole("button", { name: "打开工作台" }).getAttribute("aria-expanded")).toBe("false");
+
+    rerender(
+      <TitlebarProvider defaultDescriptor={{ title: "研究 Transformer", subtitle: "/tmp/loom" }}>
+        <AppChrome
+          shell={expanded}
+          platform="browser"
+          toggleRef={createRef<HTMLButtonElement>()}
+          sidebarContentRef={createRef<HTMLDivElement>()}
+          onToggleSidebar={vi.fn()}
+          onTransitionComplete={vi.fn()}
+          sidebar={<nav>导航</nav>}
+          main={<section>主内容</section>}
+          right={<aside>工作台内容</aside>}
+          workbenchOpen
+          onToggleWorkbench={vi.fn()}
+        />
+      </TitlebarProvider>,
+    );
+
+    expect(container.querySelector(".workbench-column")).toBe(column);
+    expect(shell.getAttribute("data-workbench-open")).toBe("true");
+    expect(column.hasAttribute("aria-hidden")).toBe(false);
+    expect(column.hasAttribute("inert")).toBe(false);
+    expect(screen.getByRole("button", { name: "关闭工作台" }).getAttribute("aria-expanded")).toBe("true");
   });
 
   it("moves the toggle to the left edge and shrinks the reserve when macOS is fullscreen", () => {

@@ -109,6 +109,20 @@ describe("surface titlebar ownership", () => {
     expect(titlebarHooks.useTitlebar).not.toHaveBeenCalled();
   });
 
+  it("opens MonitorPanel activity config through the shared modal shell", async () => {
+    const ctx = surfaceCtx();
+    render(<MonitorPanel ctx={ctx} />);
+    render(<>{titlebarHooks.useTitlebarActions.mock.calls[0][0]}</>);
+
+    fireEvent.click(screen.getByRole("button", { name: "活动流配置" }));
+
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "活动流配置" })).toBeTruthy());
+    expect(document.body.querySelector(".settings-dialog-content")).toBeTruthy();
+    expect(document.body.querySelector(".dlg-overlay")).toBeTruthy();
+    expect(document.body.querySelector(".activity-modal")).toBeNull();
+    expect(ctx.refreshActivityStatus).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps MonitorPanel's action registration stable through an unrelated rerender", () => {
     const now = Date.now();
     const ctx = surfaceCtx();
