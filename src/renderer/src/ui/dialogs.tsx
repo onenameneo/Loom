@@ -1,6 +1,7 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { AlertDialog, Dialog, Popover, Tooltip } from "radix-ui";
 import { Folder, FolderPlus, X } from "lucide-react";
+import { IconProject } from "../icons";
 
 // Radix Primitives（无样式、可访问）+ DESIGN.md token 样式。见 shell.css .dlg-*/.tip。
 
@@ -136,24 +137,53 @@ export function CreateProjectDialog({
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const [pickError, setPickError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const busyRef = useRef(false);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const nameId = useId();
+  const directoryTitleId = useId();
+  const directoryHelpId = useId();
+  const pickErrorId = useId();
+  const submitErrorId = useId();
+  const previousOpenRef = useRef(false);
+  const restoreFocusRef = useRef(false);
+
+  if (open !== previousOpenRef.current) {
+    if (open) {
+      returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    } else {
+      restoreFocusRef.current = true;
+    }
+    previousOpenRef.current = open;
+  }
 
   useEffect(() => {
     if (!open) return;
     setName("");
     setSourceRoots([]);
+    busyRef.current = false;
     setBusy(false);
     setPicking(false);
     setPickError(null);
+    setSubmitError(null);
+  }, [open]);
+
+  useEffect(() => {
+    if (open || !restoreFocusRef.current || !returnFocusRef.current?.isConnected) return;
+    restoreFocusRef.current = false;
+    returnFocusRef.current.focus();
+    returnFocusRef.current = null;
   }, [open]);
 
   const addFolder = async () => {
+    if (busy || picking) return;
     setPickError(null);
     setPicking(true);
     try {
       const path = await onPickFolder();
       if (!path) return;
       setSourceRoots((current) => (current.includes(path) ? current : [...current, path]));
-      setName((current) => current || path.split("/").filter(Boolean).at(-1) || "");
+      setName((current) => current || path.split(/[\\/]/).filter(Boolean).at(-1) || "");
     } catch (error) {
       setPickError(error instanceof Error ? error.message : "选择文件夹失败");
     } finally {
@@ -162,71 +192,132 @@ export function CreateProjectDialog({
   };
 
   const submit = async () => {
+    if (busyRef.current) return;
     const trimmed = name.trim();
     if (!trimmed) return;
+    busyRef.current = true;
     setBusy(true);
+    setSubmitError(null);
     try {
       await onSubmit({ name: trimmed, sourceRoots });
       onOpenChange(false);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "创建项目失败");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
 
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void submit();
+  };
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!busyRef.current) onOpenChange(nextOpen);
+  };
+
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay forceMount className="dlg-overlay" aria-hidden={!open} />
-        <Dialog.Content forceMount className="dlg-content project-create-dialog" aria-hidden={!open}>
+        <Dialog.Content
+          forceMount
+          className="dlg-content project-create-dialog"
+          aria-hidden={!open}
+          onEscapeKeyDown={(event) => {
+            if (busyRef.current) event.preventDefault();
+          }}
+          onPointerDownOutside={(event) => {
+            if (busyRef.current) event.preventDefault();
+          }}
+          onInteractOutside={(event) => {
+            if (busyRef.current) event.preventDefault();
+          }}
+        >
           <div className="project-dialog-head">
-            <Dialog.Title className="dlg-title">创建项目</Dialog.Title>
+            <span className="project-dialog-icon" aria-hidden="true">
+              <IconProject size={17} />
+            </span>
+            <div className="project-dialog-heading">
+              <Dialog.Title className="dlg-title">创建项目</Dialog.Title>
+              <Dialog.Description className="dlg-desc project-dialog-description">
+                为工作内容命名，并按需授权 Loom 访问项目目录。
+              </Dialog.Description>
+            </div>
             <Dialog.Close asChild>
-              <button className="project-dialog-close" aria-label="关闭">
+              <button className="project-dialog-close" type="button" aria-label="关闭" disabled={busy}>
                 <X size={16} />
               </button>
             </Dialog.Close>
           </div>
-          <label className="project-name-field">
-            <span><Folder size={17} /></span>
-            <input
-              autoFocus
-              placeholder="项目名称"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void submit();
-              }}
-            />
-          </label>
-          <div className="project-source-title">Source Roots</div>
-          <button className="project-source-drop" type="button" onClick={addFolder} disabled={picking}>
-            <FolderPlus size={22} />
-            <span>{picking ? "正在打开文件夹选择器..." : "添加 Loom 可读取和编辑的 Source Root"}</span>
-          </button>
-          {pickError && <div className="project-source-error">{pickError}</div>}
-          {sourceRoots.length > 0 && (
-            <div className="project-source-list">
-              {sourceRoots.map((folder) => (
-                <div className="project-source-row" key={folder} title={folder}>
-                  <Folder size={14} />
-                  <span>{folder}</span>
-                  <button
-                    type="button"
-                    aria-label="移除文件夹"
-                    onClick={() => setSourceRoots((current) => current.filter((item) => item !== folder))}
-                  >
-                    <X size={13} />
-                  </button>
-                </div>
-              ))}
+          <form className="project-dialog-form" onSubmit={handleSubmit}>
+            <div className="project-dialog-body">
+              <div className="project-name-field">
+                <label htmlFor={nameId}>项目名称</label>
+                <input
+                  id={nameId}
+                  autoFocus
+                  required
+                  disabled={busy}
+                  placeholder="例如：Loom 桌面端"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </div>
+              <section className="project-source-section" aria-labelledby={directoryTitleId}>
+                <h3 className="project-source-title" id={directoryTitleId}>项目目录（可选）</h3>
+                <button
+                  className="project-source-drop"
+                  type="button"
+                  aria-label="添加项目目录"
+                  aria-describedby={`${directoryHelpId}${pickError ? ` ${pickErrorId}` : ""}`}
+                  onClick={addFolder}
+                  disabled={picking || busy}
+                >
+                  <FolderPlus size={16} />
+                  <span className="project-source-copy">
+                    <strong>{picking ? "正在打开目录选择器..." : "添加项目目录"}</strong>
+                    <small id={directoryHelpId}>允许 Loom 在此目录中读取和编辑文件</small>
+                  </span>
+                </button>
+                {pickError && <div className="project-source-error" id={pickErrorId} role="alert">{pickError}</div>}
+                {sourceRoots.length > 0 && (
+                  <div className="project-source-list">
+                    {sourceRoots.map((folder) => (
+                      <div className="project-source-row" key={folder} title={folder}>
+                        <Folder size={14} />
+                        <span>{folder}</span>
+                        <button
+                          type="button"
+                          aria-label={`移除目录 ${folder}`}
+                          disabled={busy}
+                          onClick={() => setSourceRoots((current) => current.filter((item) => item !== folder))}
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+              {submitError && <div className="project-submit-error" id={submitErrorId} role="alert">{submitError}</div>}
             </div>
-          )}
-          <div className="dlg-actions">
-            <Dialog.Close asChild>
-              <button className="btn">取消</button>
-            </Dialog.Close>
-            <button className="btn primary" disabled={!name.trim() || busy} onClick={submit}>创建项目</button>
-          </div>
+            <div className="dlg-actions project-dialog-actions">
+              <Dialog.Close asChild>
+                <button className="btn" type="button" disabled={busy}>取消</button>
+              </Dialog.Close>
+              <button
+                className="btn primary"
+                type="submit"
+                aria-describedby={submitError ? submitErrorId : undefined}
+                disabled={!name.trim() || busy || picking}
+              >
+                {busy ? "正在创建..." : "创建项目"}
+              </button>
+            </div>
+          </form>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

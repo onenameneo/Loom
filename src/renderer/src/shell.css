@@ -2206,102 +2206,187 @@ button.activity-session-card {
   border-color: var(--err);
 }
 .project-create-dialog {
-  width: min(620px, calc(100vw - 48px));
-  padding: var(--s5);
-  gap: var(--s3);
+  top: 50%;
+  width: min(540px, calc(100vw - 48px));
+  max-height: min(680px, calc(100vh - 48px));
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
 }
 .project-dialog-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--s3);
+  padding: var(--s5);
+  border-bottom: 1px solid var(--border);
+}
+.project-dialog-icon {
+  width: var(--s6);
+  height: var(--s6);
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.project-dialog-heading {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 2px;
 }
 .project-dialog-head .dlg-title {
-  font-size: 18px;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.project-dialog-description {
+  line-height: 1.6;
 }
 .project-dialog-close {
   width: 28px;
   height: 28px;
+  flex: none;
   display: grid;
   place-items: center;
   border: 0;
   border-radius: var(--r-sm);
-  background: transparent;
+  background: none;
   color: var(--muted);
   cursor: pointer;
 }
 .project-dialog-close:hover {
   color: var(--text);
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  background: var(--surface-2);
+}
+.project-dialog-close:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+.project-dialog-form {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.project-dialog-body {
+  min-height: 0;
+  display: grid;
+  gap: var(--s4);
+  padding: var(--s5);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .project-name-field {
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr);
-  min-height: 50px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface);
-  overflow: hidden;
+  gap: var(--s2);
 }
-.project-name-field > span {
-  display: grid;
-  place-items: center;
-  border-right: 1px solid var(--border);
-  color: var(--muted);
+.project-name-field label {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.5;
 }
 .project-name-field input {
+  width: 100%;
+  height: 40px;
   min-width: 0;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text);
   padding: 0 var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  outline: 0;
+  background: var(--surface-2);
+  color: var(--text);
   font-family: var(--font-ui);
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 13px;
+  transition:
+    border-color 140ms var(--panel-motion-curve),
+    box-shadow 140ms var(--panel-motion-curve);
+}
+.project-name-field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.project-name-field input:disabled {
+  color: var(--muted);
+  cursor: default;
 }
 .project-name-field input::placeholder {
   color: var(--faint);
 }
+.project-source-section {
+  display: grid;
+  gap: var(--s2);
+}
 .project-source-title {
-  margin-top: var(--s1);
+  margin: 0;
   font-size: 12.5px;
-  font-weight: 550;
+  font-weight: 600;
+  line-height: 1.5;
   color: var(--text);
 }
 .project-source-drop {
-  min-height: 86px;
-  display: grid;
-  place-items: center;
-  gap: var(--s1);
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  background: var(--surface);
+  background: var(--surface-2);
   color: var(--muted);
   cursor: pointer;
   font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 500;
+  text-align: left;
+  transition:
+    border-color 140ms var(--panel-motion-curve),
+    background 140ms var(--panel-motion-curve);
 }
 .project-source-drop:disabled {
-  cursor: wait;
-  opacity: 0.72;
+  color: var(--faint);
+  cursor: default;
 }
-.project-source-drop:hover {
+.project-source-drop:not(:disabled):hover {
   color: var(--text);
   border-color: var(--border-strong);
-  background: var(--surface-2);
+  background: var(--surface);
 }
 .project-source-drop svg {
+  flex: none;
   color: var(--faint);
 }
-.project-source-error {
+.project-source-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.project-source-copy strong {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.project-source-copy small {
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.project-source-drop:disabled .project-source-copy strong {
+  color: var(--muted);
+}
+.project-source-error,
+.project-submit-error {
   color: var(--err);
   font-size: 12px;
+  line-height: 1.5;
 }
 .project-source-list {
   display: grid;
-  gap: var(--s2);
+  gap: var(--s1);
+  max-height: 144px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .project-source-row {
   display: grid;
@@ -2330,13 +2415,52 @@ button.activity-session-card {
   place-items: center;
   border: 0;
   border-radius: var(--r-sm);
-  background: transparent;
+  background: none;
   color: var(--faint);
   cursor: pointer;
 }
-.project-source-row button:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+.project-source-row button:not(:disabled):hover {
+  background: var(--surface);
   color: var(--text);
+}
+.project-source-row button:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+.project-dialog-actions {
+  flex: none;
+  min-height: 61px;
+  align-items: center;
+  margin-top: 0;
+  padding: var(--s3) var(--s5);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.project-dialog-actions .btn {
+  min-width: 84px;
+  height: 36px;
+  justify-content: center;
+  margin-top: 0;
+  padding-block: 0;
+}
+.project-dialog-actions .btn:disabled {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--faint);
+  cursor: default;
+}
+@media (max-width: 560px) {
+  .project-create-dialog {
+    width: calc(100vw - var(--s6));
+    max-height: calc(100vh - var(--s6));
+  }
+  .project-dialog-head,
+  .project-dialog-body {
+    padding: var(--s4);
+  }
+  .project-dialog-actions {
+    padding-inline: var(--s4);
+  }
 }
 @keyframes dlg-overlay-in {
   from { opacity: 0; visibility: visible; backdrop-filter: blur(0); }
