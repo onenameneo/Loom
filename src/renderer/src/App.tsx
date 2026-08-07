@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/shallow";
 import type { ActivitySession, ActivityStatus, ActivityTool, AgentProc, ProjectMeta, SessionMeta, SettingsPayload } from "./env";
 import Sidebar from "./Sidebar";
 import { CanvasLayoutProvider } from "./canvas/CanvasLayoutContext";
 import { AppChrome, TitlebarProvider } from "./titlebar/Titlebar";
 import { Workbench } from "./workbench/Workbench";
+import { CreateProjectDialog } from "./ui/dialogs";
 import { isBrowserSidebarShortcut } from "./titlebar/sidebarState";
 import { useAppShellController } from "./titlebar/useAppShellController";
 import {
@@ -13,16 +15,28 @@ import {
   SURFACES,
   type SurfaceCtx,
 } from "./surfaces";
+import {
+  selectProjects,
+  selectSessionsForProject,
+  useWorkspaceStore,
+} from "./workspace/store";
+import { connectLiveTurnBridge } from "./workspace/liveTurnBridge";
 
 export default function App() {
   const [activeSurface, setActiveSurface] = useState("project");
-  const [projects, setProjects] = useState<ProjectMeta[]>([]);
-  const [sessions, setSessions] = useState<SessionMeta[]>([]);
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
-  const [sessionMode, setSessionMode] = useState<"chat" | "canvas">("chat");
-  const sessionUiStateRef = useRef(new Map<string, { nodeId: string | null; mode: "chat" | "canvas" }>());
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const projects = useWorkspaceStore(useShallow(selectProjects));
+  const activeProjectId = useWorkspaceStore((state) => state.activeProjectId);
+  const sessions = useWorkspaceStore(useShallow((state) => selectSessionsForProject(state, state.activeProjectId)));
+  const activeSessionId = useWorkspaceStore((state) => state.activeSessionId);
+  const activeNodeId = useWorkspaceStore((state) => state.activeNodeId);
+  const hydrateProjects = useWorkspaceStore((state) => state.hydrateProjects);
+  const hydrateSessions = useWorkspaceStore((state) => state.hydrateSessions);
+  const selectProject = useWorkspaceStore((state) => state.selectProject);
+  const selectSession = useWorkspaceStore((state) => state.selectSession);
+  const selectNode = useWorkspaceStore((state) => state.selectNode);
+  const [sessionMode, setSessionMode] = useState<"chat" | "canvas" | null>(null);
+  const sessionUiStateRef = useRef(new Map<string, { nodeId: string | null; mode: "chat" | "canvas" | null }>());
   const previousSessionIdRef = useRef<string | null>(null);
   const sessionLoadRequestRef = useRef(0);
   const pendingProjectIdRef = useRef<string | null>(null);
@@ -79,21 +93,17 @@ export default function App() {
         { id: "project_demo", name: "理解 Transformer", createdAt: 0, updatedAt: 0, pinned: true, order: 0 },
         { id: "project_demo2", name: "freqtrade 策略研究", createdAt: 0, updatedAt: 0, pinned: false, order: 1 },
       ];
-      setProjects(demo);
-      setActiveProjectId((cur) => cur ?? demo[0].id);
+      hydrateProjects(demo);
       return demo;
     }
     const list = await window.api.projects.list();
-    setProjects(list);
-    setActiveProjectId((cur) => cur ?? list[0]?.id ?? null);
+    hydrateProjects(list);
     return list;
-  }, []);
+  }, [hydrateProjects]);
 
   const reloadSessions = useCallback(async (projectId: string | null = activeProjectId) => {
     const requestId = ++sessionLoadRequestRef.current;
     if (!projectId) {
-      setSessions([]);
-      setActiveSessionId(null);
       return [];
     }
     if (!window.api) {
@@ -101,16 +111,14 @@ export default function App() {
         { id: `${projectId}:session-main`, projectId, title: "新会话", createdAt: 0, updatedAt: 0, order: 0 },
         { id: `${projectId}:session-notes`, projectId, title: "实验记录", createdAt: 0, updatedAt: 0, order: 1 },
       ];
-      setSessions(demo);
-      setActiveSessionId((cur) => (cur && demo.some((s) => s.id === cur) ? cur : demo[0]?.id ?? null));
+      hydrateSessions(projectId, demo);
       return demo;
     }
     const list = await window.api.sessions.list(projectId);
     if (requestId !== sessionLoadRequestRef.current) return list;
-    setSessions(list);
-    setActiveSessionId((cur) => (cur && list.some((s) => s.id === cur) ? cur : list[0]?.id ?? null));
+    hydrateSessions(projectId, list);
     return list;
-  }, [activeProjectId]);
+  }, [activeProjectId, hydrateSessions]);
 
   useEffect(() => {
     reloadSettings();
@@ -123,16 +131,51 @@ export default function App() {
 
   useEffect(() => {
     const previous = previousSessionIdRef.current;
-    if (previous && previous !== activeSessionId) {
-      sessionUiStateRef.current.set(previous, { nodeId: activeNodeId, mode: sessionMode });
-    }
     if (activeSessionId && previous !== activeSessionId) {
       const saved = sessionUiStateRef.current.get(activeSessionId);
-      setActiveNodeId(saved?.nodeId ?? null);
-      setSessionMode(saved?.mode ?? "chat");
+      const persisted = useWorkspaceStore.getState().sessionsById[activeSessionId]?.ui;
+      selectNode(saved?.nodeId ?? persisted?.activeNodeId ?? null);
+      setSessionMode(saved?.mode ?? persisted?.mode ?? null);
     }
     previousSessionIdRef.current = activeSessionId;
+  }, [activeSessionId, selectNode]);
+
+  const updateSessionUi = useCallback((patch: { activeNodeId?: string; mode?: "chat" | "canvas" }) => {
+    const updateUi = window.api?.sessions?.updateUi;
+    if (!activeSessionId || !updateUi) return;
+    void updateUi(activeSessionId, patch);
   }, [activeSessionId]);
+
+  const setPersistedSessionMode = useCallback((mode: "chat" | "canvas") => {
+    setSessionMode(mode);
+    if (activeSessionId) {
+      sessionUiStateRef.current.set(activeSessionId, {
+        nodeId: useWorkspaceStore.getState().activeNodeId,
+        mode,
+      });
+    }
+    updateSessionUi({ mode });
+  }, [activeSessionId, updateSessionUi]);
+
+  const setPersistedActiveNode = useCallback((nodeId: string | null) => {
+    selectNode(nodeId);
+    if (activeSessionId && nodeId) {
+      const remembered = sessionUiStateRef.current.get(activeSessionId);
+      const persisted = useWorkspaceStore.getState().sessionsById[activeSessionId]?.ui;
+      sessionUiStateRef.current.set(activeSessionId, {
+        nodeId,
+        mode: sessionMode ?? remembered?.mode ?? persisted?.mode ?? null,
+      });
+      updateSessionUi({ activeNodeId: nodeId });
+    }
+  }, [activeSessionId, selectNode, sessionMode, updateSessionUi]);
+
+  useEffect(() => {
+    const updateUi = window.api?.projects?.updateUi;
+    if (activeProjectId && activeSessionId && updateUi) {
+      void updateUi(activeProjectId, { activeSessionId });
+    }
+  }, [activeProjectId, activeSessionId]);
 
   useEffect(() => {
     if (!window.api?.monitor) return;
@@ -182,6 +225,11 @@ export default function App() {
     setActiveSessionKey(views[0]?.session.key ?? null);
   }, [activeSessionKey, activityNow, activitySessions, agents]);
 
+  useEffect(() => {
+    if (!window.api?.canvas) return;
+    return connectLiveTurnBridge(window.api.canvas);
+  }, []);
+
   const refreshActivityStatus = useCallback(async () => {
     if (!window.api?.activity) return;
     setActivityStatus(await window.api.activity.status());
@@ -197,33 +245,43 @@ export default function App() {
     if (!window.api) return;
     const project = await window.api.projects.create(input);
     await reloadProjects();
-    setActiveProjectId(project.id);
+    selectProject(project.id);
     setActiveSurface("project");
-  }, [reloadProjects]);
+  }, [reloadProjects, selectProject]);
+
+  const openCreateProject = useCallback(() => {
+    setCreateProjectOpen(true);
+  }, []);
+
+  const pickProjectFolder = useCallback(async () => {
+    const picker = window.api?.projects?.pickSourceRoot ?? window.api?.acp?.pickDir;
+    if (!picker) throw new Error("当前窗口未暴露目录选择器，请重启应用后再试。");
+    const result = await picker();
+    return result.canceled || !result.path ? undefined : result.path;
+  }, []);
 
   const createSession = useCallback(async (projectId?: string) => {
     const targetProjectId = projectId ?? activeProjectId;
     if (!window.api || !targetProjectId) return;
     const session = await window.api.sessions.create(targetProjectId);
     await reloadSessions(targetProjectId);
-    setActiveProjectId(targetProjectId);
-    setActiveSessionId(session.id);
-    setActiveNodeId(null);
+    selectProject(targetProjectId);
+    selectSession(session.id);
     setActiveSurface("project");
-  }, [activeProjectId, reloadSessions]);
+  }, [activeProjectId, reloadSessions, selectProject, selectSession]);
 
   // 原生菜单动作
   useEffect(() => {
     if (!window.api) return;
     return window.api.onMenu((action) => {
-      if (action === "new-project") createProject();
+      if (action === "new-project") openCreateProject();
       else if (action === "new-session") createSession();
       else if (action === "settings") setActiveSurface("settings");
       else if (action === "surface:project") setActiveSurface("project");
       else if (action === "surface:observatory") setActiveSurface("observatory");
       else if (action === "toggle-sidebar") shellController.requestToggle("menu");
     });
-  }, [createProject, createSession, shellController.requestToggle]);
+  }, [createSession, openCreateProject, shellController.requestToggle]);
 
   useEffect(() => {
     if (window.api) return;
@@ -254,16 +312,16 @@ export default function App() {
     sessions,
     activeProjectId,
     activeSessionId,
-    createProject,
+    openCreateProject,
     createSession,
     goSettings: () => setActiveSurface("settings"),
     settings,
     reloadSettings,
     theme,
     activeNodeId,
-    setActiveNodeId,
+    setActiveNodeId: setPersistedActiveNode,
     sessionMode,
-    setSessionMode,
+    setSessionMode: setPersistedSessionMode,
     treeVersion,
     bumpTreeVersion: bumpProjectTree,
     agentCount: agents.length,
@@ -302,35 +360,37 @@ export default function App() {
                 setSurface={setActiveSurface}
                 ctx={ctx}
                 onSelectSession={async (id) => {
-                  setActiveSessionId(id);
+                  selectSession(id);
                   if (sessionMode !== "canvas") {
-                    setActiveNodeId(null);
                     return;
                   }
                   const nodes = window.api ? await window.api.canvas.list(id) : [];
                   const root = nodes.find((node) => !node.parentId) ?? nodes[0];
-                  setActiveNodeId(root?.id ?? null);
+                  selectNode(root?.id ?? null);
                 }}
                 onFocusNode={(sessionId, nodeId) => {
-                  const session = sessions.find((item) => item.id === sessionId);
-                  const nextMode = "canvas" as const;
+                  const session = useWorkspaceStore.getState().sessionsById[sessionId];
+                  const remembered = sessionUiStateRef.current.get(sessionId);
+                  const nextMode = sessionId === activeSessionId
+                    ? sessionMode ?? remembered?.mode ?? session?.ui?.mode ?? "chat"
+                    : remembered?.mode ?? session?.ui?.mode ?? "chat";
                   sessionUiStateRef.current.set(sessionId, { nodeId, mode: nextMode });
                   const nextProjectId = session?.projectId ?? pendingProjectIdRef.current;
                   pendingProjectIdRef.current = null;
-                  if (nextProjectId) setActiveProjectId(nextProjectId);
-                  setActiveSessionId(sessionId);
+                  if (nextProjectId) selectProject(nextProjectId);
+                  selectSession(sessionId);
                   setSessionMode(nextMode);
+                  void window.api?.sessions?.updateUi?.(sessionId, { activeNodeId: nodeId, mode: nextMode });
                   setActiveSurface("project");
-                  setActiveNodeId(nodeId);
+                  selectNode(nodeId);
                 }}
-                onCreateProject={createProject}
+                onOpenCreateProject={openCreateProject}
                 onRenameProject={async (id, name) => {
                   await window.api.projects.rename(id, name);
                   reloadProjects();
                 }}
                 onDeleteProject={async (id) => {
                   await window.api.projects.delete(id);
-                  setActiveProjectId((cur) => (cur === id ? null : cur));
                   reloadProjects();
                 }}
                 onPinProject={async (id, pinned) => {
@@ -339,7 +399,7 @@ export default function App() {
                 }}
                 onSelectProject={(id) => {
                   pendingProjectIdRef.current = id;
-                  setActiveProjectId(id);
+                  selectProject(id);
                 }}
                 onCreateSession={createSession}
                 onRenameSession={async (id, title) => {
@@ -348,7 +408,6 @@ export default function App() {
                 }}
                 onDeleteSession={async (id) => {
                   await window.api.sessions.delete(id);
-                  setActiveSessionId((cur) => (cur === id ? null : cur));
                   reloadSessions(activeProjectId);
                 }}
                 onRenameNode={async (id, title) => {
@@ -357,7 +416,7 @@ export default function App() {
                 }}
                 onDeleteNode={async (id) => {
                   if (window.api) await window.api.canvas.delete(id);
-                  setActiveNodeId((current) => (current === id ? null : current));
+                  if (activeNodeId === id) selectNode(null);
                   setTreeVersion((version) => version + 1);
                 }}
                 onSetSessionColor={async (_sessionId, nodeId, color) => {
@@ -375,6 +434,12 @@ export default function App() {
             right={<Workbench nodeId={activeNodeId} />}
             workbenchOpen={workbenchOpen}
             onToggleWorkbench={() => setWorkbenchOpen((open) => !open)}
+          />
+          <CreateProjectDialog
+            open={createProjectOpen}
+            onOpenChange={setCreateProjectOpen}
+            onPickFolder={pickProjectFolder}
+            onSubmit={createProject}
           />
         </div>
       </CanvasLayoutProvider>

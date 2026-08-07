@@ -30,7 +30,7 @@ function surfaceCtx(): SurfaceCtx {
     sessions: [],
     activeProjectId: null,
     activeSessionId: null,
-    createProject: vi.fn(),
+    openCreateProject: vi.fn(),
     createSession: vi.fn(),
     goSettings: vi.fn(),
     settings: null,

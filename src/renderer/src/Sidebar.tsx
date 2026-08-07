@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
 import { Bot, Check, ChevronDown, ChevronRight, Folder, FolderOpen, PanelTopClose, Pencil, Pin, Terminal, Trash2 } from "lucide-react";
+import { useShallow } from "zustand/shallow";
 import type { ActivityTool, AgentProc, CanvasNodeDto, ProjectMeta, SessionMeta, SettingsPayload } from "./env";
 import { publishNodeUpdate, subscribeNodeUpdates } from "./canvas/nodeUpdates";
 import { IconMoon, IconPlus, IconSun } from "./icons";
@@ -19,7 +20,8 @@ import {
   SURFACES,
   type SurfaceCtx,
 } from "./surfaces";
-import { ConfirmDialog, CreateProjectDialog, RenameDialog, Tip } from "./ui/dialogs";
+import { ConfirmDialog, RenameDialog, Tip } from "./ui/dialogs";
+import { selectProjects, selectSessionsForProject, useWorkspaceStore } from "./workspace/store";
 
 const SIDEBAR_PROJECT_EXPANSION_KEY = "loom:sidebar:expanded-projects";
 const SIDEBAR_SESSION_EXPANSION_KEY = "loom:sidebar:expanded-sessions";
@@ -55,6 +57,7 @@ function outlineRows(nodes: CanvasNodeDto[]): Array<{ node: CanvasNodeDto; depth
 }
 
 function SidebarNodeRow({
+  nodeId,
   active,
   title,
   colorControl,
@@ -63,6 +66,7 @@ function SidebarNodeRow({
   actions,
   root = false,
 }: {
+  nodeId: string;
   active: boolean;
   title: string;
   colorControl: ReactNode;
@@ -71,19 +75,59 @@ function SidebarNodeRow({
   actions?: ReactNode;
   root?: boolean;
 }) {
+  const liveTurn = useWorkspaceStore((state) => state.turnsByNodeId[nodeId]);
   return (
     <div
       className={`sb-session-row ${root ? "is-root" : "is-child"} ${active ? "active" : ""}`}
-      style={!root && paddingLeft ? { paddingLeft } : undefined}
+      style={paddingLeft ? { paddingLeft } : undefined}
     >
-      {colorControl}
+      {liveTurn ? (
+        <span
+          className="node-running-indicator"
+          data-testid={`node-running-${nodeId}`}
+          role="status"
+          aria-label={`${title} 正在生成`}
+          title="正在生成"
+        />
+      ) : colorControl}
       <button
         className={`sb-branch sb-root-row ${active ? "active" : ""}`}
-        style={root ? { paddingLeft: 20 } : undefined}
         onClick={onClick}
         aria-label={title}
       >
         <span>{title}</span>
+      </button>
+      {actions}
+    </div>
+  );
+}
+
+function SidebarSessionRow({
+  active,
+  expanded,
+  session,
+  onClick,
+  onToggle,
+  actions,
+}: {
+  active: boolean;
+  expanded: boolean;
+  session: SessionMeta;
+  onClick: () => void;
+  onToggle: () => void;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className={`sb-session-row sb-session-header ${active ? "active" : ""}`}>
+      <button
+        className="sb-session-toggle"
+        aria-label={`${expanded ? "折叠" : "展开"}${session.title}`}
+        onClick={onToggle}
+      >
+        {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+      </button>
+      <button className="sb-session-title" onClick={onClick} aria-label={session.title}>
+        <span>{session.title}</span>
       </button>
       {actions}
     </div>
@@ -96,7 +140,7 @@ export default function Sidebar({
   ctx,
   onSelectSession,
   onFocusNode,
-  onCreateProject,
+  onOpenCreateProject,
   onRenameProject,
   onDeleteProject,
   onPinProject,
@@ -115,7 +159,7 @@ export default function Sidebar({
   ctx: SurfaceCtx;
   onSelectSession: (id: string) => void | Promise<void>;
   onFocusNode: (sessionId: string, nodeId: string) => void;
-  onCreateProject: (input?: { name?: string; sourceRoots?: string[] }) => void | Promise<void>;
+  onOpenCreateProject: () => void;
   onRenameProject: (id: string, name: string) => void;
   onDeleteProject: (id: string) => void;
   onPinProject: (id: string, pinned: boolean) => void;
@@ -132,28 +176,25 @@ export default function Sidebar({
 }) {
   const [renaming, setRenaming] = useState<ProjectMeta | null>(null);
   const [deleting, setDeleting] = useState<ProjectMeta | null>(null);
-  const [creatingProject, setCreatingProject] = useState(false);
   const [renamingSession, setRenamingSession] = useState<SessionMeta | null>(null);
   const [deletingSession, setDeletingSession] = useState<SessionMeta | null>(null);
   const [renamingNode, setRenamingNode] = useState<CanvasNodeDto | null>(null);
   const [deletingNode, setDeletingNode] = useState<CanvasNodeDto | null>(null);
   const [projectExpanded, setProjectExpanded] = useState<Set<string>>(() => readStoredSet(SIDEBAR_PROJECT_EXPANSION_KEY));
   const [sessionExpanded, setSessionExpanded] = useState<Set<string>>(() => readStoredSet(SIDEBAR_SESSION_EXPANSION_KEY));
-  const [projectSessionsByProject, setProjectSessionsByProject] = useState<Record<string, SessionMeta[]>>({});
-  // 每个会话独立展开：sessionExpanded 记哪些会话展开，outlines 存各自的节点列表。
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["agent:claude", "agent:codex"]));
-  const [outlines, setOutlines] = useState<Record<string, CanvasNodeDto[]>>({});
   const [sessionColorOpen, setSessionColorOpen] = useState<string | null>(null);
+  const projects = useWorkspaceStore(useShallow(selectProjects));
+  const sessionsById = useWorkspaceStore((state) => state.sessionsById);
+  const nodesById = useWorkspaceStore((state) => state.nodesById);
+  const sessionIdsByProjectId = useWorkspaceStore((state) => state.sessionIdsByProjectId);
+  const nodeIdsBySessionId = useWorkspaceStore((state) => state.nodeIdsBySessionId);
 
   useEffect(() => subscribeNodeUpdates((update) => {
-    setOutlines((current) => ({
-      ...current,
-      [update.sessionId]: (current[update.sessionId] ?? []).map((node) =>
-        node.id === update.id
-          ? { ...node, ...(update.title !== undefined ? { title: update.title } : {}), ...(update.color !== undefined ? { color: update.color } : {}) }
-          : node,
-      ),
-    }));
+    useWorkspaceStore.getState().patchNode(update.id, {
+      ...(update.title !== undefined ? { title: update.title } : {}),
+      ...(update.color !== undefined ? { color: update.color } : {}),
+    });
   }), []);
 
   // 活跃 Project / Session 自动展开（切到它时把层级打开）
@@ -167,52 +208,63 @@ export default function Sidebar({
   }, [ctx.activeProjectId, ctx.activeSessionId]);
 
   useEffect(() => {
-    const validProjects = new Set(ctx.projects.map((project) => project.id));
-    const validSessions = new Set(ctx.sessions.map((session) => session.id));
+    // On first mount the store is populated by the boundary bridge below. Do not
+    // discard persisted expansion before that first hydration finishes.
+    const validProjects = new Set([...projects, ...ctx.projects].map((project) => project.id));
+    const validSessions = new Set([...Object.keys(sessionsById), ...ctx.sessions.map((session) => session.id)]);
     setProjectExpanded((prev) => new Set([...prev].filter((id) => validProjects.has(id))));
     setSessionExpanded((prev) => new Set([...prev].filter((id) => validSessions.has(id))));
-    setProjectSessionsByProject((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => validProjects.has(id))));
-  }, [ctx.projects, ctx.sessions]);
+  }, [projects, sessionsById]);
 
   useEffect(() => writeStoredSet(SIDEBAR_PROJECT_EXPANSION_KEY, projectExpanded), [projectExpanded]);
   useEffect(() => writeStoredSet(SIDEBAR_SESSION_EXPANSION_KEY, sessionExpanded), [sessionExpanded]);
 
+  // App owns hydration. This only supports an entirely empty first mount (such
+  // as an isolated preview); it must never overwrite already-normalized data
+  // with a transient ctx snapshot during Project/Session navigation.
   useEffect(() => {
-    if (!ctx.activeProjectId) return;
-    // 切换项目时 ctx.sessions 可能暂时还保留上一个项目的数据；不要用这份旧列表覆盖目标项目缓存。
-    if (ctx.sessions.some((session) => session.projectId !== ctx.activeProjectId)) return;
-    setProjectSessionsByProject((prev) => ({ ...prev, [ctx.activeProjectId!]: ctx.sessions }));
-  }, [ctx.activeProjectId, ctx.sessions]);
+    const store = useWorkspaceStore.getState();
+    const currentProjects = selectProjects(store);
+    if (currentProjects.length === 0 && ctx.projects.length > 0) {
+      store.hydrateProjects(ctx.projects);
+    }
+    if (ctx.activeProjectId && ctx.sessions.every((session) => session.projectId === ctx.activeProjectId)) {
+      const currentSessions = selectSessionsForProject(store, ctx.activeProjectId);
+      if (currentSessions.length === 0 && ctx.sessions.length > 0) {
+        store.hydrateSessions(ctx.activeProjectId, ctx.sessions);
+      }
+    }
+  }, [ctx.projects, ctx.sessions, ctx.activeProjectId]);
 
   useEffect(() => {
     if (!window.api?.sessions || activeSurface !== "project") return;
     let alive = true;
-    const validProjects = new Set(ctx.projects.map((project) => project.id));
-    const ids = ctx.projects.map((project) => project.id).filter((id) => validProjects.has(id) && id !== ctx.activeProjectId);
-    Promise.all(ids.map((id) => window.api!.sessions.list(id).then((sessions) => [id, sessions] as const))).then((entries) => {
+    Promise.all(projects.map((project) => window.api!.sessions.list(project.id).then((sessions) => [project.id, sessions] as const))).then((entries) => {
       if (!alive || entries.length === 0) return;
-      setProjectSessionsByProject((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+      const store = useWorkspaceStore.getState();
+      for (const [projectId, sessions] of entries) store.hydrateSessions(projectId, sessions);
     });
     return () => {
       alive = false;
     };
-  }, [activeSurface, ctx.projects, ctx.activeProjectId, ctx.treeVersion]);
+  }, [activeSurface, projects, ctx.treeVersion]);
 
-  // 为所有「已展开」的 Session 拉取各自的节点（树变化时 treeVersion 触发重取）
+  // 会话树是共享实体数据：提前加载每个 Session 的节点，展开时不再临时创建另一份缓存。
   useEffect(() => {
     if (!window.api || activeSurface !== "project") return;
     let alive = true;
-    const cachedSessions = Object.values(projectSessionsByProject).flat();
-    const ids = [...new Set([...ctx.sessions, ...cachedSessions].map((session) => session.id).concat([...sessionExpanded]))];
+    const ids = Object.values(sessionIdsByProjectId).flat();
     Promise.all(
       ids.map((id) => window.api!.canvas.list(id).then((nodes) => [id, nodes] as const)),
     ).then((entries) => {
-      if (alive) setOutlines(Object.fromEntries(entries));
+      if (!alive) return;
+      const store = useWorkspaceStore.getState();
+      for (const [sessionId, nodes] of entries) store.hydrateNodes(sessionId, nodes);
     });
     return () => {
       alive = false;
     };
-  }, [sessionExpanded, projectSessionsByProject, activeSurface, ctx.treeVersion, ctx.sessions]);
+  }, [sessionIdsByProjectId, activeSurface, ctx.treeVersion]);
 
   const toggleExpand = useCallback((id: string) => {
     setExpanded((prev) => {
@@ -242,10 +294,7 @@ export default function Sidebar({
   }, []);
 
   const focusNode = useCallback((sessionId: string, nodeId: string) => {
-    const session = [
-      ...ctx.sessions,
-      ...Object.values(projectSessionsByProject).flat(),
-    ].find((item) => item.id === sessionId);
+    const session = useWorkspaceStore.getState().sessionsById[sessionId];
     if (session) {
       if (session.projectId !== ctx.activeProjectId) onSelectProject?.(session.projectId);
       setProjectExpanded((prev) => new Set(prev).add(session.projectId));
@@ -253,17 +302,14 @@ export default function Sidebar({
     }
     ctx.setActiveNodeId(nodeId);
     onFocusNode(sessionId, nodeId);
-  }, [ctx.activeProjectId, ctx.sessions, ctx.setActiveNodeId, onFocusNode, onSelectProject, projectSessionsByProject]);
+  }, [ctx.activeProjectId, ctx.setActiveNodeId, onFocusNode, onSelectProject]);
 
   const renderNodeColor = (sessionId: string, node: CanvasNodeDto) => {
     const colorKey = `${sessionId}:${node.id}`;
     const updateColor = (color: string) => {
       void onSetSessionColor?.(sessionId, node.id, color);
       publishNodeUpdate({ id: node.id, sessionId, color: color || undefined });
-      setOutlines((current) => ({
-        ...current,
-        [sessionId]: (current[sessionId] ?? []).map((item) => item.id === node.id ? { ...item, color: color || undefined } : item),
-      }));
+      useWorkspaceStore.getState().patchNode(node.id, { color: color || undefined });
       setSessionColorOpen(null);
     };
     return (
@@ -371,11 +417,8 @@ export default function Sidebar({
 
   const renderProject = (w: ProjectMeta) => {
     const isProjectExpanded = projectExpanded.has(w.id);
-    const cachedSessions = projectSessionsByProject[w.id] ?? [];
-    const activeSessionsBelongToProject = ctx.sessions.length > 0 && ctx.sessions.every((session) => session.projectId === w.id);
-    const projectSessions = w.id === ctx.activeProjectId
-      ? (activeSessionsBelongToProject ? ctx.sessions : cachedSessions)
-      : cachedSessions;
+    const projectSessions = (sessionIdsByProjectId[w.id] ?? [])
+      .flatMap((id) => sessionsById[id] ? [sessionsById[id]] : []);
     const isProjectSelected = ctx.activeProjectId === w.id && !ctx.activeSessionId && !ctx.activeNodeId;
     return (
       <Fragment key={w.id}>
@@ -445,23 +488,17 @@ export default function Sidebar({
               <div className="sb-hint">一个会话 = 一张可分支的画布</div>
             )}
             {projectSessions.map((session) => {
-              const rows = outlineRows(outlines[session.id] ?? []);
-              const rootRow = rows[0];
-              const childRows = rows.slice(1);
+              const rows = outlineRows((nodeIdsBySessionId[session.id] ?? [])
+                .flatMap((id) => nodesById[id] ? [nodesById[id]] : []));
               const activeNodeId = ctx.activeNodeId;
-              if (!rootRow) return null;
-              const rootActive = ctx.activeSessionId === session.id && (activeNodeId === rootRow.node.id || !activeNodeId);
               return (
                 <Fragment key={session.id}>
-                  <SidebarNodeRow
-                    root
-                    active={rootActive}
-                    title={rootRow.node.title || DEFAULT_ROOT_TITLE}
-                    colorControl={renderNodeColor(session.id, rootRow.node)}
-                    onClick={() => {
-                      onSelectSession(session.id);
-                      focusNode(session.id, rootRow.node.id);
-                    }}
+                  <SidebarSessionRow
+                    active={ctx.activeSessionId === session.id && !activeNodeId}
+                    expanded={sessionExpanded.has(session.id)}
+                    session={session}
+                    onToggle={() => toggleSession(session.id)}
+                    onClick={() => toggleSession(session.id)}
                     actions={(
                       <span className="session-actions">
                         <Tip label="重命名"><button aria-label="重命名会话" onClick={() => setRenamingSession(session)}><Pencil size={13} /></button></Tip>
@@ -469,15 +506,17 @@ export default function Sidebar({
                       </span>
                     )}
                   />
-                  <div className={`sb-collapse ${childRows.length > 0 ? "open" : ""}`} aria-hidden={childRows.length === 0}>
+                  <div className={`sb-collapse ${sessionExpanded.has(session.id) ? "open" : ""}`} aria-hidden={!sessionExpanded.has(session.id)}>
                     <div className="sb-collapse-inner sb-outline">
-                      {childRows.map(({ node, depth }) => (
+                      {rows.map(({ node, depth }) => (
                         <SidebarNodeRow
                           key={node.id}
+                          nodeId={node.id}
+                          root={depth === 0}
                           active={ctx.activeSessionId === session.id && activeNodeId === node.id}
                           title={depth === 0 ? (node.title || DEFAULT_ROOT_TITLE) : node.title || DEFAULT_BRANCH_TITLE}
                           colorControl={renderNodeColor(session.id, node)}
-                          paddingLeft={40 + Math.max(0, depth - 1) * 12}
+                          paddingLeft={depth === 0 ? 16 : 28 + (depth - 1) * 12}
                           onClick={() => focusNode(session.id, node.id)}
                           actions={(
                             <span className="session-actions">
@@ -498,8 +537,8 @@ export default function Sidebar({
     );
   };
 
-  const pinnedProjects = ctx.projects.filter((project) => project.pinned);
-  const regularProjects = ctx.projects.filter((project) => !project.pinned);
+  const pinnedProjects = projects.filter((project) => project.pinned);
+  const regularProjects = projects.filter((project) => !project.pinned);
   const collapseProjectsButton = (projects: ProjectMeta[], label: string) => {
     const projectIds = new Set(projects.map((project) => project.id));
     return (
@@ -567,13 +606,13 @@ export default function Sidebar({
             <span className="sb-section-actions">
               {collapseProjectsButton(regularProjects, "普通项目")}
               <Tip label="新建项目">
-                <button className="sb-add" aria-label="新建项目" onClick={() => setCreatingProject(true)}>
+                <button className="sb-add" aria-label="新建项目" onClick={onOpenCreateProject}>
                   <IconPlus />
                 </button>
               </Tip>
             </span>
           </div>
-          {ctx.projects.length === 0 && <div className="sb-hint">（还没有，点 + 新建）</div>}
+          {projects.length === 0 && <div className="sb-hint">（还没有，点 + 新建）</div>}
           {regularProjects.map(renderProject)}
         </div>
       )}
@@ -607,17 +646,6 @@ export default function Sidebar({
         title="重命名分支"
         initial={renamingNode?.title ?? ""}
         onSubmit={(name) => renamingNode && onRenameNode?.(renamingNode.id, name)}
-      />
-      <CreateProjectDialog
-        open={creatingProject}
-        onOpenChange={setCreatingProject}
-        onPickFolder={async () => {
-          const picker = window.api?.projects?.pickSourceRoot ?? window.api?.acp?.pickDir;
-          if (!picker) throw new Error("当前窗口未暴露目录选择器，请重启应用后再试。");
-          const result = await picker();
-          return result.canceled ? undefined : result.path;
-        }}
-        onSubmit={onCreateProject}
       />
       <ConfirmDialog
         open={!!deleting}

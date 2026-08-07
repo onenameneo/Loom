@@ -41,7 +41,7 @@ export interface SurfaceCtx {
   sessions: SessionMeta[];
   activeProjectId: string | null;
   activeSessionId: string | null;
-  createProject: (input?: { name?: string; sourceRoots?: string[] }) => void | Promise<void>;
+  openCreateProject: () => void;
   createSession: (projectId?: string) => void;
   goSettings: () => void;
   settings: SettingsPayload | null;
@@ -49,7 +49,7 @@ export interface SurfaceCtx {
   theme: "light" | "dark";
   activeNodeId?: string | null;
   setActiveNodeId: (nodeId: string | null) => void;
-  sessionMode: "chat" | "canvas";
+  sessionMode: "chat" | "canvas" | null;
   setSessionMode: (mode: "chat" | "canvas") => void;
   treeVersion: number;
   bumpTreeVersion: () => void;
@@ -72,31 +72,53 @@ export interface Surface {
   badge?: (ctx: SurfaceCtx) => string | number | null;
 }
 
+function CreationEmptyState({
+  title,
+  description,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  description: string;
+  actionLabel: string;
+  onAction: () => void | Promise<void>;
+}) {
+  return (
+    <div className="surface-empty" data-testid="creation-empty-state">
+      <div className="big">{title}</div>
+      <div className="sub">{description}</div>
+      <button className="btn" onClick={() => void onAction()}>
+        <IconPlus /> {actionLabel}
+      </button>
+    </div>
+  );
+}
+
 // ---- 会话主面（对话/画布合一；本阶段单节点聊天）----
 function ProjectPanel({ ctx }: { ctx: SurfaceCtx }) {
   const project = ctx.projects.find((p) => p.id === ctx.activeProjectId);
   const session = ctx.sessions.find((s) => s.id === ctx.activeSessionId);
   const noKey = ctx.settings && !ctx.settings.hasKey;
   if (!project) {
+    const hasProjects = ctx.projects.length > 0;
     return (
-      <div className="surface-empty">
-        <div className="big">还没有项目</div>
-        <div className="sub">一个项目可以包含多个独立会话。</div>
-        <button className="btn" onClick={() => void ctx.createProject()}>
-          <IconPlus /> 新建项目
-        </button>
-      </div>
+      <CreationEmptyState
+        title={hasProjects ? "开始一个新项目" : "还没有项目"}
+        description={hasProjects ? "新建项目，或从左侧打开已有话题。" : "一个项目可以包含多个独立会话。"}
+        actionLabel="新建项目"
+        onAction={ctx.openCreateProject}
+      />
     );
   }
   if (!session) {
+    const hasSessions = ctx.sessions.length > 0;
     return (
-      <div className="surface-empty">
-        <div className="big">还没有会话</div>
-        <div className="sub">一个会话 = 一张可分支的研究画布。</div>
-        <button className="btn" onClick={() => ctx.createSession()}>
-          <IconPlus /> 新建会话
-        </button>
-      </div>
+      <CreationEmptyState
+        title={hasSessions ? "开始一个新会话" : "还没有会话"}
+        description={hasSessions ? "新建会话，或从左侧打开已有话题。" : "一个会话 = 一张可分支的研究画布。"}
+        actionLabel="新建会话"
+        onAction={() => ctx.createSession()}
+      />
     );
   }
   return (
@@ -111,6 +133,7 @@ function ProjectPanel({ ctx }: { ctx: SurfaceCtx }) {
       onNodeChange={ctx.setActiveNodeId}
       onModeChange={ctx.setSessionMode}
       onTreeChange={ctx.bumpTreeVersion}
+      initialMode={ctx.sessionMode}
     />
   );
 }

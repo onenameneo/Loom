@@ -3,7 +3,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isDarwinRenderer, SettingsPanel, type SurfaceCtx } from "./surfaces";
+import { isDarwinRenderer, SettingsPanel, SURFACES, type SurfaceCtx } from "./surfaces";
 import { TitlebarProvider } from "./titlebar/Titlebar";
 
 const originalPlatform = Object.getOwnPropertyDescriptor(navigator, "platform");
@@ -12,6 +12,49 @@ afterEach(() => {
   cleanup();
   Reflect.deleteProperty(window, "api");
   if (originalPlatform) Object.defineProperty(navigator, "platform", originalPlatform);
+});
+
+describe("ProjectPanel empty creation state", () => {
+  it("opens the shared project dialog instead of mutating projects directly", async () => {
+    const openCreateProject = vi.fn();
+    const ctx = {
+      projects: [], sessions: [], activeProjectId: null, activeSessionId: null,
+      openCreateProject, createSession: vi.fn(), goSettings: vi.fn(), reloadSettings: vi.fn(),
+      theme: "light", setActiveNodeId: vi.fn(), sessionMode: null, setSessionMode: vi.fn(),
+      treeVersion: 0, bumpTreeVersion: vi.fn(), agentCount: 0, activitySessions: [], agents: [],
+      activityStatus: null, activeSessionKey: null, setActiveSessionKey: vi.fn(), activityNow: 0,
+      refreshActivityStatus: vi.fn(async () => undefined), runActivityConfig: vi.fn(async () => undefined), settings: null,
+    } satisfies SurfaceCtx;
+    const ProjectPanel = SURFACES.find((surface) => surface.id === "project")!.Panel;
+
+    render(React.createElement(ProjectPanel, { ctx }));
+    await userEvent.click(screen.getByRole("button", { name: "新建项目" }));
+
+    expect(openCreateProject).toHaveBeenCalledOnce();
+  });
+
+  it("offers the shared creation action on startup before a topic is opened", async () => {
+    const createSession = vi.fn();
+    const ctx = {
+      projects: [{ id: "project-1", name: "Project", createdAt: 1, updatedAt: 1, pinned: false, order: 0 }],
+      sessions: [{ id: "session-1", projectId: "project-1", title: "A", createdAt: 1, updatedAt: 1, order: 0 }],
+      activeProjectId: "project-1",
+      activeSessionId: null,
+      openCreateProject: vi.fn(), createSession, goSettings: vi.fn(), reloadSettings: vi.fn(),
+      theme: "light", setActiveNodeId: vi.fn(), sessionMode: null, setSessionMode: vi.fn(),
+      treeVersion: 0, bumpTreeVersion: vi.fn(), agentCount: 0, activitySessions: [], agents: [],
+      activityStatus: null, activeSessionKey: null, setActiveSessionKey: vi.fn(), activityNow: 0,
+      refreshActivityStatus: vi.fn(async () => undefined), runActivityConfig: vi.fn(async () => undefined), settings: null,
+    } satisfies SurfaceCtx;
+    const ProjectPanel = SURFACES.find((surface) => surface.id === "project")!.Panel;
+
+    render(React.createElement(ProjectPanel, { ctx }));
+
+    expect(screen.getByTestId("creation-empty-state")).toBeTruthy();
+    expect(screen.queryByText("选择一个具体话题")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    expect(createSession).toHaveBeenCalledOnce();
+  });
 });
 
 describe("isDarwinRenderer", () => {
@@ -53,7 +96,7 @@ describe("SettingsPanel model registry", () => {
       sessions: [],
       activeProjectId: null,
       activeSessionId: null,
-      createProject: vi.fn(),
+      openCreateProject: vi.fn(),
       createSession: vi.fn(),
       goSettings: vi.fn(),
       reloadSettings: vi.fn(),
@@ -170,7 +213,7 @@ describe("SettingsPanel model registry", () => {
       sessions: [],
       activeProjectId: null,
       activeSessionId: null,
-      createProject: vi.fn(),
+      openCreateProject: vi.fn(),
       createSession: vi.fn(),
       goSettings: vi.fn(),
       reloadSettings: vi.fn(),
@@ -322,7 +365,7 @@ describe("SettingsPanel model registry", () => {
       sessions: [],
       activeProjectId: null,
       activeSessionId: null,
-      createProject: vi.fn(),
+      openCreateProject: vi.fn(),
       createSession: vi.fn(),
       goSettings: vi.fn(),
       reloadSettings: vi.fn(),
@@ -422,7 +465,7 @@ describe("SettingsPanel model registry", () => {
       sessions: [],
       activeProjectId: null,
       activeSessionId: null,
-      createProject: vi.fn(),
+      openCreateProject: vi.fn(),
       createSession: vi.fn(),
       goSettings: vi.fn(),
       reloadSettings: vi.fn(),
