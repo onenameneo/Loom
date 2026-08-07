@@ -94,6 +94,9 @@ describe("App theme", () => {
     render(<App />);
 
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe("dark"));
+    const themeOwners = document.querySelectorAll("[data-theme]");
+    expect(themeOwners).toHaveLength(1);
+    expect(themeOwners[0]).toBe(document.documentElement);
     fireEvent.click(screen.getByRole("button", { name: "toggle theme" }));
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
   });
