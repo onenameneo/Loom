@@ -6,10 +6,11 @@ import type { LiveTurnEvent, LiveTurnSnapshot } from "./env";
 import { resetWorkspaceStore, useWorkspaceStore } from "./workspace/store";
 
 vi.mock("./Sidebar", () => ({
-  default: ({ activeSurface, setSurface, onSelectProject, onSelectSession, onFocusNode, onOpenCreateProject, ctx }: any) => (
+  default: ({ activeSurface, setSurface, onSelectProject, onSelectSession, onFocusNode, onOpenCreateProject, toggleTheme, ctx }: any) => (
     <aside>
       <output data-testid="active-surface">{activeSurface}</output>
       <button onClick={onOpenCreateProject}>sidebar create project</button>
+      <button onClick={toggleTheme}>toggle theme</button>
       <button onClick={() => setSurface("settings")}>show settings</button>
       <button onClick={() => onSelectProject?.("project-2")}>select project two</button>
       <button onClick={() => onSelectSession("session-2")}>select session two</button>
@@ -60,6 +61,7 @@ afterEach(() => {
   cleanup();
   localStorage.clear();
   resetWorkspaceStore();
+  delete document.documentElement.dataset.theme;
   delete (window as any).api;
 });
 
@@ -74,6 +76,28 @@ function snapshot(revision: number): LiveTurnSnapshot {
     assistantText: revision === 3 ? "new" : "old",
   };
 }
+
+describe("App theme", () => {
+  it("propagates the resolved theme to the document root and updates it after a theme change", async () => {
+    const get = vi.fn()
+      .mockResolvedValueOnce({ resolvedTheme: "dark" })
+      .mockResolvedValue({ resolvedTheme: "light" });
+    const set = vi.fn(async () => undefined);
+    window.api = {
+      platform: "darwin",
+      onMenu: vi.fn(() => vi.fn()),
+      settings: { get, set },
+      projects: { list: vi.fn(async () => []) },
+      canvas: { onLiveTurn: vi.fn(() => vi.fn()), liveTurns: vi.fn(async () => []) },
+    } as unknown as Window["api"];
+
+    render(<App />);
+
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe("dark"));
+    fireEvent.click(screen.getByRole("button", { name: "toggle theme" }));
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
+  });
+});
 
 describe("App live-turn initialization", () => {
   it("restores each main Session's mode when switching through child Nodes", async () => {

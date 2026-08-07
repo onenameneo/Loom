@@ -126,6 +126,13 @@ export default function App() {
   }, [reloadSettings, reloadProjects]);
 
   useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    return () => {
+      delete document.documentElement.dataset.theme;
+    };
+  }, [theme]);
+
+  useEffect(() => {
     reloadSessions(activeProjectId);
   }, [activeProjectId, reloadSessions]);
 
