@@ -28,7 +28,7 @@
     "dist:mac": "electron-vite build && electron-builder --mac",
     "dist:win": "electron-vite build && electron-builder --win",
     "dist:linux": "electron-vite build && electron-builder --linux",
-    "postinstall": "electron-rebuild -f -w better-sqlite3",
+    "postinstall": "electron-rebuild -f -v 43.2.0 -w better-sqlite3",
     "start": "ELECTRON_RUN_AS_NODE= electron-vite preview",
     "test": "ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs run",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"

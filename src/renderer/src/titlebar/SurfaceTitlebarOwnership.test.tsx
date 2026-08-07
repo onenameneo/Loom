@@ -63,7 +63,7 @@ describe("surface titlebar ownership", () => {
         {...{
           nodeId: "root",
           initialMessages: messages,
-          initialMount: false,
+          hasFrozenContext: false,
           onBranch: vi.fn(),
           onExpandCanvas,
           noKey: true,
@@ -82,7 +82,7 @@ describe("surface titlebar ownership", () => {
         {...{
           nodeId: "root",
           initialMessages: messages,
-          initialMount: false,
+          hasFrozenContext: false,
           onBranch: vi.fn(),
           onExpandCanvas,
           noKey: true,

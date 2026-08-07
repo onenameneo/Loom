@@ -26,6 +26,7 @@ import { applyTidyPositions, findBranchPlacement, readNodeLayout, resolveNodeLay
 import { finishResizeInteraction, guardResizeNodeChanges } from "./resizeLifecycle";
 import { ResizeSession } from "./resizeSession";
 import { branchTitleFromCandidates, DEFAULT_BRANCH_TITLE, DEFAULT_ROOT_TITLE } from "../../../common/titleDefaults";
+import { publishNodeUpdate, subscribeNodeUpdates, type NodeUpdate } from "./nodeUpdates";
 
 const nodeTypes = { chatThread: ChatThreadNode };
 const defaultEdgeOptions = { type: "default" as const };
@@ -113,7 +114,9 @@ function toNode(
       title: dto.title,
       seed: dto.seed,
       messages: dto.messages,
-      mountAncestors: dto.mountAncestors,
+      hasFrozenContext: dto.hasFrozenContext,
+      frozenContextMessageCount: dto.frozenContextMessageCount,
+      frozenContextTokenEstimate: dto.frozenContextTokenEstimate,
       systemPrompt: dto.systemPrompt,
       model: dto.model || fallbackModel,
       color: dto.color,
@@ -572,18 +575,31 @@ function CanvasContent({
         setCanvasInteraction({ kind: "idle" });
       },
       onRename: async (id: string, title: string) => {
-        if (window.api) await window.api.canvas.update(id, { title });
+        const updated = window.api ? await window.api.canvas.update(id, { title }) : undefined;
         titleRef.current.set(id, title);
         setNodes((nds) =>
           nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, title } } : n)),
         );
+        publishNodeUpdate({ id, sessionId, title: updated?.node?.title ?? title, color: updated?.node?.color });
         treeChangeRef.current?.();
       },
       onSetColor: async (id: string, color: string) => {
-        if (window.api) await window.api.canvas.update(id, { color });
+        const updated = window.api ? await window.api.canvas.update(id, { color }) : undefined;
         setNodes((nds) =>
           nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, color: color || undefined } } : n)),
         );
+        publishNodeUpdate({ id, sessionId, title: updated?.node?.title, color: updated?.node?.color ?? (color || undefined) });
+        treeChangeRef.current?.();
+      },
+      onNodeUpdated: (update: NodeUpdate) => {
+        titleRef.current.set(update.id, update.title ?? titleRef.current.get(update.id) ?? "");
+        setNodes((nds) => nds.map((node) =>
+          node.id === update.id
+            ? { ...node, data: { ...node.data, ...(update.title !== undefined ? { title: update.title } : {}), ...(update.color !== undefined ? { color: update.color } : {}) } }
+            : node,
+        ));
+        publishNodeUpdate(update);
+        treeChangeRef.current?.();
       },
       onDelete: async (id: string) => {
         if (!confirm("删除这个分支及其后代？")) return;
@@ -600,6 +616,16 @@ function CanvasContent({
     [applyResizeLayout, layoutStore, onReturnChat, removeIds, setNodes, sessionId],
   );
 
+  useEffect(() => subscribeNodeUpdates((update) => {
+    if (update.sessionId !== sessionId) return;
+    titleRef.current.set(update.id, update.title ?? titleRef.current.get(update.id) ?? "");
+    setNodes((nds) => nds.map((node) =>
+      node.id === update.id
+        ? { ...node, data: { ...node.data, ...(update.title !== undefined ? { title: update.title } : {}), ...(update.color !== undefined ? { color: update.color } : {}) } }
+        : node,
+    ));
+  }), [sessionId, setNodes]);
+
   // 载入（或初始化）本会话的节点树
   useEffect(() => {
     let alive = true;
@@ -610,7 +636,7 @@ function CanvasContent({
         dtos = await window.api.canvas.open(sessionId);
       } else {
         // 浏览器预览：本地起一个根节点，画布仍可渲染
-        dtos = [{ id: "root", sessionId, projectId: "project_demo", title: DEFAULT_ROOT_TITLE, mountAncestors: false, messages: [] }];
+        dtos = [{ id: "root", sessionId, projectId: "project_demo", title: DEFAULT_ROOT_TITLE, messages: [] }];
       }
       if (!alive) return;
       const pos = layout(dtos);
@@ -668,7 +694,7 @@ function CanvasContent({
   }, [nodes, focusNodeId, focusNode]);
 
   const onBranch = useCallback(
-    async (sourceId: string, seedText: string, mountAncestors: boolean, titleCandidate?: string) => {
+    async (sourceId: string, seedText: string, includeParentContext: boolean, titleCandidate?: string) => {
       const from = titleRef.current.get(sourceId) ?? "";
       const src = nodes.find((n) => n.id === sourceId);
       const branchTitle = branchTitleFromCandidates({
@@ -680,7 +706,7 @@ function CanvasContent({
       let id: string;
       let createdDto: CanvasNodeDto | undefined;
       if (window.api) {
-        const dto = await window.api.canvas.create({ sessionId, parentId: sourceId, seed, title: branchTitle, mountAncestors });
+        const dto = await window.api.canvas.create({ sessionId, parentId: sourceId, seed, title: branchTitle, includeParentContext });
         id = dto.id;
         createdDto = dto;
       } else {
@@ -714,7 +740,7 @@ function CanvasContent({
             title,
             seed,
             messages: [],
-            mountAncestors,
+            includeParentContext,
             model,
           },
           { x: initialLayout.x, y: initialLayout.y },
@@ -741,7 +767,6 @@ function CanvasContent({
       parentId: (node.data as any)?.parentId,
       title: String((node.data as any)?.title ?? ""),
       seed: (node.data as any)?.seed,
-      mountAncestors: Boolean((node.data as any)?.mountAncestors),
       systemPrompt: (node.data as any)?.systemPrompt,
       model: (node.data as any)?.model,
       messages: ((node.data as any)?.messages ?? []) as CanvasNodeDto["messages"],

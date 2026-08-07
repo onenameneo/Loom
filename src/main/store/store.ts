@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { FrozenNodeContext } from "../agent/core/context";
 import type { DefaultTitleState } from "../../common/titleDefaults";
 import type { StoredModelSelection } from "../modelConfig/modelRef";
 import {
@@ -163,11 +164,8 @@ export interface NodeRecord {
   model?: StoredModelSelection;
   color?: string;
   layout?: NodeLayout;
-  mountAncestors: boolean;
-  /** Hidden immutable LLM context captured when this branch mounts its ancestors. */
-  forkContextSnapshot?: AgentMessage[];
-  /** Hidden immutable summary projection captured when mounted ancestors exceed child budget. */
-  frozenBranchSummary?: AgentMessage;
+  /** Versioned child-owned context captured at branch creation. */
+  frozenContext?: FrozenNodeContext;
   messages: PersistedMessage[];
 }
 
@@ -199,13 +197,11 @@ export interface Store {
     title: string;
     titleState?: DefaultTitleState;
     seed?: unknown;
-    mountAncestors?: boolean;
-    forkContextSnapshot?: AgentMessage[];
-    frozenBranchSummary?: AgentMessage;
+    frozenContext?: FrozenNodeContext;
   }): NodeRecord;
   updateNode(
     id: string,
-    patch: Partial<{ title: string; titleState: DefaultTitleState; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; frozenBranchSummary: AgentMessage; systemPrompt: string; model: StoredModelSelection; color: string }>,
+    patch: Partial<{ title: string; titleState: DefaultTitleState; seed: unknown; frozenContext: FrozenNodeContext; systemPrompt: string; model: StoredModelSelection; color: string }>,
   ): void;
   updateNodeLayout(id: string, layout: NodeLayout): boolean;
   updateNodeLayouts(items: Array<{ id: string; layout: NodeLayout }>): string[];

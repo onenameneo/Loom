@@ -121,37 +121,24 @@ describe("SqliteStore node layouts", () => {
     });
   });
 
-  it("reopens a child-owned frozen branch summary from node metadata", () => {
+  it("reopens a child-owned frozen context from node metadata", () => {
     const dir = mkdtempSync(join(tmpdir(), "loom-frozen-branch-reopen-"));
     dirs.push(dir);
     const file = join(dir, "loom.db");
     const firstStore = new SqliteStore(file);
     const project = firstStore.createProject("Project");
     const session = firstStore.ensureDefaultSession(project.id);
-    const frozen = createLoomFrozenBranchSummary({
-      id: "fb-1",
-      childNodeId: "child",
-      createdAt: 10,
-      source: { parentNodeId: "parent", fingerprint: "abc", fromSeq: 0, toSeq: 4 },
-      summary: "Frozen branch summary.",
-      retainedContext: [{ role: "user", content: "tail" } as any],
-      diagnostics: { before: { tokens: 100, exact: false }, after: { tokens: 20, exact: false } },
-    }) as any;
     const child = firstStore.createNode({
       sessionId: session.id,
       parentId: undefined,
       title: "Child",
-      mountAncestors: true,
-      frozenBranchSummary: frozen,
+      frozenContext: { version: 1, messages: [{ role: "user", content: "tail" } as any] },
     });
     (firstStore as any).db.close();
 
     const reopened = new SqliteStore(file);
 
-    expect(reopened.getNode(child.id)?.frozenBranchSummary).toMatchObject({
-      role: "loomFrozenBranchSummary",
-      summary: "Frozen branch summary.",
-    });
+    expect(reopened.getNode(child.id)?.frozenContext).toMatchObject({ version: 1 });
   });
 
   it("cascades nodes and messages when deleting a session", () => {

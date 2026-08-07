@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { createCompactionService } from "./compactionService";
+import { createLoomContextCheckpoint } from "../core/messages";
 
 const user = (text: string): AgentMessage => ({ role: "user", content: text, timestamp: 0 }) as AgentMessage;
 const assistant = (text: string): AgentMessage => ({ role: "assistant", content: text, timestamp: 0 }) as unknown as AgentMessage;
@@ -129,5 +130,28 @@ describe("CompactionService", () => {
       signal: controller.signal,
     })).resolves.toEqual({ ok: false, reason: "aborted" });
     expect(appendMessages).not.toHaveBeenCalled();
+  });
+
+  it("summarizes only the newly displaced tail plus the previous checkpoint", async () => {
+    const summarize = vi.fn(async () => ({ summary: "merged" }));
+    const previous = createLoomContextCheckpoint({
+      id: "cp-old", nodeId: "n1", createdAt: 1, reason: "threshold", summary: "old summary",
+      coverage: { fromSeq: 0, toSeq: 8 }, retainedTail: { fromSeq: 10, toSeq: 13 },
+      diagnostics: { before: { tokens: 100, exact: false }, after: { tokens: 20, exact: false } },
+    });
+    const service = createCompactionService({
+      summarize, store: { appendMessages: vi.fn() }, clock: { now: () => 20 }, ids: { message: () => "cp-new" },
+      syncEngine: vi.fn(), trace: { append: vi.fn() }, events: { emit: vi.fn() },
+    });
+    const result = await service.compactNode({
+      nodeId: "n1", trigger: "threshold", previousCheckpoint: previous, sourceOffset: 10,
+      messages: [user("u"), assistant("a"), user("u2"), assistant("a2")], tailBudgetTokens: 4,
+      tokenCounter: () => 2,
+    });
+    expect(summarize).toHaveBeenCalledWith(expect.objectContaining({
+      previousCheckpointSummary: "old summary",
+      transcript: expect.objectContaining({ range: { fromSeq: 0, toSeq: 1 } }),
+    }), expect.anything());
+    expect(result).toMatchObject({ ok: true, checkpoint: { coverage: { fromSeq: 10, toSeq: 11 } } });
   });
 });

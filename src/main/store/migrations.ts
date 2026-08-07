@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const DB_SCHEMA_VERSION = 6;
+export const DB_SCHEMA_VERSION = 7;
 
 const CANONICAL_TABLES = [
   "settings",
@@ -76,7 +76,6 @@ function createCanonicalSchema(db: Database.Database): void {
       parent_id TEXT REFERENCES nodes(id) ON DELETE CASCADE,
       title TEXT,
       seed TEXT,
-      mount_ancestors INTEGER,
       created_at INTEGER,
       updated_at INTEGER,
       meta TEXT,

@@ -46,7 +46,7 @@ function renderChat() {
     <ChatView
       nodeId="n1"
       initialMessages={[]}
-      initialMount={false}
+      hasFrozenContext={false}
       onBranch={vi.fn()}
       onExpandCanvas={vi.fn()}
       noKey={false}
@@ -74,7 +74,7 @@ describe("ChatView turn and approval controls", () => {
       <ChatView
         nodeId="n1"
         initialMessages={[{ role: "assistant", text: "parent response", seq: 0 } as any]}
-        initialMount={false}
+        hasFrozenContext={false}
         onBranch={onBranch}
         onExpandCanvas={vi.fn()}
         noKey={false}
@@ -96,7 +96,7 @@ describe("ChatView turn and approval controls", () => {
     } as any);
 
     fireEvent.mouseUp(target);
-    const toggle = await screen.findByRole("button", { name: "挂载祖先" });
+    const toggle = await screen.findByRole("button", { name: "创建时包含父级上下文" });
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
     await userEvent.setup().click(screen.getByRole("button", { name: /从这里展开/ }));
     expect(onBranch).toHaveBeenCalledWith("parent response", true);
@@ -107,7 +107,7 @@ describe("ChatView turn and approval controls", () => {
       <ChatView
         nodeId="n1"
         initialMessages={[{ role: "assistant", text: "parent response", seq: 0 } as any]}
-        initialMount={false}
+        hasFrozenContext={false}
         onBranch={vi.fn()}
         onExpandCanvas={vi.fn()}
         noKey={false}
@@ -128,10 +128,10 @@ describe("ChatView turn and approval controls", () => {
     } as any);
 
     fireEvent.mouseUp(target);
-    expect(screen.getByRole("button", { name: "挂载祖先" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "创建时包含父级上下文" })).toBeTruthy();
 
     fireEvent.pointerDown(document.body);
-    expect(screen.queryByRole("button", { name: "挂载祖先" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "创建时包含父级上下文" })).toBeNull();
   });
 
   it("runs /compact and reports when there is nothing to compact", async () => {

@@ -811,7 +811,8 @@
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
     "from icon"
-    "quote icon";
+    "quote icon"
+    "context icon";
   gap: 3px 8px;
   text-align: left;
 }
@@ -847,6 +848,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.seed__context {
+  grid-area: context;
+  margin-top: 2px;
+  padding-top: 5px;
+  border-top: 1px solid var(--accent-line);
+  color: var(--muted);
+  font: 10px/1.35 var(--font-mono);
+}
+.seed__context i {
+  padding: 0 3px;
+  color: var(--faint);
+  font-style: normal;
 }
 .seed svg {
   grid-area: icon;

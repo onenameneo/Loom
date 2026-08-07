@@ -3,9 +3,7 @@ import type { Message, UserMessage } from "@earendil-works/pi-ai";
 import type { CanvasNodeModel, Seed } from "./graph";
 import {
   isLoomContextCheckpoint,
-  isLoomFrozenBranchSummary,
   type LoomContextCheckpointMessage,
-  type LoomFrozenBranchSummaryMessage,
 } from "./messages";
 
 // ---------------------------------------------------------------------------
@@ -13,8 +11,8 @@ import {
 //
 // pi 的 convertToLlm 接缝把「一个节点自己的消息」交给我们；这里装配已冻结的分支上下文，
 // 装配成发给 LLM 的有序序列：
-//   [ (可选)祖先链对话 → (可选)seed 片段 → 本节点历史消息（过滤 UI-only） ]
-// 纯函数：绝不读取实时祖先链，避免分叉后的父会话改变子会话语义。
+//   [ frozenContext → (可选)seed 片段 → 本节点 checkpoint 投影 ]
+// 纯函数：绝不读取实时父/祖先节点，避免分叉后的父会话改变子会话语义。
 // ---------------------------------------------------------------------------
 
 export function roleOf(msg: AgentMessage): string {
@@ -44,9 +42,15 @@ export function textOf(msg: AgentMessage): string {
 function userMsg(text: string, now: number): UserMessage {
   return { role: "user", content: text, timestamp: now };
 }
-/** seed 片段包成一条用户侧上下文消息，注入子节点上下文顶部。 */
+/** 版本化的、子节点自有的父级上下文快照。 */
+export interface FrozenNodeContext {
+  version: 1;
+  messages: Message[];
+}
+
+/** seed 片段仅是背景和分叉定位，不是假装成一条待回答的追问。 */
 export function seedMessage(seed: Seed, now = 0): UserMessage {
-  return userMsg(`（上下文）我以下面这段为出发点继续追问：\n「${seed.text}」`, now);
+  return userMsg(`（分叉定位背景）用户从下列片段创建了一个新话题。仅将其作为背景；等待该话题中的下一条用户输入后再响应。\n「${seed.text}」`, now);
 }
 
 export function checkpointContextMessage(checkpoint: LoomContextCheckpointMessage, now = 0): UserMessage {
@@ -61,34 +65,22 @@ export function checkpointContextMessage(checkpoint: LoomContextCheckpointMessag
   );
 }
 
-export function frozenBranchSummaryMessage(summary: LoomFrozenBranchSummaryMessage, now = 0): UserMessage {
-  return userMsg(
-    [
-      "（冻结祖先摘要）以下是创建此子分支时捕获的不可变祖先上下文摘要。",
-      `来源父节点：${summary.source.parentNodeId}`,
-      `覆盖范围：${summary.source.fromSeq}..${summary.source.toSeq}`,
-      summary.summary,
-    ].join("\n"),
-    now,
-  );
-}
-
 /**
  * 装配某节点发往 LLM 的上下文计划：
- *   [ mountAncestors ? 冻结的祖先快照 : ∅ ] + [ seed ? seed 消息 : ∅ ] + own.filter(isLlmMessage)
+ *   [ frozenContext ? 冻结快照 : ∅ ] + [ seed ? seed 消息 : ∅ ] + checkpoint 投影
  * @param now 注入到合成上下文消息的时间戳（默认 0，保持纯净；生产由 ClockPort 提供）。
  */
 export function buildContextPlan(
-  node: Pick<CanvasNodeModel, "mountAncestors" | "seed"> & { forkContextSnapshot?: Message[]; frozenBranchSummary?: AgentMessage },
+  node: Pick<CanvasNodeModel, "seed"> & {
+    frozenContext?: FrozenNodeContext;
+  },
   ownMessages: AgentMessage[],
   now = 0,
   tailContext: Message[] = [],
 ): Message[] {
   const out: Message[] = [];
-  if (node.mountAncestors && isLoomFrozenBranchSummary(node.frozenBranchSummary)) {
-    out.push(frozenBranchSummaryMessage(node.frozenBranchSummary, now), ...node.frozenBranchSummary.retainedContext);
-  } else if (node.mountAncestors && node.forkContextSnapshot) {
-    out.push(...node.forkContextSnapshot);
+  if (node.frozenContext?.version === 1) {
+    out.push(...node.frozenContext.messages);
   }
   if (node.seed) out.push(seedMessage(node.seed, now));
   const ownLlmMessages = projectOwnMessages(ownMessages, now);

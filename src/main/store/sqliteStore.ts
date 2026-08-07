@@ -20,6 +20,7 @@ import {
 import { DEFAULT_SESSION_TITLE, type DefaultTitleState } from "../../common/titleDefaults";
 import { parseStoredModelRef, type StoredModelSelection } from "../modelConfig/modelRef";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { FrozenNodeContext } from "../agent/core/context";
 
 type ProjectRow = {
   id: string;
@@ -48,7 +49,6 @@ type NodeRow = {
   parent_id: string | null;
   title: string;
   seed: string | null;
-  mount_ancestors: number;
   meta: string | null;
   layout_x: number | null;
   layout_y: number | null;
@@ -307,7 +307,7 @@ export class SqliteStore implements Store {
   listNodes(sessionId: string): NodeRecord[] {
     const rows = this.db
       .prepare(
-        "SELECT id, session_id, project_id, parent_id, title, seed, mount_ancestors, meta, layout_x, layout_y, layout_width, layout_height FROM nodes WHERE session_id = ? ORDER BY created_at, id",
+        "SELECT id, session_id, project_id, parent_id, title, seed, meta, layout_x, layout_y, layout_width, layout_height FROM nodes WHERE session_id = ? ORDER BY created_at, id",
       )
       .all(sessionId) as NodeRow[];
     return rows.map((row) => this.toNode(row));
@@ -315,7 +315,7 @@ export class SqliteStore implements Store {
 
   getNode(id: string): NodeRecord | undefined {
     const row = this.db
-      .prepare("SELECT id, session_id, project_id, parent_id, title, seed, mount_ancestors, meta, layout_x, layout_y, layout_width, layout_height FROM nodes WHERE id = ?")
+      .prepare("SELECT id, session_id, project_id, parent_id, title, seed, meta, layout_x, layout_y, layout_width, layout_height FROM nodes WHERE id = ?")
       .get(id) as NodeRow | undefined;
     return row ? this.toNode(row) : undefined;
   }
@@ -327,9 +327,7 @@ export class SqliteStore implements Store {
     title: string;
     titleState?: DefaultTitleState;
     seed?: unknown;
-    mountAncestors?: boolean;
-    forkContextSnapshot?: AgentMessage[];
-    frozenBranchSummary?: AgentMessage;
+    frozenContext?: FrozenNodeContext;
   }): NodeRecord {
     const sessionId = input.sessionId ?? (input.projectId ? this.ensureDefaultSession(input.projectId).id : undefined);
     if (!sessionId) throw new Error("Session not found.");
@@ -348,16 +346,14 @@ export class SqliteStore implements Store {
       title: input.title,
       titleState: input.titleState,
       seed: input.seed,
-      mountAncestors: Boolean(input.mountAncestors),
-      forkContextSnapshot: input.forkContextSnapshot,
-      frozenBranchSummary: input.frozenBranchSummary,
+      frozenContext: input.frozenContext,
       messages: [],
     };
     this.db
       .prepare(
         `INSERT INTO nodes(
-          id, session_id, project_id, parent_id, title, seed, mount_ancestors, created_at, updated_at, meta
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id, session_id, project_id, parent_id, title, seed, created_at, updated_at, meta
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         node.id,
@@ -366,13 +362,11 @@ export class SqliteStore implements Store {
         node.parentId ?? null,
         node.title,
         node.seed === undefined ? null : encode(node.seed),
-        node.mountAncestors ? 1 : 0,
         now,
         now,
         encode({
           ...(node.titleState ? { titleState: node.titleState } : {}),
-          ...(node.forkContextSnapshot ? { forkContextSnapshot: node.forkContextSnapshot } : {}),
-          ...(node.frozenBranchSummary ? { frozenBranchSummary: node.frozenBranchSummary } : {}),
+          ...(node.frozenContext ? { frozenContext: node.frozenContext } : {}),
         }),
       );
     return node;
@@ -380,7 +374,7 @@ export class SqliteStore implements Store {
 
   updateNode(
     id: string,
-    patch: Partial<{ title: string; titleState: DefaultTitleState; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; frozenBranchSummary: AgentMessage; systemPrompt: string; model: StoredModelSelection; color: string }>,
+    patch: Partial<{ title: string; titleState: DefaultTitleState; seed: unknown; frozenContext: FrozenNodeContext; systemPrompt: string; model: StoredModelSelection; color: string }>,
   ): void {
     const current = this.getNode(id);
     if (!current) return;
@@ -388,11 +382,8 @@ export class SqliteStore implements Store {
       | { meta: string | null }
       | undefined;
     const meta = decode<Record<string, unknown>>(row?.meta, {});
-    if (Object.prototype.hasOwnProperty.call(patch, "forkContextSnapshot")) {
-      meta.forkContextSnapshot = patch.forkContextSnapshot;
-    }
-    if (Object.prototype.hasOwnProperty.call(patch, "frozenBranchSummary")) {
-      meta.frozenBranchSummary = patch.frozenBranchSummary;
+    if (Object.prototype.hasOwnProperty.call(patch, "frozenContext")) {
+      meta.frozenContext = patch.frozenContext;
     }
     if (Object.prototype.hasOwnProperty.call(patch, "systemPrompt")) {
       const text = patch.systemPrompt?.trim() ?? "";
@@ -415,11 +406,10 @@ export class SqliteStore implements Store {
       else delete meta.titleState;
     }
     this.db
-      .prepare("UPDATE nodes SET title = ?, seed = ?, mount_ancestors = ?, meta = ?, updated_at = ? WHERE id = ?")
+      .prepare("UPDATE nodes SET title = ?, seed = ?, meta = ?, updated_at = ? WHERE id = ?")
       .run(
         patch.title ?? current.title,
         Object.prototype.hasOwnProperty.call(patch, "seed") ? encode(patch.seed) : encode(current.seed),
-        patch.mountAncestors ?? current.mountAncestors ? 1 : 0,
         encode(meta),
         Date.now(),
         id,
@@ -531,8 +521,7 @@ export class SqliteStore implements Store {
     const model = parsedModel.kind === "ref" ? parsedModel.ref : parsedModel.kind === "legacy" ? parsedModel.legacyModel : undefined;
     const color = typeof meta.color === "string" ? meta.color : undefined;
     const titleState = meta.titleState === "default" || meta.titleState === "manual" ? meta.titleState : undefined;
-    const forkContextSnapshot = Array.isArray(meta.forkContextSnapshot) ? meta.forkContextSnapshot as AgentMessage[] : undefined;
-    const frozenBranchSummary = meta.frozenBranchSummary && typeof meta.frozenBranchSummary === "object" ? meta.frozenBranchSummary as AgentMessage : undefined;
+    const frozenContext = meta.frozenContext && typeof meta.frozenContext === "object" ? meta.frozenContext as FrozenNodeContext : undefined;
     return {
       id: row.id,
       sessionId: row.session_id,
@@ -545,9 +534,7 @@ export class SqliteStore implements Store {
       model,
       color,
       layout: toLayout(row),
-      mountAncestors: Boolean(row.mount_ancestors),
-      forkContextSnapshot,
-      frozenBranchSummary,
+      frozenContext,
       messages: this.listMessages(row.id),
     };
   }

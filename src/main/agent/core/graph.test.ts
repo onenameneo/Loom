@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ancestorChain, descendants, type CanvasNodeModel } from "./graph";
 
 function node(id: string, parentId?: string): CanvasNodeModel {
-  return { id, parentId, mountAncestors: false, messages: [] };
+  return { id, parentId, messages: [] };
 }
 
 function lookupOf(...nodes: CanvasNodeModel[]) {

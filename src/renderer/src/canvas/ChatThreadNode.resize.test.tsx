@@ -40,7 +40,6 @@ function ResizeNodeAtZoom({ zoom }: { zoom: number }) {
         data={{
           title: "Main",
           messages: [],
-          mountAncestors: false,
           onResizeStart: vi.fn(() => 1),
           shouldResize: vi.fn(() => true),
         }}
@@ -105,7 +104,6 @@ describe("ChatThreadNode resize preview", () => {
         data={{
           title: "Main",
           messages: [{ id: 1, role: "assistant", text: "A long response that should be summarized during resize." }],
-          mountAncestors: false,
           isResizing: true,
         }}
       />,

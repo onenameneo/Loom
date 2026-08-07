@@ -6,7 +6,7 @@ import type { CanvasNodeModel } from "./graph";
 const user = (text: string): AgentMessage => ({ role: "user", content: text, timestamp: 0 }) as AgentMessage;
 
 function node(messages: AgentMessage[], seed?: { text: string }): CanvasNodeModel {
-  return { id: "n", mountAncestors: false, messages, seed: seed as any };
+  return { id: "n", messages, seed: seed as any };
 }
 
 describe("estTokens / ownChars", () => {
@@ -25,7 +25,7 @@ describe("budget", () => {
   });
 
   it("adds ancestor chars only into withAncestors", () => {
-    const anc: CanvasNodeModel[] = [{ id: "p", mountAncestors: false, messages: [user("efgh")] }];
+    const anc: CanvasNodeModel[] = [{ id: "p", messages: [user("efgh")] }];
     const b = budget(node([user("abcd")]), anc);
     expect(b.withoutAncestors).toBe(2); // 4 chars
     expect(b.withAncestors).toBe(4); // 8 chars
