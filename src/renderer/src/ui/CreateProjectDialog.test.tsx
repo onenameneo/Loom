@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useState } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CreateProjectDialog } from "./dialogs";
@@ -216,5 +216,54 @@ describe("CreateProjectDialog", () => {
     expect(reopenedName.value).toBe("");
     expect(screen.queryByText("/code/first-project")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("ignores a stale folder pick after close and reopen without clearing the current pick state", async () => {
+    let resolveStale!: (path: string) => void;
+    let resolveCurrent!: (path: string) => void;
+    const stalePick = new Promise<string>((resolve) => {
+      resolveStale = resolve;
+    });
+    const currentPick = new Promise<string>((resolve) => {
+      resolveCurrent = resolve;
+    });
+    const onPickFolder = vi
+      .fn<() => Promise<string | undefined>>()
+      .mockImplementationOnce(() => stalePick)
+      .mockImplementationOnce(() => currentPick);
+
+    function Harness() {
+      const [open, setOpen] = useState(true);
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>再次打开</button>
+          <CreateProjectDialog
+            open={open}
+            onOpenChange={setOpen}
+            onPickFolder={onPickFolder}
+            onSubmit={vi.fn()}
+          />
+        </>
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "添加项目目录" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    fireEvent.click(await screen.findByRole("button", { name: "再次打开" }));
+    const currentPicker = screen.getByRole("button", { name: "添加项目目录" }) as HTMLButtonElement;
+    fireEvent.click(currentPicker);
+    await waitFor(() => expect(onPickFolder).toHaveBeenCalledTimes(2));
+
+    await act(async () => resolveStale("/stale/old-project"));
+
+    expect((screen.getByLabelText("项目名称") as HTMLInputElement).value).toBe("");
+    expect(screen.queryByText("/stale/old-project")).toBeNull();
+    expect(currentPicker.disabled).toBe(true);
+
+    await act(async () => resolveCurrent("/current/new-project"));
+    await waitFor(() => expect((screen.getByLabelText("项目名称") as HTMLInputElement).value).toBe("new-project"));
+    expect(screen.getByText("/current/new-project")).toBeTruthy();
+    expect(currentPicker.disabled).toBe(false);
   });
 });

@@ -358,7 +358,7 @@ describe("Sidebar project session navigation", () => {
     expect(screen.getByText("Pinned Project")).toBeTruthy();
 
     fireEvent.click(screen.getByLabelText("新建项目"));
-    fireEvent.click(await screen.findByText("添加 Loom 可读取和编辑的 Source Root"));
+    fireEvent.click(await screen.findByRole("button", { name: "添加项目目录" }));
     expect(await screen.findByRole("dialog", { name: "创建项目" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
     expect(onCreateProject).toHaveBeenCalledWith({

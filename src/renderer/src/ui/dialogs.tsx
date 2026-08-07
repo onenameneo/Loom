@@ -147,8 +147,10 @@ export function CreateProjectDialog({
   const submitErrorId = useId();
   const previousOpenRef = useRef(false);
   const restoreFocusRef = useRef(false);
+  const pickRequestRef = useRef(0);
 
   if (open !== previousOpenRef.current) {
+    pickRequestRef.current += 1;
     if (open) {
       returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     } else {
@@ -177,17 +179,20 @@ export function CreateProjectDialog({
 
   const addFolder = async () => {
     if (busy || picking) return;
+    const requestId = ++pickRequestRef.current;
     setPickError(null);
     setPicking(true);
     try {
       const path = await onPickFolder();
+      if (requestId !== pickRequestRef.current) return;
       if (!path) return;
       setSourceRoots((current) => (current.includes(path) ? current : [...current, path]));
       setName((current) => current || path.split(/[\\/]/).filter(Boolean).at(-1) || "");
     } catch (error) {
+      if (requestId !== pickRequestRef.current) return;
       setPickError(error instanceof Error ? error.message : "选择文件夹失败");
     } finally {
-      setPicking(false);
+      if (requestId === pickRequestRef.current) setPicking(false);
     }
   };
 
