@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
 import { Bot, Check, ChevronDown, ChevronRight, Folder, FolderOpen, PanelTopClose, Pencil, Pin, Terminal, Trash2 } from "lucide-react";
 import type { ActivityTool, AgentProc, CanvasNodeDto, ProjectMeta, SessionMeta, SettingsPayload } from "./env";
+import { publishNodeUpdate, subscribeNodeUpdates } from "./canvas/nodeUpdates";
 import { IconMoon, IconPlus, IconSun } from "./icons";
 import { DEFAULT_ROOT_TITLE, DEFAULT_BRANCH_TITLE } from "../../common/titleDefaults";
 import loomIconUrl from "../../../build/icon.png";
@@ -144,6 +145,17 @@ export default function Sidebar({
   const [outlines, setOutlines] = useState<Record<string, CanvasNodeDto[]>>({});
   const [sessionColorOpen, setSessionColorOpen] = useState<string | null>(null);
 
+  useEffect(() => subscribeNodeUpdates((update) => {
+    setOutlines((current) => ({
+      ...current,
+      [update.sessionId]: (current[update.sessionId] ?? []).map((node) =>
+        node.id === update.id
+          ? { ...node, ...(update.title !== undefined ? { title: update.title } : {}), ...(update.color !== undefined ? { color: update.color } : {}) }
+          : node,
+      ),
+    }));
+  }), []);
+
   // 活跃 Project / Session 自动展开（切到它时把层级打开）
   useEffect(() => {
     if (ctx.activeProjectId) {
@@ -247,6 +259,7 @@ export default function Sidebar({
     const colorKey = `${sessionId}:${node.id}`;
     const updateColor = (color: string) => {
       void onSetSessionColor?.(sessionId, node.id, color);
+      publishNodeUpdate({ id: node.id, sessionId, color: color || undefined });
       setOutlines((current) => ({
         ...current,
         [sessionId]: (current[sessionId] ?? []).map((item) => item.id === node.id ? { ...item, color: color || undefined } : item),

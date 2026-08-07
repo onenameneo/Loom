@@ -17,6 +17,7 @@ import {
 import { DEFAULT_SESSION_TITLE, type DefaultTitleState } from "../../common/titleDefaults";
 import type { StoredModelSelection } from "../modelConfig/modelRef";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { FrozenNodeContext } from "../agent/core/context";
 
 // JSON-file 实现（原子写）。仓储接口的一个后端；之后可换 better-sqlite3，
 // 上层不变。数据落在 app.getPath('userData')/canvas-data.json。
@@ -202,15 +203,13 @@ export class JsonStore implements Store {
     title: string;
     titleState?: DefaultTitleState;
     seed?: unknown;
-    mountAncestors?: boolean;
-    forkContextSnapshot?: AgentMessage[];
-    frozenBranchSummary?: AgentMessage;
+    frozenContext?: FrozenNodeContext;
   }): NodeRecord {
     throw new Error("JsonStore does not implement canvas node persistence.");
   }
   updateNode(
     _id: string,
-    _patch: Partial<{ title: string; titleState: DefaultTitleState; mountAncestors: boolean; seed: unknown; forkContextSnapshot: AgentMessage[]; frozenBranchSummary: AgentMessage; systemPrompt: string; model: StoredModelSelection; color: string }>,
+    _patch: Partial<{ title: string; titleState: DefaultTitleState; seed: unknown; frozenContext: FrozenNodeContext; systemPrompt: string; model: StoredModelSelection; color: string }>,
   ): void {}
   updateNodeLayout(_id: string, _layout: NodeLayout): boolean {
     return false;

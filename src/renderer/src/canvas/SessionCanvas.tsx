@@ -37,7 +37,7 @@ export default function SessionCanvas({
   const reload = useCallback(async () => {
     let dtos: CanvasNodeDto[];
     if (window.api) dtos = await window.api.canvas.open(sessionId);
-    else dtos = [{ id: "root", sessionId, projectId: "project_demo", title: DEFAULT_ROOT_TITLE, mountAncestors: false, messages: [] }];
+    else dtos = [{ id: "root", sessionId, projectId: "project_demo", title: DEFAULT_ROOT_TITLE, messages: [] }];
     setNodeList(dtos);
     setNodeCount(dtos.length);
   }, [sessionId]);
@@ -81,7 +81,7 @@ export default function SessionCanvas({
   }, [onNodeChange, reload]);
 
   const branchFromChat = useCallback(
-    async (seedText: string, mountAncestors: boolean) => {
+    async (seedText: string, includeParentContext: boolean) => {
       if (!chatNode) return;
       if (window.api) {
         await window.api.canvas.create({
@@ -93,7 +93,7 @@ export default function SessionCanvas({
             currentPrompt: [...chatNode.messages].reverse().find((msg) => msg.role === "user")?.text,
             fallback: DEFAULT_BRANCH_TITLE,
           }),
-          mountAncestors,
+          includeParentContext,
         });
       }
       setViewMode("canvas"); // 切到画布；Canvas 会自行 open 载入 root+新会话
@@ -119,7 +119,7 @@ export default function SessionCanvas({
         <ChatView
           nodeId={chatNode.id}
           initialMessages={chatNode.messages}
-          initialMount={chatNode.mountAncestors}
+          hasFrozenContext={Boolean(chatNode.hasFrozenContext)}
           systemPrompt={chatNode.systemPrompt}
           model={chatNode.model || model}
           onBranch={branchFromChat}

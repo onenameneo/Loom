@@ -4,10 +4,9 @@ import type { NodeLayout, NodeRecord, PersistedMessage } from "../../store/store
 import type { StoredModelSelection } from "../../modelConfig/modelRef";
 import { saveNodeLayout, saveNodeLayouts } from "../../store/layoutPersistence";
 import { ancestorChain, descendants, type Seed } from "../core/graph";
-import { buildContextPlan, isLlmMessage, roleOf, textOf } from "../core/context";
+import { buildContextPlan, isLlmMessage, roleOf, textOf, type FrozenNodeContext } from "../core/context";
 import { estTokens, estimateMessageTokensUnbounded, type Budget } from "../core/budget";
 import { isLoomContextCheckpoint, isLoomFrozenBranchSummary, type LoomBudgetDiagnostics, type LoomCompactionReason, type LoomUsageDiagnostic } from "../core/messages";
-import { planFrozenBranchContext } from "../core/compaction";
 import type { AgentTool } from "../core/tool";
 import type { CommandPort } from "../ports";
 import { createHookRegistry, createToolLifecycleHook } from "../hooks";
@@ -69,9 +68,7 @@ export interface CanvasNode {
   model?: StoredModelSelection;
   color?: string;
   layout?: NodeLayout;
-  mountAncestors: boolean;
-  forkContextSnapshot?: Message[];
-  frozenBranchSummary?: AgentMessage;
+  frozenContext?: FrozenNodeContext;
   messages: AgentMessage[];
   messageMeta: unknown[];
 }
@@ -188,9 +185,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       model: record.model,
       color: record.color,
       layout: record.layout,
-      mountAncestors: record.mountAncestors,
-      forkContextSnapshot: record.forkContextSnapshot as Message[] | undefined,
-      frozenBranchSummary: record.frozenBranchSummary,
+      frozenContext: record.frozenContext,
       messages: record.messages.map((m) => m.content),
       messageMeta: record.messages.map((m) => m.meta),
     };
@@ -230,6 +225,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
 
   // ---- 上下文装配 & 预算：委托 ① 领域核心 -----------------------------------
 
+  // 技能开关沿图层级继承；它不参与模型 transcript 上下文装配。
   function ancestorsOf(nodeId: string): CanvasNode[] {
     return ancestorChain(nodeId, loadNode);
   }
@@ -272,7 +268,6 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   function budgetOf(nodeId: string): Budget {
     const node = loadNode(nodeId);
     if (!node) return { withoutAncestors: 0, withAncestors: 0, estimated: true };
-    const withoutAncestorsNode = { ...node, mountAncestors: false, forkContextSnapshot: undefined, frozenBranchSummary: undefined };
     const projectedTokens = (messages: Message[]) => estTokens(messages.reduce((sum, msg) => sum + textOf(msg as AgentMessage).length, 0));
     const systemPrompt = getNodeInit(nodeId)?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     const systemTokens = estTokens(systemPrompt.length);
@@ -282,26 +277,19 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       parameters: tool.parameters,
     }))).length);
     const fixedTokens = systemTokens + toolTokens;
-    const withoutAncestors = fixedTokens + projectedTokens(buildContextPlan(withoutAncestorsNode, node.messages, clock.now()));
-    const withAncestors = fixedTokens + projectedTokens(buildContextPlan({ ...node, mountAncestors: true }, node.messages, clock.now()));
-    return { withoutAncestors, withAncestors, estimated: true };
+    const projected = fixedTokens + projectedTokens(buildContextPlan(node, node.messages, clock.now()));
+    return { withoutAncestors: projected, withAncestors: projected, estimated: true };
   }
 
-  // convertToLlm 委托：本节点发送前，交 ① 核心装配 [祖先? → seed? → 本节点历史]。
+  // convertToLlm 接收的 state 已由统一投影初始化/同步；这里仅过滤 UI-only 消息。
   function buildContext(nodeId: string, own: AgentMessage[]): Message[] {
     const node = nodes.get(nodeId);
-    if (!node) return own.filter(isLlmMessage);
-    return own.length === 0
-      ? buildContextPlan(node, own, clock.now())
-      : buildContextPlan({ mountAncestors: false }, own, clock.now());
-  }
-
-  function mountedPrefix(node: CanvasNode): Message[] {
-    return buildContextPlan(node, [], clock.now());
+    if (node && own.length === 0) return buildContextPlan(node, node.messages, clock.now());
+    return own.filter(isLlmMessage);
   }
 
   function effectiveMessages(node: CanvasNode): AgentMessage[] {
-    return [...mountedPrefix(node), ...node.messages.filter(isLlmMessage)] as AgentMessage[];
+    return buildContextPlan(node, node.messages, clock.now()) as AgentMessage[];
   }
 
   function getNodeInit(nodeId: string): NodeInit | undefined {
@@ -413,7 +401,12 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     parentId: n.parentId,
     title: n.title,
     seed: n.seed,
-    mountAncestors: n.mountAncestors,
+    hasFrozenContext: Boolean(n.frozenContext?.messages.length),
+    frozenContextMessageCount: n.frozenContext?.messages.length ?? 0,
+    frozenContextTokenEstimate: n.frozenContext?.messages.reduce(
+      (total, message) => total + estimateMessageTokensUnbounded(message as AgentMessage),
+      0,
+    ) ?? 0,
     systemPrompt: n.systemPrompt,
     model: n.model,
     color: n.color,
@@ -544,13 +537,19 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   }
 
   function compactableTail(node: CanvasNode): AgentMessage[] {
+    const checkpoint = latestValidCheckpoint(node);
+    if (checkpoint) return node.messages.slice(checkpoint.coverage.toSeq + 1).filter(isLlmMessage) as AgentMessage[];
+    return node.messages.filter(isLlmMessage) as AgentMessage[];
+  }
+
+  function latestValidCheckpoint(node: CanvasNode) {
     for (let i = node.messages.length - 1; i >= 0; i--) {
       const msg = node.messages[i];
       if (isLoomContextCheckpoint(msg) && msg.invalidatedAt === undefined) {
-        return node.messages.slice(msg.coverage.toSeq + 1).filter(isLlmMessage) as AgentMessage[];
+        return msg;
       }
     }
-    return node.messages.filter(isLlmMessage) as AgentMessage[];
+    return undefined;
   }
 
   function shouldCompact(node: CanvasNode): boolean {
@@ -569,11 +568,17 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     options: { turnId?: string; signal?: AbortSignal; handle?: EngineHandle } = {},
   ): Promise<CompactNodeResult> {
     if (!compaction || (trigger === "threshold" && !shouldCompact(node))) return { ok: false, reason: "not_needed" };
+    const previousCheckpoint = latestValidCheckpoint(node);
+    const sourceOffset = previousCheckpoint
+      ? node.messages.findIndex((msg, index) => index > previousCheckpoint.coverage.toSeq && isLlmMessage(msg))
+      : 0;
     const result = await compaction.compactNode({
       nodeId: node.id,
       turnId: options.turnId,
       trigger,
-      messages: node.messages,
+      messages: compactableTail(node),
+      sourceOffset: sourceOffset < 0 ? node.messages.length : sourceOffset,
+      previousCheckpoint,
       tailBudgetTokens: trigger === "manual"
         ? deps.compaction?.manualTailBudgetTokens ?? DEFAULT_MANUAL_COMPACTION_TAIL_BUDGET_TOKENS
         : deps.compaction?.tailBudgetTokens ?? DEFAULT_COMPACTION_TAIL_BUDGET_TOKENS,
@@ -604,7 +609,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       operation: "send",
       prepare: async (handle) => {
         syncTranscript(handle, node);
-        return { kind: "continue", from: mountedPrefix(node).length + node.messages.length };
+        return { kind: "continue", from: effectiveMessages(node).length };
       },
       finalize: (handle, from) => appendDelta(node, handle, from),
     });
@@ -630,27 +635,18 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     activateSession(sessionId);
     let items = hydrateSession(sessionId);
     if (items.length === 0) {
-      const root = toCanvasNode(store.createNode({ sessionId, title: DEFAULT_ROOT_TITLE, titleState: "default", mountAncestors: false }));
+      const root = toCanvasNode(store.createNode({ sessionId, title: DEFAULT_ROOT_TITLE, titleState: "default" }));
       nodes.set(root.id, root);
       items = [root];
     }
     return items.map(dto);
   }
 
-  function create(arg: { sessionId: string; parentId?: string; seed?: Seed; title?: string; mountAncestors?: boolean }) {
+  function create(arg: { sessionId: string; parentId?: string; seed?: Seed; title?: string; includeParentContext?: boolean }) {
     const parent = arg.parentId ? loadNode(arg.parentId) : undefined;
-    const ancestorSnapshot = arg.parentId && arg.mountAncestors
-      ? [...ancestorsOf(arg.parentId), loadNode(arg.parentId)].filter((item): item is CanvasNode => Boolean(item)).flatMap((item) => item.messages.filter(isLlmMessage)) as Message[]
-      : undefined;
-    const provisionalNodeId = ids.message();
-    const branchPlan = arg.parentId && arg.mountAncestors && ancestorSnapshot
-      ? planFrozenBranchContext({
-          ancestorMessages: ancestorSnapshot as AgentMessage[],
-          maxRawSnapshotTokens: 24_000,
-          childNodeId: provisionalNodeId,
-          parentNodeId: arg.parentId,
-          now: clock.now(),
-        })
+    // 父级上下文只在创建这一刻读取一次，复制父节点的当前有效投影。
+    const frozenContext = arg.parentId && arg.includeParentContext && parent
+      ? { version: 1 as const, messages: [...effectiveMessages(parent)] as Message[] }
       : undefined;
     const node = toCanvasNode(
       store.createNode({
@@ -659,18 +655,12 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
         title: arg.title ?? (arg.seed ? branchTitleFromCandidates({ selectedText: arg.seed.text }) : DEFAULT_ROOT_TITLE),
         titleState: "default",
         seed: arg.seed,
-        mountAncestors: Boolean(arg.mountAncestors),
-        forkContextSnapshot: branchPlan ? (branchPlan.kind === "raw-snapshot" ? branchPlan.rawSnapshot : undefined) : ancestorSnapshot,
-        frozenBranchSummary: branchPlan?.kind === "frozen-summary" ? branchPlan.frozenSummary : undefined,
+        frozenContext,
       }),
     );
-    if (arg.mountAncestors && parent?.systemPrompt) {
+    if (arg.includeParentContext && parent?.systemPrompt) {
       node.systemPrompt = parent.systemPrompt;
       store.updateNode(node.id, { systemPrompt: parent.systemPrompt });
-    }
-    if (isLoomFrozenBranchSummary(node.frozenBranchSummary) && node.frozenBranchSummary.childNodeId !== node.id) {
-      node.frozenBranchSummary = { ...node.frozenBranchSummary, id: `frozen:${node.id}:${clock.now()}`, childNodeId: node.id };
-      store.updateNode(node.id, { frozenBranchSummary: node.frozenBranchSummary });
     }
     nodes.set(node.id, node);
     return dto(node);
@@ -712,7 +702,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
         node.messages.push(userMessage);
         node.messageMeta.push(undefined);
         promptFromSeq = node.messages.length;
-        return { kind: "prompt", message: userMessage, from: mountedPrefix(node).length + node.messages.length };
+        return { kind: "prompt", message: userMessage, from: effectiveMessages(node).length };
       },
       finalize: (handle, from) => {
         appendDelta(node, handle, from);
@@ -735,6 +725,9 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       if (shouldAutoTitleNode(node)) {
         node.title = title;
         store.updateNode(node.id, { title, titleState: "manual" });
+        // 回合完成事件可能早于标题模型返回；单独通知 renderer 重载节点元数据，
+        // 避免画布与侧栏一直显示“起点”。
+        events.emit(node.id, "node_updated", { id: node.id, sessionId: node.sessionId, title });
       }
     }
     await maybeCompactNode(node, "threshold", { turnId: result.turnId });
@@ -791,7 +784,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       prepare: async (handle) => {
         truncateTranscript(node, lastUser + 1, handle);
         await maybeCompactNode(node, "threshold", { turnId: activeTurn?.turnId, signal: activeTurn?.signal, handle });
-        return { kind: "continue", from: mountedPrefix(node).length + node.messages.length };
+        return { kind: "continue", from: effectiveMessages(node).length };
       },
       finalize: (handle, from) => appendDelta(node, handle, from),
     });
@@ -827,7 +820,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
         truncateTranscript(node, arg.seq, handle);
         await maybeCompactNode(node, "threshold", { turnId: activeTurn?.turnId, signal: activeTurn?.signal, handle });
         const userMessage: AgentMessage = { role: "user", content: text, timestamp: clock.now() };
-        return { kind: "prompt", message: userMessage, from: mountedPrefix(node).length + node.messages.length };
+        return { kind: "prompt", message: userMessage, from: effectiveMessages(node).length };
       },
       finalize: (handle, from) => appendDelta(node, handle, from),
     });

@@ -362,6 +362,7 @@ export default function App() {
                 }}
                 onSetSessionColor={async (_sessionId, nodeId, color) => {
                   if (window.api) await window.api.canvas.update(nodeId, { color });
+                  bumpProjectTree();
                 }}
                 theme={theme}
                 toggleTheme={toggleTheme}

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "os";
 import { join } from "path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { FrozenNodeContext } from "../core/context";
 import { createAgentSession } from "./session";
 import type { EngineHandle, EventSinkPort, LlmEnginePort, NodeInit } from "../ports";
 import type { AgentTool } from "../core/tool";
@@ -35,7 +36,6 @@ class MemoryStore implements Store {
       sessionId: "sess",
       projectId: "ws",
       title: "Node",
-      mountAncestors: false,
       messages: messages.map((content, seq) => ({ id: `m${seq}`, seq, role: String((content as any).role), content })),
     });
     this.nodes.set("n2", {
@@ -43,7 +43,6 @@ class MemoryStore implements Store {
       sessionId: "sess2",
       projectId: "ws",
       title: "Second",
-      mountAncestors: false,
       messages: [],
     });
   }
@@ -74,7 +73,7 @@ class MemoryStore implements Store {
   deleteSession() {}
   listNodes(sessionId: string) { return [...this.nodes.values()].filter((n) => n.sessionId === sessionId); }
   getNode(id: string) { return this.nodes.get(id); }
-  createNode(input: { sessionId?: string; projectId?: string; parentId?: string; title: string; seed?: unknown; mountAncestors?: boolean; forkContextSnapshot?: AgentMessage[]; frozenBranchSummary?: AgentMessage }): NodeRecord {
+  createNode(input: { sessionId?: string; projectId?: string; parentId?: string; title: string; seed?: unknown; frozenContext?: FrozenNodeContext }): NodeRecord {
     const session = (input.sessionId ? this.getSession(input.sessionId) : this.ensureDefaultSession(input.projectId ?? "ws")) ?? this.sessions[0];
     const node: NodeRecord = {
       id: `n${this.nodes.size + 1}`,
@@ -83,19 +82,16 @@ class MemoryStore implements Store {
       parentId: input.parentId,
       title: input.title,
       seed: input.seed,
-      mountAncestors: Boolean(input.mountAncestors),
-      forkContextSnapshot: input.forkContextSnapshot,
-      frozenBranchSummary: input.frozenBranchSummary,
+      frozenContext: input.frozenContext,
       messages: [],
     };
     this.nodes.set(node.id, node);
     return node;
   }
-  updateNode(id: string, patch: Partial<{ title: string; titleState: "default" | "manual"; frozenBranchSummary: AgentMessage }>) {
-    const node = this.nodes.get(id) as (NodeRecord & { frozenBranchSummary?: AgentMessage }) | undefined;
+  updateNode(id: string, patch: Partial<{ title: string; titleState: "default" | "manual" }>) {
+    const node = this.nodes.get(id);
     if (node && Object.prototype.hasOwnProperty.call(patch, "title")) node.title = patch.title!;
     if (node && Object.prototype.hasOwnProperty.call(patch, "titleState")) node.titleState = patch.titleState;
-    if (node && Object.prototype.hasOwnProperty.call(patch, "frozenBranchSummary")) node.frozenBranchSummary = patch.frozenBranchSummary;
   }
   updateNodeLayout(_id: string, _layout: NodeLayout) { return true; }
   updateNodeLayouts(items: Array<{ id: string; layout: NodeLayout }>) { return items.map((i) => i.id); }
@@ -291,9 +287,10 @@ describe("createAgentSession turn runner integration", () => {
       generate: vi.fn(async () => "BTC 策略研究"),
     };
     const messages: AgentMessage[] = [];
+    const eventLog = events();
     const session = createAgentSession({
       store,
-      events: events().sink,
+      events: eventLog.sink,
       ids: { message: () => "id" },
       clock: { now: () => 1 },
       getApiKey: () => "key",
@@ -312,6 +309,11 @@ describe("createAgentSession turn runner integration", () => {
     expect(store.getSession("sess")?.titleState).toBe("manual");
     expect(store.getNode("n1")?.title).toBe("BTC 策略研究");
     expect(store.getNode("n1")?.titleState).toBe("manual");
+    expect(eventLog.items).toContainEqual({
+      nodeId: "n1",
+      type: "node_updated",
+      payload: { id: "n1", sessionId: "sess", title: "BTC 策略研究" },
+    });
   });
 
   it("does not overwrite manually named sessions with the title model", async () => {
@@ -367,7 +369,7 @@ describe("createAgentSession turn runner integration", () => {
     try {
       expect(session.enableSkill({ nodeId: "n1", skillId: "research" })).toMatchObject({ ok: true });
       const child = session.create({ sessionId: "sess", parentId: "n1", title: "child" });
-      expect(child.mountAncestors).toBe(false);
+      expect(child.hasFrozenContext).toBe(false);
 
       const inherited = await buildContext!(child.id, []);
       expect(inherited).toEqual([]);
@@ -390,7 +392,7 @@ describe("createAgentSession turn runner integration", () => {
       createEngine: (hooks) => { buildContext = hooks.buildContext; return createEngine(createHandle([], vi.fn())); },
     });
 
-    const child = session.create({ sessionId: "sess", parentId: "n1", seed: { text: "selected", from: "Node", parent: "n1" }, mountAncestors: true });
+    const child = session.create({ sessionId: "sess", parentId: "n1", seed: { text: "selected", from: "Node", parent: "n1" }, includeParentContext: true });
     store.appendMessages("n1", [{ id: "late", seq: 2, role: "user", content: { role: "user", content: "later parent message" } as AgentMessage }]);
 
     expect((await buildContext!(child.id, [])).map((message: any) => String(message.content))).toEqual([
@@ -423,7 +425,7 @@ describe("createAgentSession turn runner integration", () => {
       sessionId: "sess",
       parentId: "n1",
       seed: { text: "selected seed", from: "Node", parent: "n1" },
-      mountAncestors: true,
+      includeParentContext: true,
     });
 
     const init = getNodeInit!(child.id)!;
@@ -454,7 +456,6 @@ describe("createAgentSession turn runner integration", () => {
       sessionId: "sess",
       parentId: "n1",
       seed: { text: "only seed", from: "Node", parent: "n1" },
-      mountAncestors: false,
     });
 
     const init = getNodeInit!(child.id)!;
@@ -479,7 +480,7 @@ describe("createAgentSession turn runner integration", () => {
       },
     });
 
-    const child = session.create({ sessionId: "sess", parentId: "n1", mountAncestors: true });
+    const child = session.create({ sessionId: "sess", parentId: "n1", includeParentContext: true });
 
     expect(getNodeInit!(child.id)?.systemPrompt).toBe("parent persona");
   });
@@ -498,7 +499,7 @@ describe("createAgentSession turn runner integration", () => {
         return createEngine(createHandle([], vi.fn()));
       },
     });
-    const child = session.create({ sessionId: "sess", parentId: "n1", seed: { text: "selected", from: "Node", parent: "n1" }, mountAncestors: true });
+    const child = session.create({ sessionId: "sess", parentId: "n1", seed: { text: "selected", from: "Node", parent: "n1" }, includeParentContext: true });
     store.appendMessages("n1", [
       {
         id: "parent-cp",
@@ -520,7 +521,7 @@ describe("createAgentSession turn runner integration", () => {
     expect(JSON.stringify(await buildContext!(child.id, []))).not.toContain("PARENT CHECKPOINT AFTER CHILD");
   });
 
-  it("persists a child-owned frozen branch summary when mounted ancestor context exceeds budget", async () => {
+  it("persists a child-owned frozen effective projection when mounted parent context is large", async () => {
     const long = "x".repeat(20_000);
     const store = new MemoryStore([user(`parent question ${long}`), assistant(`parent answer ${long}`), user(`followup ${long}`), assistant(`final ${long}`)]);
     let buildContext: ((nodeId: string, own: AgentMessage[]) => any) | undefined;
@@ -536,16 +537,15 @@ describe("createAgentSession turn runner integration", () => {
       },
     });
 
-    const child = session.create({ sessionId: "sess", parentId: "n1", seed: { text: "selected", from: "Node", parent: "n1" }, mountAncestors: true });
+    const child = session.create({ sessionId: "sess", parentId: "n1", seed: { text: "selected", from: "Node", parent: "n1" }, includeParentContext: true });
     store.appendMessages("n1", [{ id: "late", seq: 4, role: "user", content: user("AFTER_CHILD_PARENT_MUTATION") }]);
 
     const storedChild = store.getNode(child.id)! as any;
     const projected = await buildContext!(child.id, []);
 
-    expect(storedChild.forkContextSnapshot).toBeUndefined();
-    expect(storedChild.frozenBranchSummary).toMatchObject({ role: "loomFrozenBranchSummary", childNodeId: child.id });
+    expect(storedChild.frozenContext).toMatchObject({ version: 1 });
     const projectedText = projected.map((message: any) => String(message.content));
-    expect(projectedText[0]).toEqual(expect.stringContaining("Frozen mounted-ancestor context"));
+    expect(projectedText[0]).toEqual(expect.stringContaining("parent question"));
     expect(projectedText[projectedText.length - 1]).toEqual(expect.stringContaining("selected"));
     expect(JSON.stringify(projected)).not.toContain("AFTER_CHILD_PARENT_MUTATION");
   });

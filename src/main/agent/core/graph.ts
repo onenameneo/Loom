@@ -19,7 +19,6 @@ export interface CanvasNodeModel {
   id: string;
   parentId?: string;
   seed?: Seed;
-  mountAncestors: boolean;
   messages: AgentMessage[];
 }
 

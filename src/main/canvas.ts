@@ -86,7 +86,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
 
   ipcMain.handle("node:list", (_e, sessionId: string) => runtime.list(sessionId));
   ipcMain.handle("node:open", (_e, sessionId: string) => runtime.open(sessionId));
-  ipcMain.handle("node:create", (_e, arg: { sessionId: string; parentId?: string; seed?: Seed; title?: string; mountAncestors?: boolean }) =>
+  ipcMain.handle("node:create", (_e, arg: { sessionId: string; parentId?: string; seed?: Seed; title?: string; includeParentContext?: boolean }) =>
     runtime.create(arg),
   );
   ipcMain.handle("node:send", (_e, arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[]; skillIds?: string[] }) =>

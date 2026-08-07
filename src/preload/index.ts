@@ -65,7 +65,7 @@ const api = {
   canvas: {
     list: (sessionId: string): Promise<any[]> => ipcRenderer.invoke("node:list", sessionId),
     open: (sessionId: string): Promise<any[]> => ipcRenderer.invoke("node:open", sessionId),
-    create: (arg: { sessionId: string; parentId?: string; seed?: any; title?: string; mountAncestors?: boolean }): Promise<any> =>
+    create: (arg: { sessionId: string; parentId?: string; seed?: any; title?: string; includeParentContext?: boolean }): Promise<any> =>
       ipcRenderer.invoke("node:create", arg),
     send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[]): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("node:send", { nodeId, text, images, skillIds }),

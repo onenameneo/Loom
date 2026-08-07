@@ -60,7 +60,9 @@ export interface CanvasNodeDto {
   parentId?: string;
   title: string;
   seed?: NodeSeed;
-  mountAncestors: boolean;
+  hasFrozenContext?: boolean;
+  frozenContextMessageCount?: number;
+  frozenContextTokenEstimate?: number;
   systemPrompt?: string;
   model?: ModelSelection;
   color?: string;
@@ -445,7 +447,7 @@ declare global {
       canvas: {
         list: (sessionId: string) => Promise<CanvasNodeDto[]>;
         open: (sessionId: string) => Promise<CanvasNodeDto[]>;
-        create: (arg: { sessionId: string; parentId?: string; seed?: NodeSeed; title?: string; mountAncestors?: boolean }) => Promise<CanvasNodeDto>;
+        create: (arg: { sessionId: string; parentId?: string; seed?: NodeSeed; title?: string; includeParentContext?: boolean }) => Promise<CanvasNodeDto>;
         send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[]) => Promise<{ ok: boolean; recovered?: "overflow"; reason?: string }>;
         abort: (nodeId: string) => Promise<{ ok: boolean }>;
         compact: (nodeId: string) => Promise<{ ok: boolean; node?: CanvasNodeDto; reason?: string; error?: string }>;

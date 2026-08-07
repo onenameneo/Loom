@@ -156,7 +156,7 @@ function registerIpc() {
   const createProject = (input?: string | { name?: string; sourceRoots?: string[] }) => {
     const project = store.createProject(input);
     const session = store.ensureDefaultSession(project.id);
-    store.createNode({ sessionId: session.id, title: DEFAULT_ROOT_TITLE, titleState: "default", mountAncestors: false });
+    store.createNode({ sessionId: session.id, title: DEFAULT_ROOT_TITLE, titleState: "default" });
     return project;
   };
   ipcMain.handle("project:list", () => store.listProjects());
@@ -187,7 +187,7 @@ function registerIpc() {
   });
   ipcMain.handle("session:create", (_e, { projectId, title }: { projectId: string; title?: string }) => {
     const session = store.createSession(projectId, title ?? DEFAULT_SESSION_TITLE, { titleState: title ? "manual" : "default" });
-    store.createNode({ sessionId: session.id, title: DEFAULT_ROOT_TITLE, titleState: "default", mountAncestors: false });
+    store.createNode({ sessionId: session.id, title: DEFAULT_ROOT_TITLE, titleState: "default" });
     return session;
   });
   ipcMain.handle("session:rename", (_e, { id, title }: { id: string; title: string }) => {
@@ -200,7 +200,7 @@ function registerIpc() {
     store.deleteSession(id);
     if (store.listSessions(session.projectId).length === 0) {
       const replacement = store.ensureDefaultSession(session.projectId);
-      store.createNode({ sessionId: replacement.id, title: DEFAULT_ROOT_TITLE, titleState: "default", mountAncestors: false });
+      store.createNode({ sessionId: replacement.id, title: DEFAULT_ROOT_TITLE, titleState: "default" });
     }
     return { ok: true };
   });

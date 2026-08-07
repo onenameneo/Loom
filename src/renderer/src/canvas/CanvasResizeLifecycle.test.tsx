@@ -83,7 +83,6 @@ async function renderCanvas() {
             sessionId: "session-1",
             projectId: "project-1",
             title: "Main",
-            mountAncestors: false,
             messages: [],
           },
         ]),

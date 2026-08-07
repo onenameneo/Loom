@@ -29,7 +29,7 @@ function parseModelSelection(value: string): ModelSelection {
 export default function ChatView({
   nodeId,
   initialMessages,
-  initialMount,
+  hasFrozenContext,
   systemPrompt,
   model,
   onBranch,
@@ -40,10 +40,10 @@ export default function ChatView({
 }: {
   nodeId: string;
   initialMessages: NodeMsg[];
-  initialMount: boolean;
+  hasFrozenContext: boolean;
   systemPrompt?: string;
   model?: ModelSelection;
-  onBranch: (seedText: string, mountAncestors: boolean) => void;
+  onBranch: (seedText: string, includeParentContext: boolean) => void;
   onExpandCanvas: () => void;
   onTreeChange?: () => void;
   noKey: boolean;
@@ -82,7 +82,7 @@ export default function ChatView({
   const threadRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  const [tb, setTb] = useState<{ text: string; x: number; y: number; mountAncestors: boolean } | null>(null);
+  const [tb, setTb] = useState<{ text: string; x: number; y: number; includeParentContext: boolean } | null>(null);
 
   useEffect(() => {
     if (!tb) return;
@@ -201,6 +201,9 @@ export default function ChatView({
         case "thinking":
           setThinking(true);
           break;
+        case "node_updated":
+          onTreeChange?.();
+          break;
         case "assistant_start":
           setThinking(false);
           setMsgs((m) => [...m, { id: idRef.current++, role: "assistant", text: "" }]);
@@ -227,7 +230,7 @@ export default function ChatView({
           break;
       }
     });
-  }, [nodeId, refreshBudget, upsertToolMessage]);
+  }, [nodeId, onTreeChange, refreshBudget, upsertToolMessage]);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -251,11 +254,11 @@ export default function ChatView({
     }
     const r = range.getBoundingClientRect();
     const box = threadRef.current.getBoundingClientRect();
-    setTb({ text, x: r.left - box.left + r.width / 2, y: r.top - box.top - 6, mountAncestors: true });
+    setTb({ text, x: r.left - box.left + r.width / 2, y: r.top - box.top - 6, includeParentContext: true });
   }, []);
 
   const doBranch = () => {
-    if (tb) onBranch(tb.text, tb.mountAncestors);
+    if (tb) onBranch(tb.text, tb.includeParentContext);
     setTb(null);
     window.getSelection()?.removeAllRanges();
   };
@@ -467,13 +470,13 @@ export default function ChatView({
                 <small>{tb.text.length > 40 ? `${tb.text.slice(0, 40)}…` : tb.text}</small>
               </button>
               <button
-                className={`branch-mount-toggle ${tb.mountAncestors ? "on" : ""}`}
+                className={`branch-mount-toggle ${tb.includeParentContext ? "on" : ""}`}
                 type="button"
-                aria-pressed={tb.mountAncestors}
-                onClick={() => setTb((current) => current && { ...current, mountAncestors: !current.mountAncestors })}
-                title="创建时冻结并携带根到当前节点的完整上下文"
+                aria-pressed={tb.includeParentContext}
+                onClick={() => setTb((current) => current && { ...current, includeParentContext: !current.includeParentContext })}
+                title="创建时包含父级当前上下文；创建后保持冻结"
               >
-                挂载祖先
+                创建时包含父级上下文
               </button>
             </div>
           )}
@@ -507,7 +510,7 @@ export default function ChatView({
           activeSkills={draftSkills}
           canRegenerate={msgs.some((m) => m.role === "user") && !busy}
           model={nodeModel}
-          budgetLine={`将发送 ~${(initialMount ? budget?.withAncestors : budget?.withoutAncestors) ?? 0} tokens`}
+          budgetLine={`将发送 ~${(hasFrozenContext ? budget?.withAncestors : budget?.withoutAncestors) ?? 0} tokens`}
           onSubmit={submit}
           onStop={stop}
           onOpenPersona={() => setPersonaOpen(true)}

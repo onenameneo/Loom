@@ -10,10 +10,11 @@ import { ToolCallTimeline } from "./ToolCallTimeline";
 import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
 import { useComposerHeightVar } from "./useComposerHeightVar";
 import { ApprovalPrompt, type ApprovalState } from "./ApprovalPrompt";
+import { type NodeUpdate } from "./nodeUpdates";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
 type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
-type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number; mountAncestors: boolean };
+type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number; includeParentContext: boolean };
 type RectLike = Pick<DOMRect, "left" | "top" | "bottom" | "width" | "height">;
 
 function formatModelSelection(model?: ModelSelection) {
@@ -43,7 +44,7 @@ export function selectionToolbarFromRects({
   scrollTop: number;
   clientWidth: number;
   zoom: number;
-}): Omit<SelectionToolbar, "mountAncestors"> | null {
+}): Omit<SelectionToolbar, "includeParentContext"> | null {
   if (selection.width === 0 && selection.height === 0) return null;
   const scale = zoom > 0 ? zoom : 1;
   const toolbarWidth = Math.min(240, Math.max(0, clientWidth - 24));
@@ -164,8 +165,14 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
       setPersona(next.systemPrompt ?? "");
       setNodeModel(formatModelSelection(next.model));
       setSkillCount(next.skills?.length ?? 0);
+      data.onNodeUpdated?.({
+        id: next.id,
+        sessionId: next.sessionId,
+        title: next.title,
+        color: next.color,
+      } satisfies NodeUpdate);
     }
-  }, [data.sessionId, id, toMsgs]);
+  }, [data, id, toMsgs]);
 
   const upsertToolMessage = useCallback((payload: Parameters<typeof upsertToolTimelineMessage<Msg>>[1]) => {
     setMsgs((current) => upsertToolTimelineMessage(current, payload, (toolCall) => ({
@@ -236,6 +243,10 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           setThinking(true);
           setBusy(true);
           break;
+        case "node_updated":
+          reloadNode();
+          data.onTreeChange?.();
+          break;
         case "assistant_start":
           setThinking(false);
           setMsgs((m) => [...m, { id: idRef.current++, role: "assistant", text: "" }]);
@@ -294,11 +305,11 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
       clientWidth: el.clientWidth,
       zoom,
     });
-    setTb(toolbar && { ...toolbar, mountAncestors: true });
+    setTb(toolbar && { ...toolbar, includeParentContext: true });
   }, []);
 
   const doBranch = () => {
-    if (tb) branch?.onBranch(id, tb.text, tb.mountAncestors, tb.text);
+    if (tb) branch?.onBranch(id, tb.text, tb.includeParentContext, tb.text);
     setTb(null);
     window.getSelection()?.removeAllRanges();
   };
@@ -452,9 +463,14 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
 
   const seedText = String(data.seed?.text ?? "");
   const seedPreview = seedText.length > 42 ? `${seedText.slice(0, 42)}…` : seedText;
+  const frozenContextMessageCount = Number(data.frozenContextMessageCount ?? 0);
+  const frozenContextTokens = Number(data.frozenContextTokenEstimate ?? 0);
+  const frozenContextTokenLabel = frozenContextTokens >= 1000
+    ? `${(frozenContextTokens / 1000).toFixed(1)}k`
+    : `${frozenContextTokens}`;
   const titleEditUnits = Array.from(title || "标题").reduce((sum, char) => sum + (char.charCodeAt(0) > 255 ? 2 : 1), 0);
   const titleEditWidth = `${Math.min(Math.max(titleEditUnits + 2, 8), 36)}ch`;
-  const tokens = budget ? (data.mountAncestors ? budget.withAncestors : budget.withoutAncestors) : null;
+  const tokens = budget ? budget.withAncestors : null;
   const tokenLabel =
     tokens == null ? "—" : tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : `${tokens}`;
   const streaming = busy && msgs[msgs.length - 1]?.role === "assistant";
@@ -606,7 +622,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           )}
           <div className="head-meta">
             {nodeModel && <span className="model" title={nodeModel}>{nodeModel}</span>}
-            <span className="tokens" title={budget?.estimated ? "将发送的估算 token（字符估算，随挂载祖先变化）" : undefined}>
+            <span className="tokens" title={budget?.estimated ? "将发送的估算 token（字符估算，随节点上下文变化）" : undefined}>
               {budget?.estimated ? "~" : ""}
               {tokenLabel} tok
             </span>
@@ -675,6 +691,11 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
             >
               <span className="seed__from">来自 {data.seed.from}</span>
               <span className="seed__q">“{seedPreview}”</span>
+              {frozenContextMessageCount > 0 && (
+                <span className="seed__context">
+                  包含 {frozenContextMessageCount} 条消息 <i aria-hidden="true">·</i> 约 {frozenContextTokenLabel} tokens
+                </span>
+              )}
               <IconArrowUpRight size={13} />
             </button>
           )}
@@ -724,13 +745,13 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
                 <small>{tb.text.length > 40 ? `${tb.text.slice(0, 40)}…` : tb.text}</small>
               </button>
               <button
-                className={`branch-mount-toggle ${tb.mountAncestors ? "on" : ""}`}
+                className={`branch-mount-toggle ${tb.includeParentContext ? "on" : ""}`}
                 type="button"
-                aria-pressed={tb.mountAncestors}
-                onClick={() => setTb((current) => current && { ...current, mountAncestors: !current.mountAncestors })}
-                title="创建时冻结并携带根到当前节点的完整上下文"
+                aria-pressed={tb.includeParentContext}
+                onClick={() => setTb((current) => current && { ...current, includeParentContext: !current.includeParentContext })}
+                title="创建时包含父级当前上下文；创建后保持冻结"
               >
-                挂载祖先
+                创建时包含父级上下文
               </button>
             </div>
           )}

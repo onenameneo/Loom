@@ -41,6 +41,9 @@ export interface PlanNodeCompactionInput {
   messages: AgentMessage[];
   tailBudgetTokens: number;
   tokenCounter?: (msg: AgentMessage, index: number) => number;
+  /** Original node transcript offset for a checkpoint-uncovered tail. */
+  sourceOffset?: number;
+  previousCheckpoint?: LoomContextCheckpointMessage;
 }
 
 export interface CompactNodeInput extends PlanNodeCompactionInput {
@@ -107,6 +110,7 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
       if (plan.kind === "none") return { ok: false, reason: "not_needed" };
       try {
         const summaryInput = buildCheckpointSummaryInput({
+          previousCheckpoint: input.previousCheckpoint,
           messages: input.messages,
           range: { fromSeq: 0, toSeq: plan.compactThroughSeq },
         });
@@ -131,8 +135,11 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
           createdAt: deps.clock.now(),
           reason: input.trigger,
           summary,
-          coverage: { fromSeq: 0, toSeq: plan.compactThroughSeq },
-          retainedTail: { fromSeq: plan.retainedFromSeq, toSeq: Math.max(plan.retainedFromSeq, input.messages.length - 1) },
+          coverage: { fromSeq: input.sourceOffset ?? 0, toSeq: (input.sourceOffset ?? 0) + plan.compactThroughSeq },
+          retainedTail: {
+            fromSeq: (input.sourceOffset ?? 0) + plan.retainedFromSeq,
+            toSeq: Math.max((input.sourceOffset ?? 0) + plan.retainedFromSeq, (input.sourceOffset ?? 0) + input.messages.length - 1),
+          },
           diagnostics: {
             before: { tokens: beforeTokens, exact: false },
             after: { tokens: afterTokens, exact: false },
