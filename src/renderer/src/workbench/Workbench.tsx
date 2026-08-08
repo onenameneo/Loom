@@ -1,10 +1,16 @@
-import { Activity, ChevronDown, Copy, Plus, Wrench, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Activity, ChevronRight, Copy, Plus, X } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { acceptTraceSnapshot } from "./traceState";
+import {
+  applyTraceEvent,
+  buildSpanTree,
+  traceSnapshotToState,
+  type TraceClientState,
+  type TraceRecordDto,
+  type TraceSpanDto,
+  type TraceSpanNode,
+} from "./traceState";
 
-type TraceEntry = { sequence: number; kind: string; payload: any };
-type TraceRecord = { turnId: string; state: string; operation: string; entries: TraceEntry[] };
 type WorkbenchPageId = "trace";
 type CompactionTracePayload = {
   state: string;
@@ -45,13 +51,27 @@ function restoredTabs(): WorkbenchPageId[] {
   return localStorage.getItem("loom:workbench:trace") === "1" ? ["trace"] : [];
 }
 
-function traceSummary(record: TraceRecord & { startedAt?: number; endedAt?: number }) {
-  const request = record.entries.find((entry) => entry.kind === "request")?.payload;
-  const response = record.entries.find((entry) => entry.kind === "response")?.payload;
-  const model = request?.model?.provider && request?.model?.id ? `${request.model.provider}/${request.model.id}` : "—";
-  const duration = typeof record.startedAt === "number" && typeof record.endedAt === "number" ? `${((record.endedAt - record.startedAt) / 1000).toFixed(1)}s` : undefined;
-  const usage = usageFacts(response?.message?.usage ?? response?.usage);
-  return [model, duration, usageSummary(usage)].filter(Boolean).join(" · ");
+function spanDurationMs(span: TraceSpanDto) {
+  if (typeof span.startedAt !== "number" || typeof span.endedAt !== "number") return "…";
+  const ms = span.endedAt - span.startedAt;
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function modelLabel(span: TraceSpanDto) {
+  const model = span.attributes?.model as { provider?: string; id?: string } | undefined;
+  if (model?.provider && model?.id) return `${model.provider}/${model.id}`;
+  return span.name;
+}
+
+function traceSummary(record: TraceRecordDto) {
+  const llm = record.spans.find((span) => span.kind === "llm_call");
+  const model = llm ? modelLabel(llm) : "—";
+  const duration = typeof record.startedAt === "number" && typeof record.endedAt === "number"
+    ? `${((record.endedAt - record.startedAt) / 1000).toFixed(1)}s`
+    : undefined;
+  const usage = llm ? usageSummary(usageFacts((llm.attributes as any)?.usage)) : undefined;
+  return [model, duration, usage].filter(Boolean).join(" · ");
 }
 
 type UsageFacts = {
@@ -124,19 +144,6 @@ function textFromTraceMessage(message: any) {
   return "—";
 }
 
-function toolCallsFromContent(content: unknown) {
-  return Array.isArray(content) ? content.filter((part: any) => part?.type === "toolCall") : [];
-}
-
-function isCompactionPayload(payload: unknown): payload is CompactionTracePayload {
-  if (!payload || typeof payload !== "object") return false;
-  const { state, trigger } = payload as { state?: unknown; trigger?: unknown };
-  return typeof state === "string"
-    && ["planned", "succeeded", "aborted", "failed"].includes(state)
-    && typeof trigger === "string"
-    && ["manual", "threshold", "overflow"].includes(trigger);
-}
-
 function isSkillMessage(message: any) {
   return message?.role === "user" && typeof message?.content === "string" && message.content.startsWith("[Loom skill context]");
 }
@@ -153,87 +160,156 @@ function CopyButton({ value, label }: { value: unknown; label: string }) {
 
 function MessageList({ messages }: { messages: any[] }) {
   return <div className="trace-messages">
-    {messages.map((message, index) => <article className="trace-message" key={`${message?.timestamp ?? index}-${index}`}>
+    {messages.map((message, index) => <article className="trace-message trace-message--reading" key={`${message?.timestamp ?? index}-${index}`}>
       <header><span>{message?.role ?? "message"}</span><CopyButton label="消息" value={message} /></header>
       <pre>{textFromTraceMessage(message)}</pre>
     </article>)}
   </div>;
 }
 
-function RequestView({ payload, index }: { payload: any; index: number }) {
-  const messages = Array.isArray(payload?.messages) ? payload.messages : [];
-  const skills = messages.filter(isSkillMessage);
-  const conversation = messages.filter((message: any) => !isSkillMessage(message));
-  const tools = Array.isArray(payload?.tools) ? payload.tools : [];
-  const conversationCount = typeof payload?.messageCount === "number" && payload.messageCount !== conversation.length
-    ? `${conversation.length} shown / ${payload.messageCount} sent`
-    : `${conversation.length}`;
-  return <section className="trace-section trace-request">
-    <div className="trace-section-heading"><h3>LLM Request {index + 1}</h3><span>实际提交前的语义请求</span></div>
-    <dl className="trace-facts"><dt>Model</dt><dd>{payload?.model?.provider ?? "—"}/{payload?.model?.id ?? "—"}</dd></dl>
-    <details className="trace-detail" open>
-      <summary><span>System prompt</span><em>{payload?.systemPrompt ? "已注入" : "未提供"}</em></summary>
-      <div className="trace-detail-body"><CopyButton label="系统提示词" value={payload?.systemPrompt ?? ""} /><pre>{traceText(payload?.systemPrompt)}</pre></div>
-    </details>
-    {skills.length > 0 && <details className="trace-detail" open>
-      <summary><span>Skills context</span><em>{skills.length}</em></summary>
-      <div className="trace-detail-body"><MessageList messages={skills} /></div>
-    </details>}
-    <details className="trace-detail" open>
-      <summary><span>Conversation</span><em>{conversationCount}</em></summary>
-      <div className="trace-detail-body"><MessageList messages={conversation} /></div>
-    </details>
-    <details className="trace-detail">
-      <summary><span>Tools</span><em>{tools.length}</em></summary>
-      <div className="trace-detail-body"><CopyButton label="工具定义" value={tools} /><Json value={tools} /></div>
-    </details>
-    <details className="trace-detail">
-      <summary><span>Options</span></summary>
-      <div className="trace-detail-body"><Json value={payload?.options ?? {}} /></div>
-    </details>
+function SpanStatus({ status }: { status: string }) {
+  return <span className={`trace-state ${status}`}>{status}</span>;
+}
+
+function disclosureId(turnId: string, span: TraceSpanDto, detail: string) {
+  return `${turnId}-${span.spanId}-${detail}`;
+}
+
+type DisclosurePhase = "opening" | "open" | "closing" | "closed";
+
+function prefersReducedMotion() {
+  return typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+// Design.md exception: this controlled wrapper keeps an inert body mounted through exit/reopen animation and hands focus back to its trigger; a stock Radix primitive cannot provide that product-semantic lifecycle without reimplementing it.
+function TraceDisclosure({ id, label, summary, children, className, triggerClassName, triggerContent }: {
+  id: string;
+  label: string;
+  summary?: ReactNode;
+  children: ReactNode;
+  className?: string;
+  triggerClassName?: string;
+  triggerContent?: ReactNode;
+}) {
+  const [phase, setPhase] = useState<DisclosurePhase>("closed");
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<number | undefined>(undefined);
+  const animationFrameRef = useRef<number | undefined>(undefined);
+  const open = phase === "opening" || phase === "open";
+  const bodyId = `trace-disclosure-body-${id}`;
+
+  useEffect(() => () => {
+    window.clearTimeout(timerRef.current);
+    if (animationFrameRef.current !== undefined) cancelAnimationFrame(animationFrameRef.current);
+  }, []);
+  useEffect(() => { bodyRef.current?.toggleAttribute("inert", !open); }, [open]);
+
+  function toggle() {
+    window.clearTimeout(timerRef.current);
+    if (animationFrameRef.current !== undefined) cancelAnimationFrame(animationFrameRef.current);
+    animationFrameRef.current = undefined;
+    if (open) {
+      if (bodyRef.current?.contains(document.activeElement)) triggerRef.current?.focus();
+      if (prefersReducedMotion()) {
+        setPhase("closed");
+      } else {
+        setPhase("closing");
+        timerRef.current = window.setTimeout(() => setPhase("closed"), 200);
+      }
+    } else {
+      if (prefersReducedMotion()) {
+        setPhase("open");
+      } else {
+        setPhase("opening");
+        // Keep the initial state through a paint, then transition. One frame can
+        // be coalesced with the state update and skip the opening animation.
+        animationFrameRef.current = requestAnimationFrame(() => {
+          animationFrameRef.current = requestAnimationFrame(() => {
+            animationFrameRef.current = undefined;
+            setPhase("open");
+          });
+        });
+      }
+    }
+  }
+
+  return <section className={`trace-disclosure${className ? ` ${className}` : ""}`} data-phase={phase}>
+    <button ref={triggerRef} type="button" className={`trace-disclosure__trigger${triggerClassName ? ` ${triggerClassName}` : ""}`} aria-expanded={open} aria-controls={bodyId} onClick={toggle}>
+      {triggerContent ?? <><ChevronRight className="trace-disclosure__chevron" aria-hidden="true" size={14} /><span>{label}</span>{summary && <em>{summary}</em>}</>}
+    </button>
+    <div ref={bodyRef} id={bodyId} data-testid={bodyId} className="trace-disclosure__body" hidden={phase === "closed"} aria-hidden={!open}>
+      <div className="trace-disclosure__content">{children}</div>
+    </div>
   </section>;
 }
 
-function ResponseView({ payload, index }: { payload: any; index: number }) {
-  const message = payload?.message ?? payload;
-  const toolCalls = toolCallsFromContent(message?.content);
-  const heading = toolCalls.length > 0 ? `LLM Tool Decision ${index + 1}` : `LLM Response ${index + 1}`;
-  const usage = usageFacts(message?.usage);
-  return <details className="trace-section trace-response-detail" open>
-    <summary className="trace-section-heading"><h3>{heading}</h3><span>{toolCalls.length > 0 ? `${toolCalls.length} tool call${toolCalls.length > 1 ? "s" : ""}` : traceText(message?.role, "assistant")}</span></summary>
-    {toolCalls.length > 0 && <div className="trace-tool-decisions">
-      {toolCalls.map((toolCall: any, toolIndex: number) => <div className="trace-tool-decision" key={toolCall?.id ?? toolIndex}>
-        <span>模型请求调用</span><strong>{traceText(toolCall?.name, "tool")}</strong><code>{traceText(toolCall?.id, "—")}</code>
-      </div>)}
-    </div>}
-    <div className="trace-response"><header><span>{traceText(message?.role, "assistant")}</span><CopyButton label="模型响应" value={message} /></header><pre>{textFromContent(message?.content ?? message)}</pre></div>
-    {message?.usage && <details className="trace-detail" open>
-      <summary><span>Response usage</span><em>{usageSummary(usage) ?? "available"}</em></summary>
+function LlmSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) {
+  const attrs = span.attributes as Record<string, any>;
+  const messages = Array.isArray(attrs.messages) ? attrs.messages : [];
+  const skills = messages.filter(isSkillMessage);
+  const conversation = messages.filter((message: any) => !isSkillMessage(message));
+  const tools = Array.isArray(attrs.tools) ? attrs.tools : [];
+  const usage = usageFacts(attrs.usage);
+  const response = attrs.response;
+  return <section className="trace-section trace-request trace-timeline-event">
+    <div className="trace-section-heading">
+      <h3>LLM Call</h3>
+      <span>{spanDurationMs(span)} · <SpanStatus status={span.status} /></span>
+    </div>
+    <dl className="trace-facts">
+      <dt>Model</dt><dd>{modelLabel(span)}</dd>
+      {usage && <><dt>Usage</dt><dd>{usageSummary(usage)}</dd></>}
+    </dl>
+    {usage && <TraceDisclosure id={disclosureId(turnId, span, "response-usage")} label="Response usage" summary={usageSummary(usage)}>
       <div className="trace-detail-body">
         <dl className="trace-facts">
-          {typeof usage?.input === "number" && <><dt>Input</dt><dd>{usage.input} tokens</dd></>}
-          {typeof usage?.output === "number" && <><dt>Output</dt><dd>{usage.output} tokens</dd></>}
-          {typeof usage?.total === "number" && <><dt>Total</dt><dd>{usage.total} tokens</dd></>}
-          {typeof usage?.cached === "number" && <><dt>Cached</dt><dd>{usage.cached} tokens</dd></>}
-          {typeof usage?.reasoning === "number" && <><dt>Reasoning</dt><dd>{usage.reasoning} tokens</dd></>}
+          {typeof usage.input === "number" && <><dt>Input</dt><dd>{usage.input} tokens</dd></>}
+          {typeof usage.output === "number" && <><dt>Output</dt><dd>{usage.output} tokens</dd></>}
+          {typeof usage.total === "number" && <><dt>Total</dt><dd>{usage.total} tokens</dd></>}
+          {typeof usage.cached === "number" && <><dt>Cached</dt><dd>{usage.cached} tokens</dd></>}
+          {typeof usage.reasoning === "number" && <><dt>Reasoning</dt><dd>{usage.reasoning} tokens</dd></>}
         </dl>
-        <details className="trace-detail">
-          <summary><span>Raw usage</span><em>JSON</em></summary>
-          <div className="trace-detail-body"><Json value={message.usage} /></div>
-        </details>
       </div>
-    </details>}
-  </details>;
+    </TraceDisclosure>}
+    {response != null && <TraceDisclosure id={disclosureId(turnId, span, "response")} label="Response" summary="completed">
+      <div className="trace-detail-body trace-response"><CopyButton label="响应" value={traceText(response)} /><pre>{traceText(response)}</pre></div>
+    </TraceDisclosure>}
+    {attrs.systemPrompt != null && <TraceDisclosure id={disclosureId(turnId, span, "system-prompt")} label="System prompt" summary="已注入">
+      <div className="trace-detail-body"><CopyButton label="系统提示词" value={attrs.systemPrompt} /><pre>{traceText(attrs.systemPrompt)}</pre></div>
+    </TraceDisclosure>}
+    {skills.length > 0 && <TraceDisclosure id={disclosureId(turnId, span, "skills-context")} label="Skills context" summary={skills.length}>
+      <div className="trace-detail-body"><MessageList messages={skills} /></div>
+    </TraceDisclosure>}
+    <TraceDisclosure id={disclosureId(turnId, span, "conversation")} label="Conversation" summary={conversation.length}>
+      <div className="trace-detail-body"><MessageList messages={conversation} /></div>
+    </TraceDisclosure>
+    {tools.length > 0 && <TraceDisclosure id={disclosureId(turnId, span, "tools")} label="Tools" summary={tools.length}>
+      <div className="trace-detail-body"><CopyButton label="工具定义" value={tools} /><Json value={tools} /></div>
+    </TraceDisclosure>}
+    {attrs.options != null && <TraceDisclosure id={disclosureId(turnId, span, "options")} label="Options">
+      <div className="trace-detail-body"><Json value={attrs.options} /></div>
+    </TraceDisclosure>}
+    {span.children.length > 0 && <div className="trace-span-children">
+      {span.children.map((child) => <SpanView key={child.spanId} span={child} turnId={turnId} />)}
+    </div>}
+  </section>;
 }
 
-function ToolView({ payload }: { payload: any }) {
-  return <div className="trace-tool"><Wrench size={14} /><strong>{traceText(payload?.name, "tool")}</strong><span>{traceText(payload?.state, "")}</span><details><summary>Arguments and result</summary><div className="trace-detail-body"><CopyButton label="工具调用" value={payload} /><Json value={payload} /></div></details></div>;
-}
-
-function ToolEntryView({ payload }: { payload: any }) {
-  return <section className="trace-section trace-tool-section">
-    <div className="trace-section-heading"><h3>Tool {traceText(payload?.name, "tool")}</h3><span>{traceText(payload?.state, "")}</span></div>
-    <ToolView payload={payload} />
+function ToolSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) {
+  const attrs = span.attributes as Record<string, any>;
+  const usage = usageFacts(attrs.usage);
+  return <section className="trace-section trace-tool-section trace-timeline-event">
+    <div className="trace-section-heading">
+      <h3>Tool {span.name}</h3>
+      <span>{attrs.id != null && <code>{String(attrs.id)}</code>}{attrs.id != null ? " · " : ""}{spanDurationMs(span)} · <SpanStatus status={span.status} /></span>
+    </div>
+    <TraceDisclosure id={disclosureId(turnId, span, "tool-arguments")} label="Arguments and result">
+      <div className="trace-detail-body"><CopyButton label="工具调用" value={span.attributes} /><Json value={span.attributes} /></div>
+    </TraceDisclosure>
+    {usage && <dl className="trace-facts"><dt>Usage</dt><dd>{usageSummary(usage)}</dd></dl>}
   </section>;
 }
 
@@ -247,7 +323,8 @@ function tokenDiagnosticText(label: string, value: { tokens?: number; exact?: bo
   return `${value.exact ? "exact" : "estimated"} ${label}: ${value.tokens} tokens`;
 }
 
-function CompactionEntryView({ payload }: { payload: CompactionTracePayload }) {
+function CompactionSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) {
+  const payload = span.attributes as unknown as CompactionTracePayload;
   const coverage = spanText(payload.coverage);
   const retainedTail = spanText(payload.retainedTail);
   const meta = [payload.trigger, payload.kind].filter(Boolean).join(" · ");
@@ -256,8 +333,11 @@ function CompactionEntryView({ payload }: { payload: CompactionTracePayload }) {
   const summaryUsage = typeof payload.summaryUsage?.totalTokens === "number"
     ? `${payload.summaryUsage.exact ? "exact" : "estimated"} summary: ${payload.summaryUsage.totalTokens} tokens`
     : null;
-  return <section className="trace-section trace-compaction-section">
-    <div className="trace-section-heading"><h3>Compaction {payload.state}</h3><span>{meta}</span></div>
+  return <section className="trace-section trace-compaction-section trace-timeline-event">
+    <div className="trace-section-heading">
+      <h3>Compaction {payload.state ?? span.status}</h3>
+      <span>{meta} · {spanDurationMs(span)}</span>
+    </div>
     <dl className="trace-facts">
       {coverage && <><dt>Coverage</dt><dd>coverage {coverage}</dd></>}
       {retainedTail && <><dt>Retained</dt><dd>{retainedTail}</dd></>}
@@ -271,11 +351,33 @@ function CompactionEntryView({ payload }: { payload: CompactionTracePayload }) {
       {payload.reason && <><dt>Reason</dt><dd>{payload.reason}</dd></>}
       {payload.error && <><dt>Error</dt><dd>{payload.error}</dd></>}
     </dl>
-    <details className="trace-detail">
-      <summary><span>Diagnostics</span><em>{payload.diagnostics ? "available" : "event"}</em></summary>
-      <div className="trace-detail-body"><CopyButton label="压缩事件" value={payload} /><Json value={payload} /></div>
-    </details>
+    <TraceDisclosure id={disclosureId(turnId, span, "compaction-diagnostics")} label="Diagnostics" summary={payload.diagnostics ? "available" : "event"}>
+      <div className="trace-detail-body"><CopyButton label="压缩事件" value={span.attributes} /><Json value={span.attributes} /></div>
+    </TraceDisclosure>
   </section>;
+}
+
+function SpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) {
+  if (span.kind === "llm_call") return <LlmSpanView span={span} turnId={turnId} />;
+  if (span.kind === "tool") return <ToolSpanView span={span} turnId={turnId} />;
+  if (span.kind === "compaction") return <CompactionSpanView span={span} turnId={turnId} />;
+  // turn 根 span：渲染其子 span 树
+  return <div className="trace-span-children">
+    {span.children.map((child) => <SpanView key={child.spanId} span={child} turnId={turnId} />)}
+  </div>;
+}
+
+function TraceRecordView({ record }: { record: TraceRecordDto }) {
+  const tree = buildSpanTree(record.spans);
+  return <TraceDisclosure id={`turn-${record.turnId}`} label={record.operation} className="trace-record" triggerClassName="trace-record__summary" triggerContent={<>
+      <SpanStatus status={record.status} />
+      <strong>{record.operation}</strong>
+      <span className="trace-summary">{traceSummary(record)}</span>
+      <small>{record.turnId}</small>
+      <ChevronRight className="trace-disclosure__chevron trace-record__chevron" aria-hidden="true" size={14} />
+    </>}>
+    {tree.map((node) => <SpanView key={node.spanId} span={node} turnId={record.turnId} />)}
+  </TraceDisclosure>;
 }
 
 export function Workbench({ nodeId }: { nodeId: string | null }) {
@@ -283,7 +385,7 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
   const [selectedTab, setSelectedTab] = useState<WorkbenchPageId | null>(() => restoredTabs()[0] ?? null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
-  const [trace, setTrace] = useState<any>(null);
+  const [trace, setTrace] = useState<TraceClientState | null>(null);
   const [hasNewActivity, setHasNewActivity] = useState(false);
   const addRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -318,11 +420,18 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
     }
     let dead = false;
     setTrace(null);
-    window.api.canvas.trace(nodeId).then((snapshot) => !dead && setTrace(snapshot));
-    const off = window.api.canvas.onTrace((snapshot) => {
-      if (snapshot?.nodeId !== nodeId || dead) return;
+    // 先订阅再取快照：订阅累积优先，初始快照只在更新于订阅时应用。
+    const off = window.api.canvas.onTrace((event) => {
+      if (event?.nodeId !== nodeId || dead) return;
       if (readingHistoryRef.current) setHasNewActivity(true);
-      setTrace((current: any) => acceptTraceSnapshot(current, snapshot, nodeId));
+      setTrace((current) => applyTraceEvent(current, event, nodeId));
+    });
+    window.api.canvas.trace(nodeId).then((snapshot) => {
+      if (dead) return;
+      setTrace((current) => {
+        const state = traceSnapshotToState(snapshot);
+        return current && current.revision >= state.revision ? current : state;
+      });
     });
     return () => { dead = true; off(); };
   }, [nodeId, tabs]);
@@ -352,22 +461,9 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
       if (atNewest) setHasNewActivity(false);
     }}>
       {hasNewActivity && <button className="trace-new-activity" onClick={() => { inspectorRef.current?.scrollTo({ top: 0, behavior: "smooth" }); readingHistoryRef.current = false; setHasNewActivity(false); }}>有新的 Trace 活动</button>}
-      {!nodeId ? <p>选择一个节点以查看 trace。</p> : !trace?.records?.length ? <p>此节点运行后，实际模型请求、响应和工具调用会出现在这里。</p> : trace.records.map((record: TraceRecord) => {
-        const events = record.entries.filter((entry) => !["request", "response", "tool"].includes(entry.kind) && !(entry.kind === "event" && isCompactionPayload(entry.payload)));
-        const visibleEntries = record.entries
-          .filter((entry) => ["request", "response", "tool"].includes(entry.kind) || (entry.kind === "event" && isCompactionPayload(entry.payload)))
-          .sort((a, b) => a.sequence - b.sequence);
-        let requestIndex = 0;
-        let responseIndex = 0;
-        return <details className="trace-record" key={record.turnId}><summary><span className={`trace-state ${record.state}`}>{record.state}</span><strong>{record.operation}</strong><span className="trace-summary">{traceSummary(record)}</span><small>{record.turnId}</small><ChevronDown size={14} /></summary>
-          {visibleEntries.map((entry) => {
-            if (entry.kind === "request") return <RequestView key={entry.sequence} index={requestIndex++} payload={entry.payload} />;
-            if (entry.kind === "response") return <ResponseView key={entry.sequence} index={responseIndex++} payload={entry.payload} />;
-            if (entry.kind === "event" && isCompactionPayload(entry.payload)) return <CompactionEntryView key={entry.sequence} payload={entry.payload} />;
-            return <ToolEntryView key={entry.sequence} payload={entry.payload} />;
-          })}
-          {events.length > 0 && <details className="trace-events"><summary>Events <em>{events.length}</em></summary><Json value={events.map((entry) => entry.payload)} /></details>}
-        </details>;
+      {!nodeId ? <p>选择一个节点以查看 trace。</p> : !trace?.order.length ? <p>此节点运行后，实际模型请求、响应和工具调用会出现在这里。</p> : [...trace.order].reverse().map((turnId) => {
+        const record = trace.recordsByTurnId[turnId];
+        return record ? <TraceRecordView key={record.turnId} record={record} /> : null;
       })}
     </div>}
   </div>;

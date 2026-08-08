@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Workbench } from "./Workbench";
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   localStorage.clear();
   delete (window as any).api;
+  delete (window as any).matchMedia;
 });
 
 describe("Workbench", () => {
@@ -25,18 +27,34 @@ describe("Workbench", () => {
     expect(document.activeElement).toBe(add);
   });
 
+  function spanRecord(spans: any[], overrides: Record<string, unknown> = {}) {
+    return { nodeId: "node-1", turnId: "turn-1", operation: "send", status: "ok", startedAt: 1_000, endedAt: 2_500, spans, ...overrides };
+  }
+
+  function turnSpan(startedAt = 1_000, endedAt = 2_500) {
+    return { spanId: "turn", kind: "turn", name: "send", startedAt, endedAt, status: "ok", attributes: { operation: "send" } };
+  }
+
+  function llmSpan(overrides: Record<string, unknown> = {}, spanId = "llm") {
+    return {
+      spanId, parentSpanId: "turn", kind: "llm_call", name: "p/m", startedAt: 1_000, endedAt: 2_500, status: "ok",
+      attributes: { model: { provider: "p", id: "m" }, messages: [], tools: [], ...overrides },
+    };
+  }
+
+  async function openTurn(operation = "send") {
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(operation) }));
+  }
+
   it("summarizes model duration and usage before a trace row is expanded", async () => {
     (window as any).api = {
       canvas: {
         trace: vi.fn(async () => ({
-          nodeId: "node-1", sequence: 1,
-          records: [{
-            turnId: "turn-1", operation: "send", state: "completed", startedAt: 1_000, endedAt: 2_500,
-            entries: [
-              { sequence: 1, kind: "request", payload: { model: { provider: "openai", id: "gpt-5" }, systemPrompt: { text: "long prompt", truncated: true } } },
-              { sequence: 2, kind: "response", payload: { message: { usage: { inputTokens: 30, outputTokens: 12, totalTokens: 42 } } } },
-            ],
-          }],
+          nodeId: "node-1", revision: 1,
+          records: [spanRecord([
+            turnSpan(),
+            llmSpan({ model: { provider: "openai", id: "gpt-5" }, systemPrompt: { text: "long prompt", truncated: true }, usage: { inputTokens: 30, outputTokens: 12, totalTokens: 42 } }),
+          ])],
         })),
         onTrace: vi.fn(() => () => {}),
       },
@@ -45,6 +63,8 @@ describe("Workbench", () => {
     render(<Workbench nodeId="node-1" />);
 
     expect(await screen.findByText("openai/gpt-5 · 1.5s · in 30 · out 12 · total 42 tokens")).toBeTruthy();
+    await openTurn();
+    fireEvent.click(screen.getByRole("button", { name: /System prompt/ }));
     expect(screen.getByText((_, element) => element?.tagName === "PRE" && element.textContent === "long prompt\n[TRUNCATED]")).toBeTruthy();
   });
 
@@ -52,21 +72,11 @@ describe("Workbench", () => {
     (window as any).api = {
       canvas: {
         trace: vi.fn(async () => ({
-          nodeId: "node-1", sequence: 1,
-          records: [{
-            turnId: "turn-1", operation: "send", state: "completed",
-            entries: [{
-              sequence: 1,
-              kind: "response",
-              payload: {
-                message: {
-                  role: "assistant",
-                  content: "answer",
-                  usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120, cachedTokens: 80, reasoningTokens: 5 },
-                },
-              },
-            }],
-          }],
+          nodeId: "node-1", revision: 1,
+          records: [spanRecord([
+            turnSpan(),
+            llmSpan({ usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120, cachedTokens: 80, reasoningTokens: 5 } }),
+          ])],
         })),
         onTrace: vi.fn(() => () => {}),
       },
@@ -74,7 +84,8 @@ describe("Workbench", () => {
     localStorage.setItem("loom:workbench:tabs", '["trace"]');
     render(<Workbench nodeId="node-1" />);
 
-    expect(await screen.findByText("Response usage")).toBeTruthy();
+    await openTurn();
+    fireEvent.click(await screen.findByRole("button", { name: /Response usage/ }));
     expect(screen.getByText("100 tokens")).toBeTruthy();
     expect(screen.getByText("20 tokens")).toBeTruthy();
     expect(screen.getByText("120 tokens")).toBeTruthy();
@@ -86,19 +97,11 @@ describe("Workbench", () => {
     (window as any).api = {
       canvas: {
         trace: vi.fn(async () => ({
-          nodeId: "node-1", sequence: 1,
-          records: [{
-            turnId: "turn-1", operation: "send", state: "completed",
-            entries: [{
-              sequence: 1,
-              kind: "request",
-              payload: {
-                model: { provider: "p", id: "m" },
-                messages: [{ role: "user", text: "checkpoint summary preview", contentParts: ["text"] }],
-                tools: [],
-              },
-            }],
-          }],
+          nodeId: "node-1", revision: 1,
+          records: [spanRecord([
+            turnSpan(),
+            llmSpan({ messages: [{ role: "user", text: "checkpoint summary preview", contentParts: ["text"] }] }),
+          ])],
         })),
         onTrace: vi.fn(() => () => {}),
       },
@@ -106,6 +109,8 @@ describe("Workbench", () => {
     localStorage.setItem("loom:workbench:tabs", '["trace"]');
     render(<Workbench nodeId="node-1" />);
 
+    await openTurn();
+    fireEvent.click(await screen.findByRole("button", { name: /Conversation/ }));
     expect(await screen.findByText((_, element) => element?.tagName === "PRE" && element.textContent === "checkpoint summary preview")).toBeTruthy();
   });
 
@@ -132,32 +137,40 @@ describe("Workbench", () => {
   });
 
   it("keeps a new live update non-disruptive while the reader is in history", async () => {
-    let emitTrace: ((snapshot: unknown) => void) | undefined;
+    let emitTrace: ((event: unknown) => void) | undefined;
     (window as any).api = {
       canvas: {
-        trace: vi.fn(async () => ({ nodeId: "node-1", sequence: 1, records: [] })),
+        trace: vi.fn(async () => ({ nodeId: "node-1", revision: 1, records: [] })),
         onTrace: vi.fn((listener) => { emitTrace = listener; return () => {}; }),
       },
     };
     localStorage.setItem("loom:workbench:tabs", '["trace"]');
     render(<Workbench nodeId="node-1" />);
+    await act(async () => {});
     const inspector = screen.getByRole("tabpanel", { name: "Trace" });
     Object.defineProperty(inspector, "scrollTop", { configurable: true, value: 80 });
     fireEvent.scroll(inspector);
 
-    emitTrace?.({ nodeId: "node-1", sequence: 2, records: [] });
+    emitTrace?.({
+      type: "turn_start",
+      nodeId: "node-1",
+      turnId: "live-turn-1",
+      operation: "live-send",
+      revision: 2,
+      startedAt: 3_000,
+      span: { spanId: "live-root", kind: "turn", name: "live-send", startedAt: 3_000, status: "pending", attributes: {} },
+    });
     expect(await screen.findByRole("button", { name: "有新的 Trace 活动" })).toBeTruthy();
+    expect(screen.getByText("live-send")).toBeTruthy();
+    expect(screen.getByText("live-turn-1")).toBeTruthy();
   });
 
   it("allows an LLM response body to be collapsed", async () => {
     (window as any).api = {
       canvas: {
         trace: vi.fn(async () => ({
-          nodeId: "node-1", sequence: 1,
-          records: [{
-            turnId: "turn-1", operation: "send", state: "completed",
-            entries: [{ sequence: 1, kind: "response", payload: { message: { role: "assistant", content: "long response" } } }],
-          }],
+          nodeId: "node-1", revision: 1,
+          records: [spanRecord([turnSpan(), llmSpan({ messages: [{ role: "assistant", content: "long response" }] })])],
         })),
         onTrace: vi.fn(() => () => {}),
       },
@@ -165,31 +178,240 @@ describe("Workbench", () => {
     localStorage.setItem("loom:workbench:tabs", '["trace"]');
     render(<Workbench nodeId="node-1" />);
 
-    const response = await screen.findByText("LLM Response 1");
-    const responseDetails = response.closest("details");
+    await openTurn();
+    const conversation = await screen.findByRole("button", { name: /Conversation/ });
 
-    expect(responseDetails).toBeTruthy();
-    expect(responseDetails).toHaveProperty("open", true);
+    expect(conversation.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(conversation);
+    expect(conversation.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(conversation);
+    expect(conversation.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("renders a completed LLM response from end attributes in its own copyable reading disclosure", async () => {
+    (window as any).api = {
+      canvas: {
+        trace: vi.fn(async () => ({
+          nodeId: "node-1", revision: 1,
+          records: [spanRecord([turnSpan(), llmSpan({
+            messages: [{ role: "user", text: "request only" }],
+            response: { text: "completed assistant answer", truncated: false },
+          })])],
+        })),
+        onTrace: vi.fn(() => () => {}),
+      },
+    };
+    localStorage.setItem("loom:workbench:tabs", '["trace"]');
+    render(<Workbench nodeId="node-1" />);
+
+    await openTurn();
+    const response = screen.getByRole("button", { name: /Response/ });
+    expect(response.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(response);
-    expect(responseDetails).toHaveProperty("open", false);
+    expect(screen.getByText((_, element) => element?.tagName === "PRE" && element.textContent === "completed assistant answer")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "复制响应" })).toBeTruthy();
+    expect(screen.queryByText("completed assistant answer")?.closest(".trace-message")).toBeNull();
   });
 
-  it("renders trace entries in chronological order and labels assistant tool calls", async () => {
+  it("stages an opening disclosure across two frames before its 200ms entry transition", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    }));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    (window as any).api = {
+      canvas: {
+        trace: vi.fn(async () => ({ nodeId: "node-1", revision: 1, records: [spanRecord([turnSpan(), llmSpan({ systemPrompt: "private instructions" })]) ] })),
+        onTrace: vi.fn(() => () => {}),
+      },
+    };
+    localStorage.setItem("loom:workbench:tabs", '["trace"]');
+    render(<Workbench nodeId="node-1" />);
+
+    await openTurn();
+    act(() => frames.shift()?.(0));
+    act(() => frames.shift()?.(16));
+    const prompt = screen.getByRole("button", { name: /System prompt/ });
+    const disclosure = prompt.closest(".trace-disclosure")!;
+    fireEvent.click(prompt);
+    expect(disclosure.getAttribute("data-phase")).toBe("opening");
+    expect(document.getElementById(prompt.getAttribute("aria-controls")!)?.hasAttribute("inert")).toBe(false);
+    expect(frames).toHaveLength(1);
+    act(() => frames.shift()?.(0));
+    expect(disclosure.getAttribute("data-phase")).toBe("opening");
+    expect(frames).toHaveLength(1);
+    act(() => frames.shift()?.(16));
+    expect(disclosure.getAttribute("data-phase")).toBe("open");
+  });
+
+  it("keeps nested trace diagnostics collapsed and removes them from focus after close", async () => {
+    vi.useFakeTimers();
+    try {
+      (window as any).api = {
+        canvas: {
+          trace: vi.fn(async () => ({ nodeId: "node-1", revision: 1, records: [spanRecord([
+            turnSpan(), llmSpan({ systemPrompt: "private instructions" }),
+          ])] })),
+          onTrace: vi.fn(() => () => {}),
+        },
+      };
+      localStorage.setItem("loom:workbench:tabs", '["trace"]');
+      render(<Workbench nodeId="node-1" />);
+      await act(async () => {});
+      fireEvent.click(screen.getByText("send"));
+      const prompt = screen.getByRole("button", { name: /System prompt/ });
+      const promptBody = () => document.getElementById(prompt.getAttribute("aria-controls")!)!;
+      expect(prompt.getAttribute("aria-expanded")).toBe("false");
+      expect(screen.getByText("已注入")).toBeTruthy();
+      fireEvent.click(prompt);
+      expect(prompt.getAttribute("aria-expanded")).toBe("true");
+      fireEvent.click(prompt);
+      expect(prompt.getAttribute("aria-expanded")).toBe("false");
+      expect(promptBody().hasAttribute("inert")).toBe(true);
+      act(() => vi.advanceTimersByTime(220));
+      expect(promptBody().hasAttribute("hidden")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives duplicate LLM disclosure labels unique body ids", async () => {
+    (window as any).api = {
+      canvas: {
+        trace: vi.fn(async () => ({ nodeId: "node-1", revision: 1, records: [spanRecord([
+          turnSpan(),
+          llmSpan({ systemPrompt: "first instructions" }, "llm-first"),
+          llmSpan({ systemPrompt: "second instructions" }, "llm-second"),
+        ])] })),
+        onTrace: vi.fn(() => () => {}),
+      },
+    };
+    localStorage.setItem("loom:workbench:tabs", '["trace"]');
+    render(<Workbench nodeId="node-1" />);
+
+    await openTurn();
+    const prompts = await screen.findAllByRole("button", { name: /System prompt/ });
+    const bodyIds = prompts.map((prompt) => prompt.getAttribute("aria-controls"));
+    expect(new Set(bodyIds).size).toBe(2);
+    bodyIds.forEach((bodyId) => expect(document.getElementById(bodyId!)).toBeTruthy());
+  });
+
+  it("namespaces disclosure body ids by trace record and span", async () => {
+    (window as any).api = {
+      canvas: {
+        trace: vi.fn(async () => ({ nodeId: "node-1", revision: 1, records: [
+          spanRecord([turnSpan(), llmSpan({ systemPrompt: "first instructions" }, "shared-llm")]),
+          spanRecord([turnSpan(), llmSpan({ systemPrompt: "second instructions" }, "shared-llm")], { turnId: "turn-2" }),
+        ] })),
+        onTrace: vi.fn(() => () => {}),
+      },
+    };
+    localStorage.setItem("loom:workbench:tabs", '["trace"]');
+    render(<Workbench nodeId="node-1" />);
+
+    const turnSummaries = await screen.findAllByRole("button", { name: /send/ });
+    turnSummaries.forEach((summary) => fireEvent.click(summary));
+    const prompts = await screen.findAllByRole("button", { name: /System prompt/ });
+    const bodyIds = prompts.map((prompt) => prompt.getAttribute("aria-controls"));
+    expect(new Set(bodyIds).size).toBe(2);
+    expect(bodyIds.every((bodyId) => document.getElementById(bodyId!) !== null)).toBe(true);
+  });
+
+  it("keeps turns in a stable controlled disclosure lifecycle", async () => {
+    vi.useFakeTimers();
+    try {
+    (window as any).api = {
+      canvas: {
+        trace: vi.fn(async () => ({ nodeId: "node-1", revision: 1, records: [spanRecord([turnSpan(), llmSpan()])] })),
+        onTrace: vi.fn(() => () => {}),
+      },
+    };
+    localStorage.setItem("loom:workbench:tabs", '["trace"]');
+    render(<Workbench nodeId="node-1" />);
+    await act(async () => {});
+
+    const summary = screen.getByText("send").closest("button")!;
+    const record = summary.closest(".trace-record")!;
+    const body = document.getElementById(summary.getAttribute("aria-controls")!)!;
+    expect(record.tagName).toBe("SECTION");
+    expect(summary.getAttribute("aria-expanded")).toBe("false");
+    expect(body.hasAttribute("hidden")).toBe(true);
+    expect(body.hasAttribute("inert")).toBe(true);
+    fireEvent.click(summary);
+    expect(record.getAttribute("data-phase")).toBe("opening");
+    expect(summary.getAttribute("aria-expanded")).toBe("true");
+    expect(body.hasAttribute("hidden")).toBe(false);
+    const conversation = screen.getByRole("button", { name: /Conversation/ });
+    conversation.focus();
+    expect(document.activeElement).toBe(conversation);
+    fireEvent.click(summary);
+    expect(document.activeElement).toBe(summary);
+    expect(record.getAttribute("data-phase")).toBe("closing");
+    expect(body.hasAttribute("inert")).toBe(true);
+    act(() => vi.advanceTimersByTime(220));
+    expect(record.getAttribute("data-phase")).toBe("closed");
+    expect(body.hasAttribute("hidden")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("renders trace timeline events and reading messages", async () => {
+    (window as any).api = {
+      canvas: {
+        trace: vi.fn(async () => ({ nodeId: "node-1", revision: 1, records: [spanRecord([
+          turnSpan(),
+          llmSpan({ messages: [{ role: "user", text: "checkpoint summary preview", contentParts: ["text"] }] }, "llm-reading"),
+          { spanId: "tool-reading", parentSpanId: "turn", kind: "tool", name: "now", startedAt: 1_100, endedAt: 1_200, status: "ok", attributes: {} },
+        ])] })),
+        onTrace: vi.fn(() => () => {}),
+      },
+    };
+    localStorage.setItem("loom:workbench:tabs", '["trace"]');
+    render(<Workbench nodeId="node-1" />);
+
+    await openTurn();
+    expect((await screen.findByRole("heading", { name: "LLM Call" })).closest("section")?.classList.contains("trace-timeline-event")).toBe(true);
+    expect(screen.getByText("Tool now").closest("section")?.classList.contains("trace-timeline-event")).toBe(true);
+    expect(screen.getByText("checkpoint summary preview").closest("article")?.classList.contains("trace-message--reading")).toBe(true);
+  });
+
+  it("closes nested trace disclosures immediately when reduced motion is preferred", async () => {
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn(() => ({ matches: true })),
+    });
+    (window as any).api = {
+      canvas: {
+        trace: vi.fn(async () => ({ nodeId: "node-1", revision: 1, records: [spanRecord([
+          turnSpan(), llmSpan({ systemPrompt: "private instructions" }),
+        ])] })),
+        onTrace: vi.fn(() => () => {}),
+      },
+    };
+    localStorage.setItem("loom:workbench:tabs", '["trace"]');
+    render(<Workbench nodeId="node-1" />);
+
+    await openTurn();
+    const prompt = await screen.findByRole("button", { name: /System prompt/ });
+    const body = () => document.getElementById(prompt.getAttribute("aria-controls")!)!;
+    fireEvent.click(prompt);
+    fireEvent.click(prompt);
+    expect(body().hasAttribute("hidden")).toBe(true);
+  });
+
+  it("renders the span tree in order and labels tool calls", async () => {
     (window as any).api = {
       canvas: {
         trace: vi.fn(async () => ({
-          nodeId: "node-1", sequence: 1,
-          records: [{
-            turnId: "turn-1", operation: "send", state: "completed",
-            entries: [
-              { sequence: 1, kind: "request", payload: { model: { provider: "p", id: "m" }, messages: [], tools: [] } },
-              { sequence: 2, kind: "response", payload: { message: { role: "assistant", content: [{ type: "toolCall", id: "call-now", name: "now", arguments: {} }] } } },
-              { sequence: 3, kind: "tool", payload: { state: "start", name: "now", id: "call-now", arguments: {} } },
-              { sequence: 4, kind: "tool", payload: { state: "end", name: "now", id: "call-now", arguments: {}, result: [{ type: "text", text: "2026-07-29" }] } },
-              { sequence: 5, kind: "request", payload: { model: { provider: "p", id: "m" }, messages: [], tools: [] } },
-              { sequence: 6, kind: "response", payload: { message: { role: "assistant", content: "final answer" } } },
-            ],
-          }],
+          nodeId: "node-1", revision: 1,
+          records: [spanRecord([
+            turnSpan(),
+            llmSpan({}, "llm1"),
+            { spanId: "tool1", parentSpanId: "llm1", kind: "tool", name: "now", startedAt: 1_100, endedAt: 1_200, status: "ok", attributes: { id: "call-now", arguments: {}, result: [{ type: "text", text: "2026-07-29" }] } },
+            llmSpan({}, "llm2"),
+          ])],
         })),
         onTrace: vi.fn(() => () => {}),
       },
@@ -197,44 +419,33 @@ describe("Workbench", () => {
     localStorage.setItem("loom:workbench:tabs", '["trace"]');
     render(<Workbench nodeId="node-1" />);
 
+    await openTurn();
     const headings = await screen.findAllByRole("heading", { level: 3 });
-    expect(headings.map((heading) => heading.textContent)).toEqual([
-      "LLM Request 1",
-      "LLM Tool Decision 1",
-      "Tool now",
-      "Tool now",
-      "LLM Request 2",
-      "LLM Response 2",
-    ]);
+    expect(headings.map((heading) => heading.textContent)).toEqual(["LLM Call", "Tool now", "LLM Call"]);
     expect(screen.getByText("call-now")).toBeTruthy();
+    const toolEvent = screen.getByRole("heading", { name: "Tool now" }).closest("section")!;
+    expect(toolEvent.querySelector(".trace-tool")).toBeNull();
+    expect(Array.from(toolEvent.children).some((child) => child.classList.contains("trace-disclosure"))).toBe(true);
   });
 
-  it("renders compaction lifecycle trace entries with bounded diagnostics", async () => {
+  it("renders compaction span with bounded diagnostics", async () => {
     (window as any).api = {
       canvas: {
         trace: vi.fn(async () => ({
-          nodeId: "node-1", sequence: 1,
-          records: [{
-            turnId: "turn-1", operation: "send", state: "completed",
-            entries: [
-              { sequence: 1, kind: "request", payload: { model: { provider: "openai", id: "gpt-5" }, messages: [] } },
-              { sequence: 2, kind: "event", payload: { state: "planned", trigger: "threshold", kind: "retain-tail", compactThroughSeq: 4, retainedFromSeq: 5, retainedTokenCount: 100 } },
-              {
-                sequence: 3,
-                kind: "event",
-                payload: {
-                  state: "succeeded",
-                  trigger: "threshold",
-                  checkpointId: "cp-1",
-                  coverage: { fromSeq: 0, toSeq: 4 },
-                  retainedTail: { fromSeq: 5, toSeq: 7 },
-                  diagnostics: { before: { tokens: 1200, exact: false }, after: { tokens: 320, exact: true } },
-                  summaryUsage: { totalTokens: 90, exact: false },
-                },
+          nodeId: "node-1", revision: 1,
+          records: [spanRecord([
+            turnSpan(),
+            llmSpan({ model: { provider: "openai", id: "gpt-5" } }),
+            {
+              spanId: "cp", parentSpanId: "turn", kind: "compaction", name: "compact:threshold", startedAt: 1_300, endedAt: 1_400, status: "ok",
+              attributes: {
+                state: "succeeded", trigger: "threshold", kind: "retain-tail", compactThroughSeq: 4, retainedFromSeq: 5, retainedTokenCount: 100,
+                checkpointId: "cp-1", coverage: { fromSeq: 0, toSeq: 4 }, retainedTail: { fromSeq: 5, toSeq: 7 },
+                diagnostics: { before: { tokens: 1200, exact: false }, after: { tokens: 320, exact: true } },
+                summaryUsage: { totalTokens: 90, exact: false },
               },
-              { sequence: 4, kind: "response", payload: { message: { role: "assistant", content: "done" } } },
-            ],
-          }],
+            },
+          ])],
         })),
         onTrace: vi.fn(() => () => {}),
       },
@@ -242,19 +453,16 @@ describe("Workbench", () => {
     localStorage.setItem("loom:workbench:tabs", '["trace"]');
     render(<Workbench nodeId="node-1" />);
 
-    expect(await screen.findByText("Compaction planned")).toBeTruthy();
-    expect(screen.getByText("threshold · retain-tail")).toBeTruthy();
-    expect(screen.getByText("Compaction succeeded")).toBeTruthy();
+    await openTurn();
+    expect(await screen.findByText("Compaction succeeded")).toBeTruthy();
+    expect(screen.getByText(/threshold · retain-tail/)).toBeTruthy();
     expect(screen.getByText("coverage 0..4")).toBeTruthy();
     expect(screen.getByText("estimated before: 1200 tokens")).toBeTruthy();
     expect(screen.getByText("exact after: 320 tokens")).toBeTruthy();
     expect(screen.getByText("estimated summary: 90 tokens")).toBeTruthy();
     expect((await screen.findAllByRole("heading", { level: 3 })).map((heading) => heading.textContent)).toEqual([
-      "LLM Request 1",
-      "Compaction planned",
+      "LLM Call",
       "Compaction succeeded",
-      "LLM Response 1",
     ]);
-    expect(screen.queryByText(/Transcript:/)).toBeNull();
   });
 });
