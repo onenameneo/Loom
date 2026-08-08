@@ -98,6 +98,7 @@ export interface Project {
   pinned: boolean;
   order: number;
   sourceRoots: string[];
+  ui?: { activeSessionId?: string };
 }
 
 export interface SessionRecord {
@@ -108,6 +109,13 @@ export interface SessionRecord {
   createdAt: number;
   updatedAt: number;
   order: number;
+  ui?: SessionUiState;
+}
+
+/** Durable, renderer-owned resume state. Transcript and node layout stay in their own records. */
+export interface SessionUiState {
+  activeNodeId?: string;
+  mode?: "chat" | "canvas";
 }
 
 export interface StoreData {
@@ -180,6 +188,7 @@ export interface Store {
   renameProject(id: string, name: string): void;
   deleteProject(id: string): void;
   setPinned(id: string, pinned: boolean): void;
+  updateProjectUi?(id: string, patch: { activeSessionId?: string }): void;
 
   listSessions(projectId: string): SessionRecord[];
   getSession(id: string): SessionRecord | undefined;
@@ -187,6 +196,7 @@ export interface Store {
   createSession(projectId: string, title?: string, options?: { titleState?: DefaultTitleState }): SessionRecord;
   renameSession(id: string, title: string, options?: { titleState?: DefaultTitleState }): void;
   deleteSession(id: string): void;
+  updateSessionUi?(id: string, patch: SessionUiState): void;
 
   listNodes(sessionId: string): NodeRecord[];
   getNode(id: string): NodeRecord | undefined;

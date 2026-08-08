@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { ReactFlowProvider, useStoreApi } from "@xyflow/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatThreadNode, selectionToolbarFromRects } from "./ChatThreadNode";
+import { resetWorkspaceStore, useWorkspaceStore } from "../workspace/store";
 import "./canvas.css";
 
 vi.mock("@xyflow/react", async (importOriginal) => {
@@ -48,7 +49,10 @@ function ResizeNodeAtZoom({ zoom }: { zoom: number }) {
   );
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  resetWorkspaceStore();
+});
 
 describe("ChatThreadNode resize control geometry", () => {
   it.each([0.3, 1, 1.6])(
@@ -96,6 +100,19 @@ describe("ChatThreadNode selection toolbar geometry", () => {
 });
 
 describe("ChatThreadNode resize preview", () => {
+  it("renders the active Node's assistant tail from workspace state", async () => {
+    useWorkspaceStore.getState().applyLiveTurn({
+      type: "upsert",
+      snapshot: {
+        nodeId: "n1", sessionId: "session-a", turnId: "turn-a", operation: "send",
+        state: "running", revision: 1, assistantText: "canvas background tail",
+      },
+    });
+    render(<ChatThreadNode id="n1" data={{ title: "Main", messages: [] }} />);
+
+    await waitFor(() => expect(screen.getByText("canvas background tail")).toBeTruthy());
+  });
+
   it("renders a bounded body preview while resizing instead of the full message tree", () => {
     render(
       <ChatThreadNode

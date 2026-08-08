@@ -65,7 +65,9 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     // 注入 pi 引擎工厂：session 只认端口，pi 收敛在适配器。
     createEngine: (hooks) =>
       createPiEngine({
-        events,
+        // Use session's wrapped gateway, not the raw IPC sink: this is what
+        // updates Node-scoped live snapshots before forwarding canvas events.
+        events: hooks.events,
         resolveModel: () => resolveModelConfig(store),
         buildContext: hooks.buildContext,
         getNodeInit: hooks.getNodeInit,
@@ -81,6 +83,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
       }),
   });
   runtime.onTrace((snapshot) => sendToWindow(getWin, "node:trace:update", snapshot));
+  runtime.onLiveTurn((event) => sendToWindow(getWin, "canvas:live-turn", event));
 
   // ---- IPC：一一转调 session（channel/入参/出参不变）------------------------
 
@@ -111,8 +114,13 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   ipcMain.handle("node:skills", (_e, nodeId: string) => runtime.listSkills(nodeId));
   ipcMain.handle("node:enableSkill", (_e, arg: { nodeId: string; skillId: string }) => runtime.enableSkill(arg));
   ipcMain.handle("node:disableSkill", (_e, arg: { nodeId: string; skillId: string }) => runtime.disableSkill(arg));
+  ipcMain.handle("turns:list", () => runtime.liveTurns());
   ipcMain.handle("approval:decide", (_e, decision: ApprovalDecision) => runtime.decideApproval(decision));
 
   /** 设置变更（模型/baseUrl/key）→ 丢弃所有引擎，下次发送按新配置重建。 */
-  return { invalidate: () => runtime.invalidate() };
+  return {
+    invalidate: () => runtime.invalidate(),
+    disposeSession: (sessionId: string) => runtime.disposeSession(sessionId),
+    disposeProject: (projectId: string) => runtime.disposeProject(projectId),
+  };
 }

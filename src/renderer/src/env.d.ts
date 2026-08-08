@@ -89,6 +89,24 @@ export interface CanvasEvent {
 
 export type TurnOperationKind = "send" | "regenerate" | "edit-resend";
 export type TurnState = "running" | "awaiting_approval" | "completed" | "aborted" | "failed";
+export interface LiveTurnSnapshot {
+  nodeId: string;
+  sessionId: string;
+  turnId: string;
+  operation: TurnOperationKind;
+  state: Extract<TurnState, "running" | "awaiting_approval">;
+  revision: number;
+  assistantText: string;
+  approval?: {
+    requestId: string;
+    toolName: string;
+    toolCallId: string;
+    reason?: string;
+    sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
+    approvalPolicy?: "untrusted" | "on-request" | "never";
+  };
+}
+export type LiveTurnEvent = { type: "upsert"; snapshot: LiveTurnSnapshot } | { type: "remove"; nodeId: string; revision: number };
 export type ApprovalScope = "once" | "node-session" | "persistent";
 
 export interface TurnCanvasEventPayload {
@@ -309,6 +327,7 @@ export interface ProjectMeta {
   pinned: boolean;
   order: number;
   sourceRoots?: string[];
+  ui?: { activeSessionId?: string };
 }
 
 export interface SessionMeta {
@@ -318,6 +337,7 @@ export interface SessionMeta {
   createdAt: number;
   updatedAt: number;
   order: number;
+  ui?: { activeNodeId?: string; mode?: "chat" | "canvas" };
 }
 
 export interface SettingsPayload {
@@ -468,6 +488,8 @@ declare global {
         budget: (nodeId: string) => Promise<NodeBudget>;
         trace: (nodeId: string) => Promise<any>;
         onTrace: (listener: (snapshot: any) => void) => () => void;
+        liveTurns: () => Promise<LiveTurnSnapshot[]>;
+        onLiveTurn: (listener: (event: LiveTurnEvent) => void) => () => void;
         reset: (nodeId: string) => Promise<{ ok: boolean }>;
         skills: (nodeId: string) => Promise<{
           catalog: SkillCatalogDto;
@@ -521,6 +543,7 @@ declare global {
         rename: (id: string, name: string) => Promise<{ ok: boolean }>;
         delete: (id: string) => Promise<{ ok: boolean }>;
         pin: (id: string, pinned: boolean) => Promise<{ ok: boolean }>;
+        updateUi: (id: string, ui: { activeSessionId?: string }) => Promise<{ ok: boolean }>;
         pickSourceRoot: () => Promise<{ canceled: boolean; path?: string }>;
       };
       sessions: {
@@ -528,6 +551,7 @@ declare global {
         create: (projectId: string, title?: string) => Promise<SessionMeta>;
         rename: (id: string, title: string) => Promise<{ ok: boolean }>;
         delete: (id: string) => Promise<{ ok: boolean }>;
+        updateUi: (id: string, ui: { activeNodeId?: string; mode?: "chat" | "canvas" }) => Promise<{ ok: boolean }>;
       };
       onMenu: (cb: (action: string) => void) => () => void;
       onFullScreen: (cb: (fullscreen: boolean) => void) => () => void;

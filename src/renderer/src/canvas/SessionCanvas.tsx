@@ -19,6 +19,7 @@ export default function SessionCanvas({
   onNodeChange,
   onModeChange,
   onTreeChange,
+  initialMode,
 }: {
   sessionId: string;
   sessionName: string;
@@ -29,10 +30,10 @@ export default function SessionCanvas({
   onNodeChange?: (nodeId: string | null) => void;
   onModeChange?: (mode: "chat" | "canvas") => void;
   onTreeChange?: () => void;
+  initialMode?: "chat" | "canvas" | null;
 }) {
   const [nodeList, setNodeList] = useState<CanvasNodeDto[]>([]);
   const [nodeCount, setNodeCount] = useState(1);
-  const [viewMode, setViewMode] = useState<"auto" | "chat" | "canvas">("auto");
 
   const reload = useCallback(async () => {
     let dtos: CanvasNodeDto[];
@@ -43,17 +44,12 @@ export default function SessionCanvas({
   }, [sessionId]);
 
   useEffect(() => {
-    setViewMode("auto");
     reload();
   }, [sessionId, reload]);
 
-  const isCanvas = viewMode === "canvas" || (viewMode === "auto" && nodeCount > 1);
+  const isCanvas = initialMode === "canvas" || (initialMode == null && nodeCount > 1);
   const root = nodeList.find((d) => !d.parentId) ?? nodeList[0] ?? null;
   const chatNode = nodeList.find((d) => d.id === activeNodeId) ?? root;
-
-  useEffect(() => {
-    onModeChange?.(isCanvas ? "canvas" : "chat");
-  }, [isCanvas, onModeChange]);
 
   // 普通对话会在未选中节点时回退显示根节点；把实际渲染节点同步给共享状态，
   // 因而标题栏、侧栏、Trace 与 ChatView 始终使用同一个 node id。
@@ -71,14 +67,14 @@ export default function SessionCanvas({
   useTitlebarContext(titlebarContext);
 
   const expandCanvas = useCallback(() => {
-    setViewMode("canvas");
-  }, []);
+    onModeChange?.("canvas");
+  }, [onModeChange]);
 
   const returnChat = useCallback(async (nodeId?: string) => {
     onNodeChange?.(nodeId ?? null);
     await reload();
-    setViewMode("chat");
-  }, [onNodeChange, reload]);
+    onModeChange?.("chat");
+  }, [onModeChange, onNodeChange, reload]);
 
   const branchFromChat = useCallback(
     async (seedText: string, includeParentContext: boolean) => {
@@ -96,10 +92,10 @@ export default function SessionCanvas({
           includeParentContext,
         });
       }
-      setViewMode("canvas"); // 切到画布；Canvas 会自行 open 载入 root+新会话
+      onModeChange?.("canvas"); // Canvas 会自行 open 载入 root+新会话
       onTreeChange?.();
     },
-    [chatNode, sessionId, onTreeChange],
+    [chatNode, sessionId, onModeChange, onTreeChange],
   );
 
   return (

@@ -8,6 +8,7 @@ import {
   type NodeRecord,
   type PersistedMessage,
   type SessionRecord,
+  type SessionUiState,
   type Settings,
   type SettingsPatch,
   type Store,
@@ -187,6 +188,16 @@ export class JsonStore implements Store {
   }
   deleteSession(id: string): void {
     this.data.sessions = (this.data.sessions ?? []).filter((session) => session.id !== id);
+    this.flush();
+  }
+  updateSessionUi(id: string, patch: SessionUiState): void {
+    const session = this.getSession(id);
+    if (!session) return;
+    session.ui = {
+      ...session.ui,
+      ...(typeof patch.activeNodeId === "string" ? { activeNodeId: patch.activeNodeId } : {}),
+      ...(patch.mode === "chat" || patch.mode === "canvas" ? { mode: patch.mode } : {}),
+    };
     this.flush();
   }
 

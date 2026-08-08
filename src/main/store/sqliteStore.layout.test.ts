@@ -13,6 +13,31 @@ afterEach(() => {
 });
 
 describe("SqliteStore node layouts", () => {
+  it("persists a session's last open node and preferred view mode", () => {
+    const dir = mkdtempSync(join(tmpdir(), "loom-session-ui-"));
+    dirs.push(dir);
+    const store = new SqliteStore(join(dir, "loom.db"));
+    const project = store.createProject("Project");
+    const session = store.ensureDefaultSession(project.id);
+    const node = store.createNode({ sessionId: session.id, title: "Root" });
+
+    store.updateSessionUi(session.id, { activeNodeId: node.id, mode: "chat" });
+
+    expect(store.getSession(session.id)?.ui).toEqual({ activeNodeId: node.id, mode: "chat" });
+  });
+
+  it("persists a project's most recently opened session", () => {
+    const dir = mkdtempSync(join(tmpdir(), "loom-project-ui-"));
+    dirs.push(dir);
+    const store = new SqliteStore(join(dir, "loom.db"));
+    const project = store.createProject("Project");
+    const session = store.ensureDefaultSession(project.id);
+
+    store.updateProjectUi(project.id, { activeSessionId: session.id });
+
+    expect(store.listProjects()[0]?.ui).toEqual({ activeSessionId: session.id });
+  });
+
   it("persists default and manual title state for sessions and nodes", () => {
     const dir = mkdtempSync(join(tmpdir(), "loom-title-state-"));
     dirs.push(dir);

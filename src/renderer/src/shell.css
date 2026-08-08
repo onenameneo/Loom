@@ -722,13 +722,49 @@ body {
   transition: transform 140ms cubic-bezier(0.2, 0, 0, 1), box-shadow 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 .session-color .color-dot:hover { transform: scale(1.2); box-shadow: 0 0 0 3px var(--accent-soft); }
+.node-running-indicator {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  margin: 0 3px;
+  border: 1.5px solid color-mix(in srgb, var(--ok) 28%, transparent);
+  border-top-color: var(--ok);
+  border-radius: var(--r-pill);
+  animation: node-running-spin 760ms linear infinite;
+}
+@keyframes node-running-spin { to { transform: rotate(360deg); } }
 .session-color .session-color-pop { display: none; top: calc(100% + 4px); left: -6px; }
 .session-color .session-color-pop.is-open { display: grid; }
 .sb-session-row .sb-root-row { flex: 1; min-width: 0; overflow: hidden; }
 .sb-session-row .sb-root-row { width: auto; max-width: none; }
-.sb-session-row.is-root .sb-root-row { margin-left: -20px; }
 .sb-session-row .sb-root-row:hover,
 .sb-session-row .sb-root-row.active { background: transparent; }
+.sb-session-header { min-height: 28px; padding-left: 0; }
+.sb-session-toggle,
+.sb-session-title {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.sb-session-toggle {
+  width: 20px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--faint);
+}
+.sb-session-title {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px 4px 2px;
+  overflow: hidden;
+  text-align: left;
+  font-size: 11px;
+}
+.sb-session-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-session-header.active .sb-session-title { color: var(--text); font-weight: 500; }
 .session-actions {
   position: absolute;
   right: 0;
@@ -2561,4 +2597,5 @@ button.activity-session-card {
   .sb-collapse {
     transition: none;
   }
+  .node-running-indicator { animation: none; }
 }

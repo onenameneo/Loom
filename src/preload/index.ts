@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 type CanvasEvent = { nodeId: string; type: string; payload?: unknown };
+type LiveTurnSnapshot = { nodeId: string; sessionId: string; turnId: string; operation: "send" | "regenerate" | "edit-resend"; state: "running" | "awaiting_approval"; revision: number; assistantText: string; approval?: { requestId: string; toolName: string; toolCallId: string; reason?: string; sandboxMode?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "untrusted" | "on-request" | "never" } };
+type LiveTurnEvent = { type: "upsert"; snapshot: LiveTurnSnapshot } | { type: "remove"; nodeId: string; revision: number };
 type ApprovalScope = "once" | "node-session" | "persistent";
 type ApprovalDecision = {
   requestId: string;
@@ -108,6 +110,12 @@ const api = {
       ipcRenderer.on("canvas:event", l);
       return () => ipcRenderer.removeListener("canvas:event", l);
     },
+    liveTurns: (): Promise<LiveTurnSnapshot[]> => ipcRenderer.invoke("turns:list"),
+    onLiveTurn: (cb: (event: LiveTurnEvent) => void) => {
+      const l = (_: unknown, event: LiveTurnEvent) => cb(event);
+      ipcRenderer.on("canvas:live-turn", l);
+      return () => ipcRenderer.removeListener("canvas:live-turn", l);
+    },
   },
   settings: {
     get: (): Promise<any> => ipcRenderer.invoke("settings:get"),
@@ -172,6 +180,8 @@ const api = {
     delete: (id: string): Promise<any> => ipcRenderer.invoke("project:delete", id),
     pin: (id: string, pinned: boolean): Promise<any> =>
       ipcRenderer.invoke("project:pin", { id, pinned }),
+    updateUi: (id: string, ui: { activeSessionId?: string }): Promise<any> =>
+      ipcRenderer.invoke("project:updateUi", { id, ui }),
     pickSourceRoot: (): Promise<{ canceled: boolean; path?: string }> =>
       ipcRenderer.invoke("project:pickSourceRoot"),
   },
@@ -182,6 +192,8 @@ const api = {
     rename: (id: string, title: string): Promise<any> =>
       ipcRenderer.invoke("session:rename", { id, title }),
     delete: (id: string): Promise<any> => ipcRenderer.invoke("session:delete", id),
+    updateUi: (id: string, ui: { activeNodeId?: string; mode?: "chat" | "canvas" }): Promise<any> =>
+      ipcRenderer.invoke("session:updateUi", { id, ui }),
   },
   onMenu: (cb: (action: string) => void) => {
     const l = (_: unknown, action: string) => cb(action);

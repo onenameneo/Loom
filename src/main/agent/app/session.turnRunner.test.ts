@@ -1178,7 +1178,7 @@ describe("createAgentSession turn runner integration", () => {
     expect(store.listMessages("n1").map((m) => (m.content as any).content)).toEqual(["go", "partial"]);
   });
 
-  it("invalidates an active turn when opening another session", async () => {
+  it("keeps an active turn running when another session opens", async () => {
     const store = new MemoryStore();
     const eventLog = events();
     const gate = deferred();
@@ -1204,8 +1204,61 @@ describe("createAgentSession turn runner integration", () => {
     session.open("sess2");
     gate.resolve();
 
+    await expect(run).resolves.toEqual({ ok: true });
+    expect(store.listMessages("n1").map((m) => (m.content as any).content)).toEqual(["go", "late"]);
+  });
+
+  it("exposes and clears a Session-scoped live turn while work runs in the background", async () => {
+    const store = new MemoryStore();
+    const gate = deferred();
+    const messages: AgentMessage[] = [];
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle(messages, vi.fn(async (msg) => {
+        messages.push(msg);
+        await gate.promise;
+        messages.push(assistant("done"));
+      }))),
+    });
+
+    const run = session.send({ nodeId: "n1", text: "go" });
+    await vi.waitFor(() => expect(session.liveTurns()).toEqual([
+      expect.objectContaining({ nodeId: "n1", sessionId: "sess", state: "running", revision: 1 }),
+    ]));
+
+    gate.resolve();
+    await expect(run).resolves.toEqual({ ok: true });
+    expect(session.liveTurns()).toEqual([]);
+  });
+
+  it("invalidates a background turn before its Session is deleted", async () => {
+    const store = new MemoryStore();
+    const gate = deferred();
+    const messages: AgentMessage[] = [];
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle(messages, vi.fn(async (msg) => {
+        messages.push(msg);
+        await gate.promise;
+        messages.push(assistant("late"));
+      }))),
+    });
+    const run = session.send({ nodeId: "n1", text: "go" });
+    await vi.waitFor(() => expect(session.liveTurns()).toHaveLength(1));
+
+    session.disposeSession("sess");
+    gate.resolve();
+
     await expect(run).resolves.toEqual({ ok: false, reason: "stale" });
-    expect(store.listMessages("n1").map((m) => (m.content as any).content)).toEqual(["go"]);
+    expect(session.liveTurns()).toEqual([]);
   });
 
   it("returns session-scoped node DTOs without legacy workspace ownership", () => {
@@ -1228,5 +1281,119 @@ describe("createAgentSession turn runner integration", () => {
       }),
     ]);
     expect(session.list("sess")[0]).not.toHaveProperty("workspaceId");
+  });
+
+  it("scopes live turns to their owning Session and isolates cross-Session concurrency", async () => {
+    const store = new MemoryStore();
+    const gateA = deferred();
+    const gateB = deferred();
+    const messagesA: AgentMessage[] = [];
+    const messagesB: AgentMessage[] = [];
+
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => `id-${Math.random()}` },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine({
+        get messages() { return []; },
+        prompt: vi.fn(async (msg) => {
+          // Route by inspecting which engine was ensured – the test has one engine,
+          // but the session caches handles per node. We differentiate by pushing
+          // to dedicated arrays per gate resolution order.
+        }),
+        continue: vi.fn(),
+        abort: vi.fn(),
+        reset: vi.fn(),
+        syncMessages: vi.fn(),
+      } as unknown as EngineHandle),
+    });
+
+    // Use two independent engines so each Node gets its own gate.
+    const engineA = createHandle(messagesA, vi.fn(async (msg) => {
+      messagesA.push(msg);
+      await gateA.promise;
+      messagesA.push(assistant("done-a"));
+    }));
+    const engineB = createHandle(messagesB, vi.fn(async (msg) => {
+      messagesB.push(msg);
+      await gateB.promise;
+      messagesB.push(assistant("done-b"));
+    }));
+
+    const engineMap = new Map<string, EngineHandle>();
+    engineMap.set("n1", engineA);
+    engineMap.set("n2", engineB);
+
+    const multiSession = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => `id-${Math.random()}` },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => ({
+        ensure: async (nodeId) => engineMap.get(nodeId) ?? engineA,
+        peek: (nodeId) => engineMap.get(nodeId),
+        drop: vi.fn(),
+        invalidateAll: vi.fn(),
+        listModels: async () => [],
+      }),
+    });
+
+    const runA = multiSession.send({ nodeId: "n1", text: "prompt-a" });
+    const runB = multiSession.send({ nodeId: "n2", text: "prompt-b" });
+
+    await vi.waitFor(() => {
+      const turns = multiSession.liveTurns();
+      expect(turns).toHaveLength(2);
+    });
+
+    const turns = multiSession.liveTurns();
+    const turnA = turns.find((t) => t.nodeId === "n1");
+    const turnB = turns.find((t) => t.nodeId === "n2");
+    expect(turnA).toMatchObject({ sessionId: "sess", state: "running" });
+    expect(turnB).toMatchObject({ sessionId: "sess2", state: "running" });
+
+    // Complete Session B's turn – only its live turn should clear.
+    gateB.resolve();
+    await expect(runB).resolves.toEqual({ ok: true });
+    await vi.waitFor(() => {
+      const remaining = multiSession.liveTurns();
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0].nodeId).toBe("n1");
+    });
+
+    // Complete Session A's turn – now both are gone.
+    gateA.resolve();
+    await expect(runA).resolves.toEqual({ ok: true });
+    expect(multiSession.liveTurns()).toEqual([]);
+  });
+
+  it("clears the live turn when a Node is reset", async () => {
+    const store = new MemoryStore();
+    const gate = deferred();
+    const messages: AgentMessage[] = [];
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle(messages, vi.fn(async (msg) => {
+        messages.push(msg);
+        await gate.promise;
+        messages.push(assistant("done"));
+      }))),
+    });
+
+    const run = session.send({ nodeId: "n1", text: "go" });
+    await vi.waitFor(() => expect(session.liveTurns()).toHaveLength(1));
+
+    session.reset("n1");
+    gate.resolve();
+
+    await expect(run).resolves.toEqual({ ok: false, reason: "stale" });
+    expect(session.liveTurns()).toEqual([]);
   });
 });

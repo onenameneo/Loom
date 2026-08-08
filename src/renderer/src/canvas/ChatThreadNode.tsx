@@ -11,6 +11,7 @@ import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimeline
 import { useComposerHeightVar } from "./useComposerHeightVar";
 import { ApprovalPrompt, type ApprovalState } from "./ApprovalPrompt";
 import { type NodeUpdate } from "./nodeUpdates";
+import { selectNodeLiveTurn, useWorkspaceStore } from "../workspace/store";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
 type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
@@ -94,6 +95,8 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
 
   const [msgs, setMsgs] = useState<Msg[]>(() => toMsgs(data.messages ?? []));
   const [busy, setBusy] = useState(false);
+  const [stopPending, setStopPending] = useState(false);
+  const liveTurn = useWorkspaceStore((state) => selectNodeLiveTurn(state, id));
   const [thinking, setThinking] = useState(false);
   const [turn, setTurn] = useState<TurnCanvasEventPayload | null>(null);
   const [approval, setApproval] = useState<ApprovalState | null>(null);
@@ -142,6 +145,20 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   }, [data.messages, data.title, data.systemPrompt, data.model, data.skills, toMsgs]);
 
   useEffect(() => {
+    if (!liveTurn) return;
+    setThinking(false);
+    setMsgs((current) => {
+      const last = current[current.length - 1];
+      if (last?.role === "assistant") {
+        return last.text === liveTurn.assistantText
+          ? current
+          : [...current.slice(0, -1), { ...last, text: liveTurn.assistantText }];
+      }
+      return [...current, { id: idRef.current++, role: "assistant", text: liveTurn.assistantText }];
+    });
+  }, [liveTurn]);
+
+  useEffect(() => {
     if (!colorOpen) return;
     const onDown = (e: PointerEvent) => {
       if (!colorRef.current?.contains(e.target as Node)) setColorOpen(false);
@@ -185,6 +202,11 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
 
   useEffect(() => {
     setInput(localStorage.getItem(`loom:draft:${id}`) ?? "");
+    setBusy(false);
+    setStopPending(false);
+    setThinking(false);
+    setTurn(null);
+    setApproval(null);
   }, [id]);
 
   useEffect(() => {
@@ -248,17 +270,8 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           data.onTreeChange?.();
           break;
         case "assistant_start":
-          setThinking(false);
-          setMsgs((m) => [...m, { id: idRef.current++, role: "assistant", text: "" }]);
-          break;
         case "delta":
-          setMsgs((m) => {
-            const last = m[m.length - 1];
-            if (!last || last.role !== "assistant") return m;
-            const copy = m.slice();
-            copy[copy.length - 1] = { ...last, text: last.text + String(e.payload ?? "") };
-            return copy;
-          });
+          // The workspace snapshot owns the active assistant tail.
           break;
         case "done":
           setThinking(false);
@@ -315,7 +328,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   };
 
   function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = []) {
-    if (busy || (!text && images.length === 0)) return;
+    if (isBusy || (!text && images.length === 0)) return;
     setMsgs((m) => [...m, { id: idRef.current++, role: "user", text, images }]);
     setInput("");
     setDraftSkills([]);
@@ -330,7 +343,13 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   }
 
   async function stop() {
-    if (window.api) await window.api.canvas.abort(id);
+    if (!window.api || stopPending) return;
+    setStopPending(true);
+    try {
+      await window.api.canvas.abort(id);
+    } finally {
+      setStopPending(false);
+    }
   }
 
   async function decideApproval(action: "allow" | "deny", scope?: ApprovalState["scope"]) {
@@ -349,7 +368,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   }
 
   async function regenerate() {
-    if (!window.api || busy) return;
+    if (!window.api || isBusy) return;
     setBusy(true);
     setThinking(true);
     setMsgs((m) => {
@@ -361,7 +380,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   }
 
   async function editResend(seq: number | undefined, text: string) {
-    if (!window.api || seq == null || busy) return;
+    if (!window.api || seq == null || isBusy) return;
     setBusy(true);
     setThinking(true);
     setMsgs((m) => {
@@ -402,7 +421,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   }
 
   async function compactNode() {
-    if (!window.api || busy) return;
+    if (!window.api || isBusy) return;
     setBusy(true);
     setThinking(true);
     try {
@@ -473,7 +492,8 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   const tokens = budget ? budget.withAncestors : null;
   const tokenLabel =
     tokens == null ? "—" : tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : `${tokens}`;
-  const streaming = busy && msgs[msgs.length - 1]?.role === "assistant";
+  const isBusy = busy || Boolean(liveTurn);
+  const streaming = isBusy && msgs[msgs.length - 1]?.role === "assistant";
   const awaitingApproval = turn?.state === "awaiting_approval" && approval;
   const hasChildren = Boolean(data.hasChildren);
   const treeCollapsed = Boolean(data.isTreeCollapsed);
@@ -717,8 +737,8 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
                 streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1]?.id}
                 meta={item.message.role === "assistant" ? metaFor(item.message) : undefined}
                 checkpoint={item.message.checkpoint}
-                canRegenerate={item.message.role === "assistant" && item.message.id === msgs[msgs.length - 1]?.id && !busy}
-                canEdit={item.message.role === "user" && !busy}
+                canRegenerate={item.message.role === "assistant" && item.message.id === msgs[msgs.length - 1]?.id && !isBusy}
+                canEdit={item.message.role === "user" && !isBusy}
                 onRegenerate={regenerate}
                 onEditResend={(text) => editResend(item.message.seq, text)}
                 onRetry={item.message.role === "error" ? regenerate : undefined}
@@ -726,7 +746,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
             )
           ))}
 
-          {thinking && <div className="thinking"><span className="dot">·</span> 思考中…</div>}
+          {thinking && !liveTurn && <div className="thinking"><span className="dot">·</span> 思考中…</div>}
 
           {tb && (
             <div
@@ -782,8 +802,9 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           nodeId={id}
           value={input}
           onChange={setInput}
-          busy={busy}
-          placeholder={awaitingApproval ? "等待工具审批…" : busy ? "回复中…" : msgs.length ? "继续追问…" : data.seed ? "顺着这个往下问…" : "开始一段思考…"}
+          busy={isBusy}
+          stopPending={stopPending}
+          placeholder={awaitingApproval ? "等待工具审批…" : isBusy ? "回复中…" : msgs.length ? "继续追问…" : data.seed ? "顺着这个往下问…" : "开始一段思考…"}
           topAccessory={awaitingApproval ? (
             <ApprovalPrompt
               approval={approval}
@@ -793,7 +814,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
             />
           ) : undefined}
           activeSkills={draftSkills}
-          canRegenerate={msgs.some((m) => m.role === "user") && !busy}
+          canRegenerate={msgs.some((m) => m.role === "user") && !isBusy}
           model={nodeModel}
           onSubmit={submit}
           onStop={stop}

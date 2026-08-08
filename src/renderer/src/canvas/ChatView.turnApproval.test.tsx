@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ChatView from "./ChatView";
 import type { CanvasEvent } from "../env";
+import { resetWorkspaceStore, useWorkspaceStore } from "../workspace/store";
 import "./canvas.css";
 
 vi.mock("../titlebar/Titlebar", () => ({ useTitlebarActions: vi.fn() }));
@@ -12,16 +13,18 @@ let eventHandler: ((event: CanvasEvent) => void) | undefined;
 let send: ReturnType<typeof vi.fn>;
 let decideApproval: ReturnType<typeof vi.fn>;
 let compact: ReturnType<typeof vi.fn>;
+let abort: ReturnType<typeof vi.fn>;
 
 function installApi() {
   send = vi.fn(async () => ({ ok: true }));
   decideApproval = vi.fn(async () => ({ ok: true }));
   compact = vi.fn(async () => ({ ok: false, reason: "not_needed" }));
+  abort = vi.fn(async () => ({ ok: true }));
   (window as any).api = {
     canvas: {
       budget: vi.fn(async () => ({ withoutAncestors: 0, withAncestors: 0, estimated: true })),
       send,
-      abort: vi.fn(async () => ({ ok: true })),
+      abort,
       regenerate: vi.fn(async () => ({ ok: true })),
       editResend: vi.fn(async () => ({ ok: true })),
       setMount: vi.fn(async () => ({ ok: true, budget: { withoutAncestors: 0, withAncestors: 0, estimated: true } })),
@@ -57,17 +60,60 @@ function renderChat() {
 
 afterEach(() => {
   cleanup();
+  resetWorkspaceStore();
   vi.restoreAllMocks();
   delete (window as any).api;
 });
 
 beforeEach(() => {
   localStorage.clear();
+  resetWorkspaceStore();
   eventHandler = undefined;
   installApi();
 });
 
 describe("ChatView turn and approval controls", () => {
+  it("locks the current Node's stop action until its abort request settles", async () => {
+    let resolveAbort: (() => void) | undefined;
+    abort.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveAbort = () => resolve({ ok: true });
+    }));
+    renderChat();
+    await waitFor(() => expect(eventHandler).toBeTruthy());
+    act(() => {
+      eventHandler?.({ nodeId: "n1", type: "turn", payload: { nodeId: "n1", turnId: "t1", operation: "send", state: "running" } });
+    });
+
+    const stop = screen.getByTitle("停止生成");
+    fireEvent.click(stop);
+    fireEvent.click(stop);
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect((stop as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => resolveAbort?.());
+    expect((stop as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("reattaches a child Node's current assistant tail from workspace state after visiting another Session", async () => {
+    useWorkspaceStore.getState().applyLiveTurn({
+      type: "upsert",
+      snapshot: {
+        nodeId: "node-child", sessionId: "session-a", turnId: "turn-a", operation: "send",
+        state: "running", revision: 1, assistantText: "background tail",
+      },
+    });
+    const props = {
+      initialMessages: [], hasFrozenContext: false, onBranch: vi.fn(), onExpandCanvas: vi.fn(), noKey: false, goSettings: vi.fn(),
+    };
+    const view = render(<ChatView nodeId="node-child" {...props} />);
+
+    await waitFor(() => expect(screen.getByText("background tail")).toBeTruthy());
+    view.rerender(<ChatView nodeId="node-other" {...props} />);
+    view.rerender(<ChatView nodeId="node-child" {...props} />);
+
+    await waitFor(() => expect(screen.getAllByText("background tail")).toHaveLength(1));
+  });
+
   it("defaults the selection toolbar to mounted ancestors", async () => {
     const onBranch = vi.fn();
     render(

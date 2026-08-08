@@ -166,11 +166,16 @@ function registerIpc() {
     return { ok: true };
   });
   ipcMain.handle("project:delete", (_e, id: string) => {
+    canvas?.disposeProject(id);
     store.deleteProject(id);
     return { ok: true };
   });
   ipcMain.handle("project:pin", (_e, { id, pinned }) => {
     store.setPinned(id, pinned);
+    return { ok: true };
+  });
+  ipcMain.handle("project:updateUi", (_e, { id, ui }) => {
+    store.updateProjectUi?.(id, ui);
     return { ok: true };
   });
   ipcMain.handle("project:pickSourceRoot", async () => {
@@ -182,7 +187,6 @@ function registerIpc() {
     return { canceled: result.canceled, path: result.filePaths[0] };
   });
   ipcMain.handle("session:list", (_e, projectId: string) => {
-    store.ensureDefaultSession(projectId);
     return store.listSessions(projectId);
   });
   ipcMain.handle("session:create", (_e, { projectId, title }: { projectId: string; title?: string }) => {
@@ -197,11 +201,12 @@ function registerIpc() {
   ipcMain.handle("session:delete", (_e, id: string) => {
     const session = store.getSession(id);
     if (!session) return { ok: false };
+    canvas?.disposeSession(id);
     store.deleteSession(id);
-    if (store.listSessions(session.projectId).length === 0) {
-      const replacement = store.ensureDefaultSession(session.projectId);
-      store.createNode({ sessionId: replacement.id, title: DEFAULT_ROOT_TITLE, titleState: "default" });
-    }
+    return { ok: true };
+  });
+  ipcMain.handle("session:updateUi", (_e, { id, ui }: { id: string; ui: { activeNodeId?: string; mode?: "chat" | "canvas" } }) => {
+    store.updateSessionUi?.(id, ui);
     return { ok: true };
   });
 }

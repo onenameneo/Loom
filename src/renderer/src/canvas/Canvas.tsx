@@ -740,7 +740,6 @@ function CanvasContent({
             title,
             seed,
             messages: [],
-            includeParentContext,
             model,
           },
           { x: initialLayout.x, y: initialLayout.y },

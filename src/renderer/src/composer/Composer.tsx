@@ -13,6 +13,7 @@ export function Composer({
   value,
   onChange,
   busy,
+  stopPending = false,
   placeholder,
   canRegenerate,
   model,
@@ -33,6 +34,7 @@ export function Composer({
   value: string;
   onChange: (value: string) => void;
   busy: boolean;
+  stopPending?: boolean;
   placeholder: string;
   canRegenerate: boolean;
   model?: string;
@@ -351,7 +353,7 @@ export function Composer({
             type="button"
             className={`round-send ${busy ? "is-stop" : ""}`}
             onClick={busy ? onStop : submit}
-            disabled={sendDisabled}
+            disabled={sendDisabled || stopPending}
             title={busy ? "停止生成" : "发送"}
           >
             {busy ? <Square size={12} fill="currentColor" strokeWidth={0} /> : <IconSend />}

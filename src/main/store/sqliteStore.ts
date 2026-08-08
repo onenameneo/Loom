@@ -12,6 +12,7 @@ import {
   type NodeRecord,
   type PersistedMessage,
   type SessionRecord,
+  type SessionUiState,
   type Settings,
   type SettingsPatch,
   type Store,
@@ -94,12 +95,16 @@ function toProject(row: ProjectRow): Project {
     pinned: Boolean(row.pinned),
     order: row.order,
     sourceRoots,
+    ui: meta.ui && typeof meta.ui === "object" && typeof (meta.ui as Record<string, unknown>).activeSessionId === "string"
+      ? { activeSessionId: (meta.ui as Record<string, string>).activeSessionId }
+      : undefined,
   };
 }
 
 function toSession(row: SessionRow): SessionRecord {
   const meta = decode<Record<string, unknown>>(row.meta, {});
   const titleState = meta.titleState === "default" || meta.titleState === "manual" ? meta.titleState : undefined;
+  const ui = meta.ui && typeof meta.ui === "object" ? meta.ui as Record<string, unknown> : undefined;
   return {
     id: row.id,
     projectId: row.project_id,
@@ -108,6 +113,12 @@ function toSession(row: SessionRow): SessionRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     order: row.order,
+    ui: ui && (typeof ui.activeNodeId === "string" || ui.mode === "chat" || ui.mode === "canvas")
+      ? {
+          ...(typeof ui.activeNodeId === "string" ? { activeNodeId: ui.activeNodeId } : {}),
+          ...(ui.mode === "chat" || ui.mode === "canvas" ? { mode: ui.mode } : {}),
+        }
+      : undefined,
   };
 }
 
@@ -242,6 +253,14 @@ export class SqliteStore implements Store {
       .run(pinned ? 1 : 0, Date.now(), id);
   }
 
+  updateProjectUi(id: string, patch: { activeSessionId?: string }): void {
+    const row = this.db.prepare("SELECT meta FROM projects WHERE id = ?").get(id) as { meta: string | null } | undefined;
+    if (!row) return;
+    const meta = decode<Record<string, unknown>>(row.meta, {});
+    meta.ui = { ...(meta.ui && typeof meta.ui === "object" ? meta.ui as Record<string, unknown> : {}), ...(typeof patch.activeSessionId === "string" ? { activeSessionId: patch.activeSessionId } : {}) };
+    this.db.prepare("UPDATE projects SET meta = ? WHERE id = ?").run(encode(meta), id);
+  }
+
   listSessions(projectId: string): SessionRecord[] {
     const rows = this.db
       .prepare(
@@ -302,6 +321,19 @@ export class SqliteStore implements Store {
 
   deleteSession(id: string): void {
     this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+  }
+
+  updateSessionUi(id: string, patch: SessionUiState): void {
+    const row = this.db.prepare("SELECT meta FROM sessions WHERE id = ?").get(id) as { meta: string | null } | undefined;
+    if (!row) return;
+    const meta = decode<Record<string, unknown>>(row.meta, {});
+    const current = meta.ui && typeof meta.ui === "object" ? meta.ui as Record<string, unknown> : {};
+    meta.ui = {
+      ...current,
+      ...(typeof patch.activeNodeId === "string" ? { activeNodeId: patch.activeNodeId } : {}),
+      ...(patch.mode === "chat" || patch.mode === "canvas" ? { mode: patch.mode } : {}),
+    };
+    this.db.prepare("UPDATE sessions SET meta = ? WHERE id = ?").run(encode(meta), id);
   }
 
   listNodes(sessionId: string): NodeRecord[] {

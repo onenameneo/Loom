@@ -9,6 +9,7 @@ import { ToolCallTimeline } from "./ToolCallTimeline";
 import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
 import { useComposerHeightVar } from "./useComposerHeightVar";
 import { ApprovalPrompt, type ApprovalState } from "./ApprovalPrompt";
+import { selectNodeLiveTurn, useWorkspaceStore } from "../workspace/store";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
 type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
@@ -68,6 +69,7 @@ export default function ChatView({
   const [msgs, setMsgs] = useState<Msg[]>(seed);
   const [draftSkills, setDraftSkills] = useState<SkillEffectiveDto[]>([]);
   const [busy, setBusy] = useState(false);
+  const [stopPending, setStopPending] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [turn, setTurn] = useState<TurnCanvasEventPayload | null>(null);
   const [approval, setApproval] = useState<ApprovalState | null>(null);
@@ -83,6 +85,7 @@ export default function ChatView({
   const toolbarRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const [tb, setTb] = useState<{ text: string; x: number; y: number; includeParentContext: boolean } | null>(null);
+  const liveTurn = useWorkspaceStore((state) => selectNodeLiveTurn(state, nodeId));
 
   useEffect(() => {
     if (!tb) return;
@@ -128,8 +131,18 @@ export default function ChatView({
   );
   useTitlebarActions(titlebarActions);
 
-  const reloadFromInitial = useCallback((items: NodeMsg[]) => {
-    setMsgs(items.map((m) => ({ id: idRef.current++, role: m.role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent })));
+  const reloadFromInitial = useCallback((items: NodeMsg[], targetNodeId: string) => {
+    const restored: Msg[] = items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }));
+    // A tree refresh can race an in-flight Node. Merge the authoritative live
+    // snapshot into the refreshed transcript instead of briefly replacing it
+    // with an older persisted copy.
+    const live = useWorkspaceStore.getState().turnsByNodeId[targetNodeId];
+    if (live) {
+      const last = restored[restored.length - 1];
+      if (last?.role === "assistant") last.text = live.assistantText;
+      else restored.push({ id: idRef.current++, role: "assistant", text: live.assistantText });
+    }
+    setMsgs(restored);
   }, []);
 
   const upsertToolMessage = useCallback((payload: Parameters<typeof upsertToolTimelineMessage<Msg>>[1]) => {
@@ -149,11 +162,32 @@ export default function ChatView({
     const previous = initialMessagesRef.current;
     if (previous.nodeId === nodeId && previous.messages === initialMessages) return;
     initialMessagesRef.current = { nodeId, messages: initialMessages };
-    reloadFromInitial(initialMessages ?? []);
+    reloadFromInitial(initialMessages ?? [], nodeId);
   }, [initialMessages, nodeId, reloadFromInitial]);
+
+  // The App-owned bridge is the only live-turn IPC consumer. A returning view
+  // derives its assistant tail directly from that Node's snapshot.
+  useEffect(() => {
+    if (!liveTurn) return;
+    setThinking(false);
+    setMsgs((current) => {
+      const last = current[current.length - 1];
+      if (last?.role === "assistant") {
+        return last.text === liveTurn.assistantText
+          ? current
+          : [...current.slice(0, -1), { ...last, text: liveTurn.assistantText }];
+      }
+      return [...current, { id: idRef.current++, role: "assistant", text: liveTurn.assistantText }];
+    });
+  }, [liveTurn]);
 
   useEffect(() => {
     setInput(localStorage.getItem(`loom:draft:${nodeId}`) ?? "");
+    setBusy(false);
+    setStopPending(false);
+    setThinking(false);
+    setTurn(null);
+    setApproval(null);
     setPersona(systemPrompt ?? "");
     setNodeModel(formatModelSelection(model));
     refreshBudget();
@@ -205,17 +239,8 @@ export default function ChatView({
           onTreeChange?.();
           break;
         case "assistant_start":
-          setThinking(false);
-          setMsgs((m) => [...m, { id: idRef.current++, role: "assistant", text: "" }]);
-          break;
         case "delta":
-          setMsgs((m) => {
-            const last = m[m.length - 1];
-            if (!last || last.role !== "assistant") return m;
-            const copy = m.slice();
-            copy[copy.length - 1] = { ...last, text: last.text + String(e.payload ?? "") };
-            return copy;
-          });
+          // Assistant text is rendered from the workspace live snapshot.
           break;
         case "done":
           setThinking(false);
@@ -263,11 +288,12 @@ export default function ChatView({
     window.getSelection()?.removeAllRanges();
   };
 
-  const streaming = busy && msgs[msgs.length - 1]?.role === "assistant";
+  const isBusy = busy || Boolean(liveTurn);
+  const streaming = isBusy && msgs[msgs.length - 1]?.role === "assistant";
   const awaitingApproval = turn?.state === "awaiting_approval" && approval;
 
   function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = []) {
-    if (busy || (!text && images.length === 0)) return;
+    if (isBusy || (!text && images.length === 0)) return;
     setMsgs((m) => [...m, { id: idRef.current++, role: "user", text, images }]);
     setInput("");
     setDraftSkills([]);
@@ -282,8 +308,13 @@ export default function ChatView({
   }
 
   async function stop() {
-    if (!window.api) return;
-    await window.api.canvas.abort(nodeId);
+    if (!window.api || stopPending) return;
+    setStopPending(true);
+    try {
+      await window.api.canvas.abort(nodeId);
+    } finally {
+      setStopPending(false);
+    }
   }
 
   async function decideApproval(action: "allow" | "deny", scope?: ApprovalState["scope"]) {
@@ -302,7 +333,7 @@ export default function ChatView({
   }
 
   async function regenerate() {
-    if (!window.api || busy) return;
+    if (!window.api || isBusy) return;
     setBusy(true);
     setThinking(true);
     setMsgs((m) => {
@@ -313,7 +344,7 @@ export default function ChatView({
   }
 
   async function editResend(seq: number | undefined, text: string) {
-    if (!window.api || seq == null || busy) return;
+    if (!window.api || seq == null || isBusy) return;
     setBusy(true);
     setThinking(true);
     setMsgs((m) => {
@@ -342,13 +373,13 @@ export default function ChatView({
   }
 
   async function compactNode() {
-    if (!window.api || busy) return;
+    if (!window.api || isBusy) return;
     setBusy(true);
     setThinking(true);
     try {
       const result = await window.api.canvas.compact(nodeId);
       if (result.ok) {
-        if (result.node) reloadFromInitial(result.node.messages ?? []);
+        if (result.node) reloadFromInitial(result.node.messages ?? [], nodeId);
         setMsgs((m) => [...m, { id: idRef.current++, role: "tool", text: "压缩完成。已插入压缩摘要。" }]);
       } else if (result.reason === "not_needed") {
         setMsgs((m) => [...m, { id: idRef.current++, role: "tool", text: "压缩未执行：当前上下文还不需要压缩。" }]);
@@ -440,15 +471,15 @@ export default function ChatView({
                 streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1].id}
                 meta={item.message.role === "assistant" ? metaFor(item.message) : undefined}
                 checkpoint={item.message.checkpoint}
-                canRegenerate={item.message.role === "assistant" && item.message.id === msgs[msgs.length - 1]?.id && !busy}
-                canEdit={item.message.role === "user" && !busy}
+                canRegenerate={item.message.role === "assistant" && item.message.id === msgs[msgs.length - 1]?.id && !isBusy}
+                canEdit={item.message.role === "user" && !isBusy}
                 onRegenerate={regenerate}
                 onEditResend={(text) => editResend(item.message.seq, text)}
                 onRetry={item.message.role === "error" ? regenerate : undefined}
               />
             )
           ))}
-          {thinking && (
+          {thinking && !liveTurn && (
             <div className="thinking">
               <span className="dot">·</span> 思考中…
             </div>
@@ -498,8 +529,9 @@ export default function ChatView({
           nodeId={nodeId}
           value={input}
           onChange={setInput}
-          busy={busy}
-          placeholder={awaitingApproval ? "等待工具审批…" : busy ? "生成中…" : "随心输入…（Enter 发送，Shift+Enter 换行）"}
+          busy={isBusy}
+          stopPending={stopPending}
+          placeholder={awaitingApproval ? "等待工具审批…" : isBusy ? "生成中…" : "随心输入…（Enter 发送，Shift+Enter 换行）"}
           topAccessory={awaitingApproval ? (
             <ApprovalPrompt
               approval={approval}
@@ -508,7 +540,7 @@ export default function ChatView({
             />
           ) : undefined}
           activeSkills={draftSkills}
-          canRegenerate={msgs.some((m) => m.role === "user") && !busy}
+          canRegenerate={msgs.some((m) => m.role === "user") && !isBusy}
           model={nodeModel}
           budgetLine={`将发送 ~${(hasFrozenContext ? budget?.withAncestors : budget?.withoutAncestors) ?? 0} tokens`}
           onSubmit={submit}
