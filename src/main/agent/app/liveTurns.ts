@@ -15,61 +15,50 @@ export type LiveTurnEvent =
   | { type: "upsert"; snapshot: LiveTurnSnapshot }
   | { type: "remove"; nodeId: string; revision: number };
 
-export function createLiveTurnStore() {
-  const turns = new Map<string, LiveTurnSnapshot>();
-  const revisions = new Map<string, number>();
+export interface LiveTurnPublisher {
+  subscribe(listener: (event: LiveTurnEvent) => void): () => void;
+  publish(event: LiveTurnEvent): void;
+}
+
+/**
+ * 纯发布器：只广播 live 事件，不持有节点状态。
+ * 快照本体与 revision 由 NodeRuntime store 持有/盖章，这里只负责分发到订阅者
+ * （renderer workspace bridge 的订阅 + 初始快照顺序由调用方保证）。
+ */
+export function createLiveTurnPublisher(): LiveTurnPublisher {
   const listeners = new Set<(event: LiveTurnEvent) => void>();
-
-  const nextRevision = (nodeId: string) => {
-    const next = (revisions.get(nodeId) ?? 0) + 1;
-    revisions.set(nodeId, next);
-    return next;
-  };
-  const publish = (event: LiveTurnEvent) => {
-    for (const listener of listeners) listener(event);
-  };
-  const replace = (nodeId: string, patch: Partial<Omit<LiveTurnSnapshot, "nodeId" | "revision">>) => {
-    const current = turns.get(nodeId);
-    if (!current) return undefined;
-    const snapshot = { ...current, ...patch, revision: nextRevision(nodeId) };
-    turns.set(nodeId, snapshot);
-    publish({ type: "upsert", snapshot });
-    return snapshot;
-  };
-
   return {
-    beginTurn(input: Omit<LiveTurnSnapshot, "state" | "revision" | "assistantText" | "approval">) {
-      const snapshot: LiveTurnSnapshot = {
-        ...input,
-        state: "running",
-        assistantText: "",
-        revision: nextRevision(input.nodeId),
-      };
-      turns.set(input.nodeId, snapshot);
-      publish({ type: "upsert", snapshot });
-      return snapshot;
-    },
-    applyLifecycle(nodeId: string, event: TurnLifecycleEvent) {
-      if (event.state === "completed" || event.state === "aborted" || event.state === "failed") return invalidateNode(nodeId);
-      return replace(nodeId, { state: event.state, approval: event.approval });
-    },
-    appendAssistantDelta(nodeId: string, delta: string) {
-      const current = turns.get(nodeId);
-      return current ? replace(nodeId, { assistantText: `${current.assistantText}${delta}` }) : undefined;
-    },
-    invalidateNode,
-    list: () => [...turns.values()],
-    get: (nodeId: string) => turns.get(nodeId),
-    subscribe(listener: (event: LiveTurnEvent) => void) {
+    subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    publish(event) {
+      for (const listener of listeners) listener(event);
+    },
   };
+}
 
-  function invalidateNode(nodeId: string): LiveTurnEvent | undefined {
-    if (!turns.delete(nodeId)) return undefined;
-    const event: LiveTurnEvent = { type: "remove", nodeId, revision: nextRevision(nodeId) };
-    publish(event);
-    return event;
-  }
+// ---- 纯快照变换（供 session 经 NodeRuntime.transition 计算并写入）----
+
+/** 一个 turn 开始的快照；revision 由 store 在发布时盖章。 */
+export function beginTurnSnapshot(input: {
+  nodeId: string;
+  sessionId: string;
+  turnId: string;
+  operation: TurnOperationKind;
+}): LiveTurnSnapshot {
+  return { ...input, state: "running", revision: 0, assistantText: "" };
+}
+
+export function appendAssistantDeltaToSnapshot(snapshot: LiveTurnSnapshot, delta: string): LiveTurnSnapshot {
+  return { ...snapshot, assistantText: `${snapshot.assistantText}${delta}` };
+}
+
+/** 非终态生命周期 → 更新快照；终态（completed/aborted/failed）→ 返回 undefined 以触发移除。 */
+export function applyLifecycleToSnapshot(
+  snapshot: LiveTurnSnapshot,
+  event: TurnLifecycleEvent,
+): LiveTurnSnapshot | undefined {
+  if (event.state === "completed" || event.state === "aborted" || event.state === "failed") return undefined;
+  return { ...snapshot, state: event.state, approval: event.approval };
 }

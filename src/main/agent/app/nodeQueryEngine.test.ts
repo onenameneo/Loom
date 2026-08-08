@@ -3,6 +3,8 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { EngineHandle, EventSinkPort, LlmEnginePort } from "../ports";
 import { createNodeQueryEngine } from "./nodeQueryEngine";
 import { createTurnRunner } from "./turnRunner";
+import { createNodeRuntimeStore } from "./nodeRuntime";
+import type { CanvasNode } from "./session";
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -12,6 +14,14 @@ function deferred<T = void>() {
 
 function eventSink(): EventSinkPort {
   return { emit: vi.fn() };
+}
+
+function makeRuntime(nodeIds: string[]) {
+  const runtime = createNodeRuntimeStore({ publishLive: vi.fn() });
+  for (const id of nodeIds) {
+    runtime.set(id, { node: { id, sessionId: "s", projectId: "p", title: id, messages: [], messageMeta: [] } as CanvasNode, pendingSkillIds: [] });
+  }
+  return runtime;
 }
 
 function engine(handle: EngineHandle): LlmEnginePort {
@@ -27,7 +37,7 @@ describe("NodeQueryEngine", () => {
       prompt: vi.fn(async () => gate.promise),
       continue: vi.fn(), abort: vi.fn(), reset: vi.fn(), syncMessages: vi.fn(),
     };
-    const queries = createNodeQueryEngine({ engine: engine(handle), turns: createTurnRunner({ events: eventSink() }) });
+    const queries = createNodeQueryEngine({ engine: engine(handle), turns: createTurnRunner({ events: eventSink(), runtime: makeRuntime(["n1"]) }) });
     const prepareFirst = vi.fn(() => ({ kind: "prompt" as const, message: { role: "user", content: "one" } as AgentMessage }));
     const prepareSecond = vi.fn(() => ({ kind: "continue" as const }));
 
@@ -49,7 +59,7 @@ describe("NodeQueryEngine", () => {
       continue: vi.fn(), abort: vi.fn(), reset: vi.fn(), syncMessages: vi.fn(),
     };
     const finalize = vi.fn();
-    const queries = createNodeQueryEngine({ engine: engine(handle), turns: createTurnRunner({ events: eventSink() }) });
+    const queries = createNodeQueryEngine({ engine: engine(handle), turns: createTurnRunner({ events: eventSink(), runtime: makeRuntime(["n1"]) }) });
 
     const output = await queries.run({ nodeId: "n1", operation: "send", prepare: () => ({ kind: "prompt", message: user }), finalize });
     expect(output.result.ok).toBe(true);
@@ -68,7 +78,7 @@ describe("NodeQueryEngine", () => {
       continue: vi.fn(), abort: vi.fn(), reset: vi.fn(), syncMessages: vi.fn(),
     };
     const finalize = vi.fn();
-    const queries = createNodeQueryEngine({ engine: engine(handle), turns: createTurnRunner({ events: eventSink() }) });
+    const queries = createNodeQueryEngine({ engine: engine(handle), turns: createTurnRunner({ events: eventSink(), runtime: makeRuntime(["n1"]) }) });
 
     const output = await queries.run({ nodeId: "n1", operation: "send", prepare: () => ({ kind: "prompt", message: user }), finalize });
 
@@ -80,7 +90,7 @@ describe("NodeQueryEngine", () => {
   it("exposes the acquired turn to request instrumentation before preparation", async () => {
     const handle: EngineHandle = { messages: [], prompt: vi.fn(), continue: vi.fn(), abort: vi.fn(), reset: vi.fn(), syncMessages: vi.fn() };
     const started = vi.fn();
-    const queries = createNodeQueryEngine({ engine: engine(handle), turns: createTurnRunner({ events: eventSink() }) });
+    const queries = createNodeQueryEngine({ engine: engine(handle), turns: createTurnRunner({ events: eventSink(), runtime: makeRuntime(["n1"]) }) });
     await queries.run({ nodeId: "n1", operation: "send", onTurnStarted: started, prepare: () => ({ kind: "continue" }), finalize: vi.fn() });
     expect(started).toHaveBeenCalledWith(expect.objectContaining({ nodeId: "n1", turnId: expect.any(String) }));
   });
@@ -93,7 +103,7 @@ describe("NodeQueryEngine", () => {
       prompt: vi.fn(async () => { messages.push({ role: "assistant", content: "partial" } as unknown as AgentMessage); await gate.promise; }),
       continue: vi.fn(), abort: vi.fn(), reset: vi.fn(), syncMessages: vi.fn(),
     };
-    const queries = createNodeQueryEngine({ engine: engine(handle), turns: createTurnRunner({ events: eventSink() }) });
+    const queries = createNodeQueryEngine({ engine: engine(handle), turns: createTurnRunner({ events: eventSink(), runtime: makeRuntime(["n1"]) }) });
     const abortFinalize = vi.fn();
     const aborted = queries.run({ nodeId: "n1", operation: "send", prepare: () => ({ kind: "prompt", message: { role: "user", content: "go" } as AgentMessage }), finalize: abortFinalize });
     await vi.waitFor(() => expect(handle.prompt).toHaveBeenCalledOnce());

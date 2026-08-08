@@ -486,8 +486,8 @@ declare global {
         setModel: (nodeId: string, model: string | { providerId: string; modelId: string }) => Promise<{ ok: boolean }>;
         models: () => Promise<ModelListItem[]>;
         budget: (nodeId: string) => Promise<NodeBudget>;
-        trace: (nodeId: string) => Promise<any>;
-        onTrace: (listener: (snapshot: any) => void) => () => void;
+        trace: (nodeId: string) => Promise<import("./workbench/traceState").TraceSnapshotDto>;
+        onTrace: (listener: (event: import("./workbench/traceState").TraceEventDto) => void) => () => void;
         liveTurns: () => Promise<LiveTurnSnapshot[]>;
         onLiveTurn: (listener: (event: LiveTurnEvent) => void) => () => void;
         reset: (nodeId: string) => Promise<{ ok: boolean }>;

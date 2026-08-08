@@ -1,5 +1,6 @@
 import type { EngineHandle, EventSinkPort, TurnLifecycleEvent, TurnOperationKind, TurnResult, TurnRunContext } from "../ports";
 import type { TraceRepository } from "./traceRepository";
+import type { NodeRuntimeStore } from "./nodeRuntime";
 
 export interface TurnRunner {
   acquire(nodeId: string, operation: TurnOperationKind): { ok: true; turn: TurnRunContext } | { ok: false; reason: "node_busy" };
@@ -12,7 +13,7 @@ export interface TurnRunner {
   setRunning(nodeId: string, turnId: string): boolean;
 }
 
-interface ActiveTurn {
+export interface ActiveTurn {
   nodeId: string;
   turnId: string;
   operation: TurnOperationKind;
@@ -32,19 +33,18 @@ function boundedError(err: unknown): string {
   return text.length > 240 ? `${text.slice(0, 237)}...` : text;
 }
 
-export function createTurnRunner(deps: { events: EventSinkPort; traces?: TraceRepository }): TurnRunner {
-  const activeByNode = new Map<string, ActiveTurn>();
-  const generationByNode = new Map<string, number>();
-
-  function nextGeneration(nodeId: string): number {
-    const next = (generationByNode.get(nodeId) ?? 0) + 1;
-    generationByNode.set(nodeId, next);
-    return next;
-  }
-
+/**
+ * turn 状态机：不再自持 `activeByNode` / `generationByNode` Map。
+ * per-node 状态（activeTurn / generation）存于 NodeRuntime 记录；generation bump 的
+ * stale+abort 副作用由 `NodeRuntime.transition` 统一承担。本模块只表达状态机规则。
+ */
+export function createTurnRunner(deps: { events: EventSinkPort; traces?: TraceRepository; runtime: NodeRuntimeStore }): TurnRunner {
   function isStale(active: ActiveTurn): boolean {
-    return active.invalidated || generationByNode.get(active.nodeId) !== active.generation;
+    const rec = deps.runtime.get(active.nodeId);
+    return !rec || rec.disposed || rec.generation !== active.generation;
   }
+
+  const terminalStatus = { completed: "ok", failed: "error", aborted: "aborted" } as const;
 
   function emit(active: ActiveTurn, state: TurnLifecycleEvent["state"], extra?: Partial<TurnLifecycleEvent>) {
     deps.events.emit(active.nodeId, "turn", {
@@ -54,8 +54,11 @@ export function createTurnRunner(deps: { events: EventSinkPort; traces?: TraceRe
       state,
       ...extra,
     } satisfies TurnLifecycleEvent);
-    if (state === "completed" || state === "aborted" || state === "failed") deps.traces?.finish(active.nodeId, active.turnId, state);
-    else deps.traces?.append(active.nodeId, active.turnId, state === "awaiting_approval" ? "approval" : "turn", { state, ...extra });
+    if (state === "completed" || state === "aborted" || state === "failed") {
+      deps.traces?.finishTurn(active.nodeId, active.turnId, terminalStatus[state]);
+    } else {
+      deps.traces?.updateTurn(active.nodeId, active.turnId, { state, ...(state === "awaiting_approval" && extra?.approval ? { approval: extra.approval } : {}) });
+    }
   }
 
   function contextFor(active: ActiveTurn): TurnRunContext {
@@ -85,32 +88,37 @@ export function createTurnRunner(deps: { events: EventSinkPort; traces?: TraceRe
   }
 
   function acquire(nodeId: string, operation: TurnOperationKind) {
-    if (activeByNode.has(nodeId)) return { ok: false as const, reason: "node_busy" as const };
+    const rec = deps.runtime.get(nodeId);
+    if (!rec || rec.activeTurn) return { ok: false as const, reason: "node_busy" as const };
+    const generation = (rec.generation ?? 0) + 1;
     const active: ActiveTurn = {
       nodeId,
       turnId: `turn-${Date.now().toString(36)}-${nextTurnSeq++}`,
       operation,
-      generation: nextGeneration(nodeId),
+      generation,
       state: "running",
       abortController: new AbortController(),
       aborted: false,
       invalidated: false,
       settled: false,
     };
-    activeByNode.set(nodeId, active);
-    deps.traces?.start({ nodeId, turnId: active.turnId, operation });
+    deps.runtime.transition(nodeId, () => ({ activeTurn: active, generation }));
+    deps.traces?.startTurn({ nodeId, turnId: active.turnId, operation });
     emit(active, "running");
     return { ok: true as const, turn: contextFor(active) };
   }
 
   function settle(turn: TurnRunContext, error?: unknown): TurnResult {
-    const active = activeByNode.get(turn.nodeId);
+    const rec = deps.runtime.get(turn.nodeId);
+    const active = rec?.activeTurn;
     if (!active || active.turnId !== turn.turnId || active.settled || isStale(active)) {
-      if (active?.turnId === turn.turnId) activeByNode.delete(turn.nodeId);
+      if (active?.turnId === turn.turnId) deps.runtime.transition(turn.nodeId, () => ({ activeTurn: undefined }));
+      if (active?.turnId === turn.turnId && rec?.disposed) deps.runtime.delete(turn.nodeId);
       return { ok: false, reason: "stale" };
     }
     active.settled = true;
-    activeByNode.delete(turn.nodeId);
+    deps.runtime.transition(turn.nodeId, () => ({ activeTurn: undefined }));
+    if (rec.disposed) deps.runtime.delete(turn.nodeId);
     if (active.aborted || active.abortController.signal.aborted) {
       emit(active, "aborted");
       return { ok: false, reason: "aborted" };
@@ -124,7 +132,7 @@ export function createTurnRunner(deps: { events: EventSinkPort; traces?: TraceRe
   }
 
   function abort(nodeId: string) {
-    const active = activeByNode.get(nodeId);
+    const active = deps.runtime.get(nodeId)?.activeTurn;
     if (!active) return { ok: true };
     active.aborted = true;
     active.abortController.abort();
@@ -133,34 +141,30 @@ export function createTurnRunner(deps: { events: EventSinkPort; traces?: TraceRe
   }
 
   function invalidate(nodeId: string) {
-    const active = activeByNode.get(nodeId);
-    nextGeneration(nodeId);
-    if (active) {
-      active.invalidated = true;
-      active.abortController.abort();
-      active.abortHandle?.abort();
-    }
+    const rec = deps.runtime.get(nodeId);
+    if (!rec) return { ok: true };
+    deps.runtime.transition(nodeId, (r) => ({ generation: (r.generation ?? 0) + 1 }));
     return { ok: true };
   }
 
   function invalidateAll() {
-    for (const nodeId of new Set([...generationByNode.keys(), ...activeByNode.keys()])) invalidate(nodeId);
+    for (const nodeId of deps.runtime.keys()) invalidate(nodeId);
   }
 
   function state(nodeId: string): TurnLifecycleEvent | undefined {
-    const active = activeByNode.get(nodeId);
+    const active = deps.runtime.get(nodeId)?.activeTurn;
     return active && !active.settled
       ? { nodeId, turnId: active.turnId, operation: active.operation, state: active.state }
       : undefined;
   }
 
   function setAwaitingApproval(nodeId: string, turnId: string, approval: NonNullable<TurnLifecycleEvent["approval"]>) {
-    const active = activeByNode.get(nodeId);
+    const active = deps.runtime.get(nodeId)?.activeTurn;
     return active?.turnId === turnId ? contextFor(active).setAwaitingApproval(approval) : false;
   }
 
   function setRunning(nodeId: string, turnId: string) {
-    const active = activeByNode.get(nodeId);
+    const active = deps.runtime.get(nodeId)?.activeTurn;
     return active?.turnId === turnId ? contextFor(active).setRunning() : false;
   }
 

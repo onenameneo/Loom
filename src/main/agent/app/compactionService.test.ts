@@ -16,7 +16,7 @@ describe("CompactionService", () => {
       clock: { now: () => 10 },
       ids: { message: () => "cp-1" },
       syncEngine: vi.fn(),
-      trace: { append: (_nodeId, _turnId, _kind, payload) => traces.push(payload) },
+      trace: { beginSpan: (input) => { traces.push({ op: 'begin', ...input }); return 'span-'+traces.length; }, endSpan: (_nodeId, _turnId, spanId, input) => traces.push({ op: 'end', spanId, ...input }) },
       events: { emit: (nodeId, type, payload) => events.push({ nodeId, type, payload }) },
     });
 
@@ -36,7 +36,8 @@ describe("CompactionService", () => {
         payload: expect.objectContaining({ state: "planned", trigger: "threshold", compactThroughSeq: 1 }),
       },
     ]);
-    expect(traces).toEqual([expect.objectContaining({ state: "planned", trigger: "threshold" })]);
+    // planNodeCompaction 是 plan-only，不写 span；compactNode 才 begin/end compaction span。
+    expect(traces).toEqual([]);
   });
 
   it("persists a checkpoint only after a valid summary is returned", async () => {
@@ -51,7 +52,7 @@ describe("CompactionService", () => {
       clock: { now: () => 20 },
       ids: { message: () => "cp-1" },
       syncEngine,
-      trace: { append: vi.fn() },
+      trace: { beginSpan: vi.fn(), endSpan: vi.fn() },
       events: { emit: vi.fn() },
     });
 
@@ -91,7 +92,7 @@ describe("CompactionService", () => {
       clock: { now: () => 20 },
       ids: { message: () => "cp-1" },
       syncEngine: vi.fn(),
-      trace: { append: vi.fn() },
+      trace: { beginSpan: vi.fn(), endSpan: vi.fn() },
       events: { emit: vi.fn() },
     });
 
@@ -117,7 +118,7 @@ describe("CompactionService", () => {
       clock: { now: () => 20 },
       ids: { message: () => "cp-1" },
       syncEngine: vi.fn(),
-      trace: { append: vi.fn() },
+      trace: { beginSpan: vi.fn(), endSpan: vi.fn() },
       events: { emit: vi.fn() },
     });
 
@@ -141,7 +142,7 @@ describe("CompactionService", () => {
     });
     const service = createCompactionService({
       summarize, store: { appendMessages: vi.fn() }, clock: { now: () => 20 }, ids: { message: () => "cp-new" },
-      syncEngine: vi.fn(), trace: { append: vi.fn() }, events: { emit: vi.fn() },
+      syncEngine: vi.fn(), trace: { beginSpan: vi.fn(), endSpan: vi.fn() }, events: { emit: vi.fn() },
     });
     const result = await service.compactNode({
       nodeId: "n1", trigger: "threshold", previousCheckpoint: previous, sourceOffset: 10,

@@ -29,7 +29,14 @@ export interface CompactionServiceDeps {
   ids: IdPort;
   syncEngine(nodeId: string): void;
   trace: {
-    append(nodeId: string, turnId: string, kind: "event" | "error", payload: unknown): void;
+    beginSpan(input: {
+      nodeId: string;
+      turnId: string;
+      kind: "compaction";
+      name: string;
+      attributes?: Record<string, unknown>;
+    }): string | undefined;
+    endSpan(nodeId: string, turnId: string, spanId: string, input: { status: "ok" | "error" | "aborted"; attributes?: Record<string, unknown> }): void;
   };
   events: EventSinkPort;
 }
@@ -78,7 +85,7 @@ export interface CompactionLifecycleEventPayload {
 }
 
 export function createCompactionService(deps: CompactionServiceDeps): CompactionService {
-  function emitPlan(input: PlanNodeCompactionInput, plan: TurnSafeCutPlan) {
+  function emitPlan(input: PlanNodeCompactionInput, plan: TurnSafeCutPlan, beginSpan: boolean): string | undefined {
     const payload: CompactionLifecycleEventPayload = {
       state: "planned",
       trigger: input.trigger,
@@ -89,7 +96,14 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
       retainedTokenCount: plan.retainedTokenCount,
     };
     deps.events.emit(input.nodeId, "compaction", payload);
-    if (input.turnId) deps.trace.append(input.nodeId, input.turnId, "event", payload);
+    if (!beginSpan || !input.turnId) return undefined;
+    return deps.trace.beginSpan({
+      nodeId: input.nodeId,
+      turnId: input.turnId,
+      kind: "compaction",
+      name: `compact:${input.trigger}`,
+      attributes: payload as unknown as Record<string, unknown>,
+    });
   }
 
   return {
@@ -98,7 +112,7 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
         tailBudgetTokens: input.tailBudgetTokens,
         tokenCounter: input.tokenCounter,
       });
-      emitPlan(input, plan);
+      emitPlan(input, plan, false);
       return plan;
     },
     async compactNode(input) {
@@ -106,8 +120,8 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
         tailBudgetTokens: input.tailBudgetTokens,
         tokenCounter: input.tokenCounter,
       });
-      emitPlan(input, plan);
       if (plan.kind === "none") return { ok: false, reason: "not_needed" };
+      const spanId = emitPlan(input, plan, true);
       try {
         const summaryInput = buildCheckpointSummaryInput({
           previousCheckpoint: input.previousCheckpoint,
@@ -119,12 +133,12 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
           maxOutputTokens: input.maxSummaryOutputTokens ?? 2_048,
         });
         if (input.signal?.aborted) {
-          emitTerminal(input, "aborted", { reason: "signal-aborted" });
+          emitTerminal(input, spanId, "aborted", { reason: "signal-aborted" });
           return { ok: false, reason: "aborted" };
         }
         const summary = result.summary.trim();
         if (!summary) {
-          emitTerminal(input, "failed", { reason: "empty-summary" });
+          emitTerminal(input, spanId, "failed", { reason: "empty-summary" });
           return { ok: false, reason: "empty_summary" };
         }
         const beforeTokens = input.messages.reduce((sum, msg) => sum + estimateMessageTokensUnbounded(msg), 0);
@@ -148,7 +162,7 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
         });
         deps.store.appendMessages(input.nodeId, [{ id: checkpoint.id, seq: 0, role: checkpoint.role, content: checkpoint as unknown as AgentMessage }]);
         deps.syncEngine(input.nodeId);
-        emitTerminal(input, "succeeded", {
+        emitTerminal(input, spanId, "succeeded", {
           checkpointId: checkpoint.id,
           coverage: checkpoint.coverage,
           retainedTail: checkpoint.retainedTail,
@@ -158,7 +172,7 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
         return { ok: true, checkpoint };
       } catch (error) {
         const message = error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240);
-        emitTerminal(input, input.signal?.aborted ? "aborted" : "failed", {
+        emitTerminal(input, spanId, input.signal?.aborted ? "aborted" : "failed", {
           error: message,
         });
         return input.signal?.aborted ? { ok: false, reason: "aborted" } : { ok: false, reason: "failed", error: message };
@@ -168,11 +182,17 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
 
   function emitTerminal(
     input: PlanNodeCompactionInput,
+    spanId: string | undefined,
     state: "succeeded" | "failed" | "aborted",
     extra: Omit<CompactionLifecycleEventPayload, "state" | "trigger" | "at">,
   ) {
     const payload: CompactionLifecycleEventPayload = { state, trigger: input.trigger, at: deps.clock.now(), ...extra };
     deps.events.emit(input.nodeId, "compaction", payload);
-    if (input.turnId) deps.trace.append(input.nodeId, input.turnId, state === "failed" ? "error" : "event", payload);
+    if (input.turnId && spanId) {
+      deps.trace.endSpan(input.nodeId, input.turnId, spanId, {
+        status: state === "succeeded" ? "ok" : state === "failed" ? "error" : "aborted",
+        attributes: payload as unknown as Record<string, unknown>,
+      });
+    }
   }
 }

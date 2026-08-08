@@ -1,31 +1,58 @@
-import { describe, expect, it } from "vitest";
-import { createLiveTurnStore } from "./liveTurns";
+import { describe, expect, it, vi } from "vitest";
+import type { TurnLifecycleEvent } from "../ports";
+import {
+  appendAssistantDeltaToSnapshot,
+  applyLifecycleToSnapshot,
+  beginTurnSnapshot,
+  createLiveTurnPublisher,
+} from "./liveTurns";
 
-describe("createLiveTurnStore", () => {
-  it("assigns monotonically increasing revisions per Node", () => {
-    const turns = createLiveTurnStore();
+describe("createLiveTurnPublisher", () => {
+  it("broadcasts published events to all subscribers and supports unsubscribe", () => {
+    const publisher = createLiveTurnPublisher();
+    const first = vi.fn();
+    const second = vi.fn();
+    const stop = publisher.subscribe(first);
+    publisher.subscribe(second);
 
-    const first = turns.beginTurn({ nodeId: "node-a", sessionId: "session-a", turnId: "turn-a", operation: "send" });
-    const second = turns.beginTurn({ nodeId: "node-b", sessionId: "session-a", turnId: "turn-b", operation: "send" });
-    const updated = turns.appendAssistantDelta("node-a", "hello");
+    const snapshot = beginTurnSnapshot({ nodeId: "node-a", sessionId: "session-a", turnId: "turn-a", operation: "send" });
+    publisher.publish({ type: "upsert", snapshot: { ...snapshot, revision: 1 } });
 
-    expect(first?.revision).toBe(1);
-    expect(second?.revision).toBe(1);
-    expect(updated).toMatchObject({ revision: 2, assistantText: "hello" });
-    expect(turns.list()).toHaveLength(2);
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+
+    stop();
+    publisher.publish({ type: "remove", nodeId: "node-a", revision: 2 });
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("live snapshot pure transforms", () => {
+  it("appends assistant deltas", () => {
+    const snap = beginTurnSnapshot({ nodeId: "n", sessionId: "s", turnId: "t", operation: "send" });
+    const updated = appendAssistantDeltaToSnapshot(snap, "hello");
+    expect(updated.assistantText).toBe("hello");
+    expect(snap.assistantText).toBe("");
   });
 
-  it("emits a newer removal revision and does not resurrect a cleared turn from a late delta", () => {
-    const turns = createLiveTurnStore();
-    const events: unknown[] = [];
-    turns.subscribe((event) => events.push(event));
+  it("maps a non-terminal lifecycle to a snapshot update", () => {
+    const snap = beginTurnSnapshot({ nodeId: "n", sessionId: "s", turnId: "t", operation: "send" });
+    const event: TurnLifecycleEvent = {
+      nodeId: "n",
+      turnId: "t",
+      operation: "send",
+      state: "awaiting_approval",
+      approval: { requestId: "r", toolName: "bash", toolCallId: "c", reason: "destructive_command" },
+    };
+    expect(applyLifecycleToSnapshot(snap, event)).toMatchObject({ state: "awaiting_approval", approval: event.approval });
+  });
 
-    turns.beginTurn({ nodeId: "node-a", sessionId: "session-a", turnId: "turn-a", operation: "send" });
-    const removed = turns.invalidateNode("node-a");
-
-    expect(removed).toEqual({ type: "remove", nodeId: "node-a", revision: 2 });
-    expect(turns.appendAssistantDelta("node-a", "late")).toBeUndefined();
-    expect(turns.list()).toEqual([]);
-    expect(events).toContainEqual({ type: "remove", nodeId: "node-a", revision: 2 });
+  it("maps terminal lifecycles to removal (undefined)", () => {
+    const snap = beginTurnSnapshot({ nodeId: "n", sessionId: "s", turnId: "t", operation: "send" });
+    for (const state of ["completed", "aborted", "failed"] as const) {
+      const event: TurnLifecycleEvent = { nodeId: "n", turnId: "t", operation: "send", state };
+      expect(applyLifecycleToSnapshot(snap, event)).toBeUndefined();
+    }
   });
 });

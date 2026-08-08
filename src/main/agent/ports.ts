@@ -98,6 +98,35 @@ export interface LlmEnginePort {
   listModels(): Promise<Array<{ id: string; name: string; providerId?: string; modelId?: string; available?: boolean; availability?: string; capabilities?: unknown }>>;
 }
 
+/**
+ * 引擎缓存条目——应用编排持有于节点运行期记录上（适配器不再自持缓存）。
+ * `configStamp` 用于检测配置变更（settings/models.json 文件戳），不一致时重建。
+ */
+export interface EngineCacheEntry {
+  agent: unknown;
+  handle: EngineHandle;
+  configStamp: string;
+}
+
+/** 引擎工厂端口：无状态，构建结果由调用方缓存。 */
+export interface EngineFactory {
+  build(nodeId: string): Promise<EngineCacheEntry>;
+  configStamp(nodeId: string): string;
+  listModels(): Promise<Array<{ id: string; name: string; providerId?: string; modelId?: string; available?: boolean; availability?: string; capabilities?: unknown }>>;
+}
+
+/** trace 观测端口：② 声明、④ 适配器调用（pi 事件 → span）、session 实现（解析 turnId → 仓库）。 */
+export interface TracePort {
+  beginSpan(input: {
+    nodeId: string;
+    kind: "llm_call" | "tool";
+    name: string;
+    parentSpanId?: string;
+    attributes?: Record<string, unknown>;
+  }): string | undefined;
+  endSpan(nodeId: string, spanId: string, input: { status: "ok" | "error" | "aborted"; attributes?: Record<string, unknown> }): void;
+}
+
 export interface CommandExecutionRequest {
   argv: string[];
   cwd: string;

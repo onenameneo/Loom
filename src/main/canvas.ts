@@ -79,10 +79,10 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
         },
         dispatcher: hooks.dispatcher,
         getCurrentTurnId: hooks.getCurrentTurnId,
-        captureTrace: hooks.captureTrace,
+        trace: hooks.trace,
       }),
   });
-  runtime.onTrace((snapshot) => sendToWindow(getWin, "node:trace:update", snapshot));
+  runtime.onTrace((event) => sendToWindow(getWin, "node:trace:update", event));
   runtime.onLiveTurn((event) => sendToWindow(getWin, "canvas:live-turn", event));
 
   // ---- IPC：一一转调 session（channel/入参/出参不变）------------------------

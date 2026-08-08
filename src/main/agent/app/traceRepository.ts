@@ -1,39 +1,66 @@
 import type { TurnOperationKind } from "../ports";
 
-export type TraceEntryKind = "turn" | "request" | "response" | "tool" | "approval" | "event" | "error";
-export type TraceTerminalState = "running" | "completed" | "failed" | "aborted";
-export type TraceValue = unknown;
+export type TraceSpanKind = "turn" | "llm_call" | "tool" | "compaction";
+export type TraceSpanStatus = "pending" | "ok" | "error" | "aborted";
 
-export interface TraceEntry {
-  sequence: number;
-  at: number;
-  kind: TraceEntryKind;
-  payload: TraceValue;
+/** 一个 span = 一次有边界的观测单元（turn 根 / 模型调用 / 工具执行 / 压缩）。 */
+export interface TraceSpan {
+  spanId: string;
+  parentSpanId?: string;
+  kind: TraceSpanKind;
+  name: string;
+  startedAt: number;
+  endedAt?: number;
+  status: TraceSpanStatus;
+  attributes: Record<string, unknown>;
 }
 
 export interface TraceRecord {
   nodeId: string;
   turnId: string;
   operation: TurnOperationKind;
-  state: TraceTerminalState;
+  /** 运行中为 pending；finishTurn 后为 ok/error/aborted。 */
+  status: TraceSpanStatus;
   startedAt: number;
   endedAt?: number;
   truncated?: boolean;
-  entries: TraceEntry[];
+  spans: TraceSpan[];
 }
 
 export interface TraceSnapshot {
   nodeId: string;
-  sequence: number;
+  revision: number;
   records: TraceRecord[];
 }
 
+/** 增量发布事件；revision 为 per-node 单调递增，renderer 按此门控。 */
+export type TraceEvent =
+  | { type: "turn_start"; nodeId: string; turnId: string; operation: TurnOperationKind; revision: number; startedAt: number; span: TraceSpan }
+  | { type: "span"; nodeId: string; turnId: string; span: TraceSpan; revision: number }
+  | { type: "span_end"; nodeId: string; turnId: string; spanId: string; status: TraceSpanStatus; endedAt: number; attributes?: Record<string, unknown>; revision: number }
+  | { type: "turn_update"; nodeId: string; turnId: string; attributes: Record<string, unknown>; revision: number }
+  | { type: "turn_end"; nodeId: string; turnId: string; status: Exclude<TraceSpanStatus, "pending">; endedAt: number; revision: number };
+
 export interface TraceRepository {
-  start(input: { nodeId: string; turnId: string; operation: TurnOperationKind }): void;
-  append(nodeId: string, turnId: string, kind: TraceEntryKind, payload: unknown): void;
-  finish(nodeId: string, turnId: string, state: Exclude<TraceTerminalState, "running">): void;
+  startTurn(input: { nodeId: string; turnId: string; operation: TurnOperationKind }): void;
+  beginSpan(input: {
+    nodeId: string;
+    turnId: string;
+    parentSpanId?: string;
+    kind: TraceSpanKind;
+    name: string;
+    attributes?: Record<string, unknown>;
+  }): string | undefined;
+  endSpan(
+    nodeId: string,
+    turnId: string,
+    spanId: string,
+    input: { status: TraceSpanStatus; endedAt?: number; attributes?: Record<string, unknown> },
+  ): void;
+  updateTurn(nodeId: string, turnId: string, attributes: Record<string, unknown>): void;
+  finishTurn(nodeId: string, turnId: string, status: Exclude<TraceSpanStatus, "pending">): void;
   snapshot(nodeId: string): TraceSnapshot;
-  subscribe(listener: (snapshot: TraceSnapshot) => void): () => void;
+  subscribe(listener: (event: TraceEvent) => void): () => void;
 }
 
 const SENSITIVE_KEY = /^(?:api[_-]?key|authorization|token|access[_-]?token|refresh[_-]?token|password|secret)$/i;
@@ -43,7 +70,7 @@ export function sanitizeTraceValue(
   options: { maxTextLength?: number; maxArrayLength?: number; maxObjectKeys?: number; maxDepth?: number } = {},
   seen = new WeakSet<object>(),
   depth = 0,
-): TraceValue {
+): unknown {
   const maxTextLength = options.maxTextLength ?? 1_500;
   const maxArrayLength = options.maxArrayLength ?? 30;
   const maxObjectKeys = options.maxObjectKeys ?? 40;
@@ -75,64 +102,126 @@ export function sanitizeTraceValue(
   return record;
 }
 
-export function createTraceRepository(options: { maxCompletedPerNode?: number; maxEntriesPerRecord?: number; now?: () => number } = {}): TraceRepository {
+function sanitizeAttributes(attributes: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(attributes)) {
+    out[key] = sanitizeTraceValue(value);
+  }
+  return out;
+}
+
+export function createTraceRepository(options: { maxCompletedPerNode?: number; maxSpansPerRecord?: number; now?: () => number } = {}): TraceRepository {
   const maxCompletedPerNode = options.maxCompletedPerNode ?? 20;
-  const maxEntriesPerRecord = options.maxEntriesPerRecord ?? 120;
+  const maxSpansPerRecord = options.maxSpansPerRecord ?? 120;
   const now = options.now ?? Date.now;
   const recordsByNode = new Map<string, TraceRecord[]>();
-  const sequenceByNode = new Map<string, number>();
-  const listeners = new Set<(snapshot: TraceSnapshot) => void>();
-  const next = (nodeId: string) => {
-    const value = (sequenceByNode.get(nodeId) ?? 0) + 1;
-    sequenceByNode.set(nodeId, value);
+  const revisionByNode = new Map<string, number>();
+  const listeners = new Set<(event: TraceEvent) => void>();
+  let spanSeq = 0;
+
+  const nextRevision = (nodeId: string) => {
+    const value = (revisionByNode.get(nodeId) ?? 0) + 1;
+    revisionByNode.set(nodeId, value);
     return value;
   };
-  const find = (nodeId: string, turnId: string) => recordsByNode.get(nodeId)?.find((record) => record.turnId === turnId);
+  const findRecord = (nodeId: string, turnId: string) => recordsByNode.get(nodeId)?.find((record) => record.turnId === turnId);
+  const findSpan = (record: TraceRecord, spanId: string) => record.spans.find((span) => span.spanId === spanId);
+  const rootSpanId = (record: TraceRecord) => record.spans.find((span) => span.kind === "turn")?.spanId;
   const snapshotFor = (nodeId: string): TraceSnapshot => {
     const records = recordsByNode.get(nodeId) ?? [];
-    return { nodeId, sequence: sequenceByNode.get(nodeId) ?? 0, records: [...records].reverse() };
+    return { nodeId, revision: revisionByNode.get(nodeId) ?? 0, records: [...records].reverse() };
   };
-  const publish = (nodeId: string) => {
-    const snapshot = snapshotFor(nodeId);
-    for (const listener of listeners) listener(snapshot);
+  const publish = (event: TraceEvent) => {
+    for (const listener of listeners) listener(event);
   };
-  const entry = (nodeId: string, record: TraceRecord, kind: TraceEntryKind, payload: unknown) => {
-    if (record.entries.length >= maxEntriesPerRecord) {
-      record.entries.shift();
+  const appendSpan = (record: TraceRecord, span: TraceSpan) => {
+    if (record.spans.length >= maxSpansPerRecord) {
+      record.spans.shift();
       record.truncated = true;
     }
-    record.entries.push({ sequence: next(nodeId), at: now(), kind, payload: sanitizeTraceValue(payload) });
+    record.spans.push(span);
   };
+
   return {
-    start({ nodeId, turnId, operation }) {
-      const record: TraceRecord = { nodeId, turnId, operation, state: "running", startedAt: now(), entries: [] };
+    startTurn({ nodeId, turnId, operation }) {
+      const revision = nextRevision(nodeId);
+      const span: TraceSpan = {
+        spanId: `span-${++spanSeq}`,
+        kind: "turn",
+        name: operation,
+        startedAt: now(),
+        status: "pending",
+        attributes: { operation },
+      };
+      const record: TraceRecord = { nodeId, turnId, operation, status: "pending", startedAt: span.startedAt, spans: [span] };
       const records = recordsByNode.get(nodeId) ?? [];
       records.push(record);
       recordsByNode.set(nodeId, records);
-      entry(nodeId, record, "turn", { state: "running", operation });
-      publish(nodeId);
+      publish({ type: "turn_start", nodeId, turnId, operation, revision, startedAt: span.startedAt, span });
     },
-    append(nodeId, turnId, kind, payload) {
-      const record = find(nodeId, turnId);
-      if (record) {
-        entry(nodeId, record, kind, payload);
-        publish(nodeId);
+    beginSpan({ nodeId, turnId, parentSpanId, kind, name, attributes = {} }) {
+      const record = findRecord(nodeId, turnId);
+      if (!record) return undefined;
+      const revision = nextRevision(nodeId);
+      const span: TraceSpan = {
+        spanId: `span-${++spanSeq}`,
+        parentSpanId: parentSpanId ?? rootSpanId(record),
+        kind,
+        name,
+        startedAt: now(),
+        status: "pending",
+        attributes: sanitizeAttributes(attributes),
+      };
+      appendSpan(record, span);
+      publish({ type: "span", nodeId, turnId, span, revision });
+      return span.spanId;
+    },
+    endSpan(nodeId, turnId, spanId, { status, endedAt, attributes }) {
+      const record = findRecord(nodeId, turnId);
+      const span = record ? findSpan(record, spanId) : undefined;
+      if (!record || !span) return;
+      const revision = nextRevision(nodeId);
+      span.status = status;
+      span.endedAt = endedAt ?? now();
+      if (attributes && Object.keys(attributes).length > 0) {
+        span.attributes = { ...span.attributes, ...sanitizeAttributes(attributes) };
       }
+      publish({ type: "span_end", nodeId, turnId, spanId, status, endedAt: span.endedAt, attributes: span.attributes, revision });
     },
-    finish(nodeId, turnId, state) {
-      const record = find(nodeId, turnId);
+    updateTurn(nodeId, turnId, attributes) {
+      const record = findRecord(nodeId, turnId);
+      const span = record ? findSpan(record, rootSpanId(record) ?? "") : undefined;
+      if (!span) return;
+      const revision = nextRevision(nodeId);
+      span.attributes = { ...span.attributes, ...sanitizeAttributes(attributes) };
+      publish({ type: "turn_update", nodeId, turnId, attributes: span.attributes, revision });
+    },
+    finishTurn(nodeId, turnId, status) {
+      const record = findRecord(nodeId, turnId);
       if (!record) return;
-      record.state = state;
+      const revision = nextRevision(nodeId);
+      record.status = status;
       record.endedAt = now();
-      entry(nodeId, record, "turn", { state });
-      const records = recordsByNode.get(nodeId) ?? [];
-      const completed = records.filter((item) => item.state !== "running");
-      while (completed.length > maxCompletedPerNode) {
-        const oldest = completed.shift();
-        const index = oldest ? records.indexOf(oldest) : -1;
-        if (index >= 0) records.splice(index, 1);
+      const root = findSpan(record, rootSpanId(record) ?? "");
+      if (root) {
+        root.status = status;
+        root.endedAt = record.endedAt;
       }
-      publish(nodeId);
+      // 兜底：未 end 的 span 标 aborted（崩溃/中断路径），保持树一致。
+      for (const span of record.spans) {
+        if (span.endedAt === undefined) {
+          span.status = "aborted";
+          span.endedAt = record.endedAt;
+        }
+      }
+      const completed = recordsByNode.get(nodeId) ?? [];
+      const done = completed.filter((item) => item.endedAt !== undefined);
+      while (done.length > maxCompletedPerNode) {
+        const oldest = done.shift();
+        const index = oldest ? completed.indexOf(oldest) : -1;
+        if (index >= 0) completed.splice(index, 1);
+      }
+      publish({ type: "turn_end", nodeId, turnId, status, endedAt: record.endedAt, revision });
     },
     snapshot(nodeId) {
       return snapshotFor(nodeId);

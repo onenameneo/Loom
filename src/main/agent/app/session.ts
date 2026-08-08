@@ -27,7 +27,13 @@ import {
 import { createTraceRepository } from "./traceRepository";
 import { createCompactionService, type CompactNodeResult, type CompactionServiceDeps } from "./compactionService";
 import { createApprovalGate } from "../hooks/tools/approvalGate";
-import { createLiveTurnStore } from "./liveTurns";
+import {
+  appendAssistantDeltaToSnapshot,
+  applyLifecycleToSnapshot,
+  beginTurnSnapshot,
+  createLiveTurnPublisher,
+} from "./liveTurns";
+import { createNodeRuntimeStore } from "./nodeRuntime";
 import {
   buildSkillCatalog,
   compileAvailableSkillsIndex,
@@ -42,6 +48,7 @@ import {
 import type {
   AgentHook,
   ClockPort,
+  EngineFactory,
   EngineHandle,
   EventSinkPort,
   HookDispatcher,
@@ -49,6 +56,7 @@ import type {
   LlmEnginePort,
   NodeInit,
   StorePort,
+  TracePort,
   TurnLifecycleEvent,
 } from "../ports";
 
@@ -93,7 +101,7 @@ export interface CanvasRuntimeDeps {
   titleGenerator?: {
     generate(input: { prompt: string; response?: string; signal?: AbortSignal }): Promise<string>;
   };
-  /** 注入引擎工厂：由组装根提供 pi 适配器；session 只认端口。 */
+  /** 注入引擎工厂：由组装根提供 pi 适配器；session 只认端口，引擎缓存持有于 runtime 记录。 */
   createEngine: (hooks: {
     buildContext: (nodeId: string, own: AgentMessage[]) => Message[] | Promise<Message[]>;
     getNodeInit: (nodeId: string) => NodeInit | undefined;
@@ -102,8 +110,9 @@ export interface CanvasRuntimeDeps {
     events: EventSinkPort;
     dispatcher: HookDispatcher;
     getCurrentTurnId: (nodeId: string) => string | undefined;
-    captureTrace: (nodeId: string, kind: "request" | "response" | "tool" | "event" | "error", payload: unknown) => void;
-  }) => LlmEnginePort;
+    /** trace 观测端口：pi 事件 → span（llm_call/tool），session 解析 turnId 后写入仓库。 */
+    trace: TracePort;
+  }) => EngineFactory;
 }
 
 interface CanvasMessageDto {
@@ -152,25 +161,47 @@ const DEFAULT_MANUAL_COMPACTION_TAIL_BUDGET_TOKENS = 6_000;
 
 export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   const { store, events: eventSink, ids, clock, getApiKey } = deps;
-  const nodes = new Map<string, CanvasNode>();
-  const pendingPromptSkillIds = new Map<string, string[]>();
-  const manualCompactions = new Map<string, AbortController>();
-  const liveTurns = createLiveTurnStore();
+  const liveTurnPublisher = createLiveTurnPublisher();
+  const runtime = createNodeRuntimeStore({ publishLive: (event) => liveTurnPublisher.publish(event) });
   const events: EventSinkPort = {
     emit(nodeId, type, payload) {
-      if (type === "delta") liveTurns.appendAssistantDelta(nodeId, String(payload ?? ""));
+      if (type === "delta") {
+        runtime.transition(nodeId, (r) =>
+          r.liveSnapshot ? { liveSnapshot: appendAssistantDeltaToSnapshot(r.liveSnapshot, String(payload ?? "")) } : {},
+        );
+      }
       if (type === "turn" && payload && typeof payload === "object") {
         const lifecycle = payload as TurnLifecycleEvent;
-        liveTurns.applyLifecycle(nodeId, lifecycle);
+        runtime.transition(nodeId, (r) => {
+          if (!r.liveSnapshot) return {};
+          return { liveSnapshot: applyLifecycleToSnapshot(r.liveSnapshot, lifecycle) };
+        });
       }
       eventSink.emit(nodeId, type, payload);
     },
   };
 
+  /** 记录缺省时建档；已存在则保持 node 对象身份（running turn 闭包持有它）。 */
+  function ensureRecord(nodeId: string, node: CanvasNode) {
+    const existing = runtime.get(nodeId);
+    if (existing) {
+      if (!existing.node) runtime.replaceNode(nodeId, node);
+    } else {
+      runtime.set(nodeId, { node, pendingSkillIds: [] });
+    }
+  }
+
+  /** 清空 live 投影（终态/invalidate/dispose 共用），无快照时静默。 */
+  function clearLiveTurn(nodeId: string) {
+    runtime.transition(nodeId, (r) => ({ liveSnapshot: undefined }));
+  }
+
   function startLiveTurn(nodeId: string, turn: { turnId: string; operation: "send" | "regenerate" | "edit-resend" }) {
     const node = loadNode(nodeId);
     if (!node) return;
-    liveTurns.beginTurn({ nodeId, sessionId: node.sessionId, turnId: turn.turnId, operation: turn.operation });
+    runtime.transition(nodeId, (r) => ({
+      liveSnapshot: beginTurnSnapshot({ nodeId, sessionId: node.sessionId, turnId: turn.turnId, operation: turn.operation }),
+    }));
   }
 
   async function generateTitle(input: { prompt: string; response?: string; signal?: AbortSignal }): Promise<string> {
@@ -214,14 +245,14 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   function hydrateSession(sessionId: string): CanvasNode[] {
     const records = store.listNodes(sessionId);
     const ids = new Set(records.map((record) => record.id));
-    for (const [id, node] of nodes) {
-      if (node.sessionId === sessionId && !ids.has(id) && !queries.state(id)) nodes.delete(id);
+    for (const [id, rec] of runtime.entries()) {
+      if (rec.node.sessionId === sessionId && !ids.has(id) && !queries.state(id)) runtime.delete(id);
     }
     const list = records.map((record) => {
-      const current = nodes.get(record.id);
+      const current = runtime.get(record.id)?.node;
       if (!current || !queries.state(record.id)) {
         const hydrated = toCanvasNode(record);
-        nodes.set(hydrated.id, hydrated);
+        runtime.replaceNode(hydrated.id, hydrated);
         return hydrated;
       }
       // A running turn closes over this object. Keep its transcript identity;
@@ -239,12 +270,12 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   }
 
   function loadNode(nodeId: string): CanvasNode | undefined {
-    const cached = nodes.get(nodeId);
+    const cached = runtime.get(nodeId)?.node;
     if (cached) return cached;
     const record = store.getNode(nodeId);
     if (!record) return undefined;
     const node = toCanvasNode(record);
-    nodes.set(node.id, node);
+    ensureRecord(node.id, node);
     return node;
   }
 
@@ -272,7 +303,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
 
   function requestSkillsFor(nodeId: string) {
     const effective = effectiveSkillsFor(nodeId);
-    const selectedIds = pendingPromptSkillIds.get(nodeId) ?? [];
+    const selectedIds = runtime.get(nodeId)?.pendingSkillIds ?? [];
     if (selectedIds.length === 0) return effective;
     const catalog = catalogFor(nodeId);
     const selected = selectedIds
@@ -308,7 +339,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
 
   // convertToLlm 接收的 state 已由统一投影初始化/同步；这里仅过滤 UI-only 消息。
   function buildContext(nodeId: string, own: AgentMessage[]): Message[] {
-    const node = nodes.get(nodeId);
+    const node = runtime.get(nodeId)?.node;
     if (node && own.length === 0) return buildContextPlan(node, node.messages, clock.now());
     return own.filter(isLlmMessage);
   }
@@ -359,7 +390,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   const hookRegistry = createHookRegistry();
   hookRegistry.use(createToolLifecycleHook(events));
   const traces = createTraceRepository({ now: clock.now });
-  const turns = createTurnRunner({ events, traces });
+  const turns = createTurnRunner({ events, traces, runtime });
   let queries!: ReturnType<typeof createNodeQueryEngine>;
   const approvals = createApprovalBroker({ events, clock });
   const policies = createApprovalPolicyStore({
@@ -377,18 +408,58 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       emitPermission: (nodeId, payload) => events.emit(nodeId, "permission", payload),
     }),
   );
-  const engine = deps.createEngine({
+  const engineFactory = deps.createEngine({
     buildContext,
     getNodeInit,
     getTools: toolsFor,
     events,
     dispatcher: hookRegistry,
     getCurrentTurnId: (nodeId) => queries.state(nodeId)?.turnId,
-    captureTrace: (nodeId, kind, payload) => {
-      const turnId = queries.state(nodeId)?.turnId;
-      if (turnId) traces.append(nodeId, turnId, kind, payload);
+    // trace 观测端口：解析当前活跃 turnId，写入 span 仓库。观测是观测面，失败仅告警。
+    trace: {
+      beginSpan: ({ nodeId, kind, name, parentSpanId, attributes }) => {
+        const turnId = queries.state(nodeId)?.turnId;
+        if (!turnId) {
+          console.warn(`[trace] beginSpan skip ${name} for ${nodeId}: no active turn`);
+          return undefined;
+        }
+        try {
+          return traces.beginSpan({ nodeId, turnId, kind, name, parentSpanId, attributes });
+        } catch (error) {
+          console.warn(`[trace] beginSpan failed for ${nodeId}/${name}:`, error);
+          return undefined;
+        }
+      },
+      endSpan: (nodeId, spanId, input) => {
+        const turnId = queries.state(nodeId)?.turnId;
+        if (!turnId) return;
+        try {
+          traces.endSpan(nodeId, turnId, spanId, input);
+        } catch (error) {
+          console.warn(`[trace] endSpan failed for ${nodeId}/${spanId}:`, error);
+        }
+      },
     },
   });
+  // 引擎缓存持有于 NodeRuntime 记录：ensure/peek/drop/invalidateAll 只读 runtime。
+  const engine: LlmEnginePort = {
+    async ensure(nodeId) {
+      const current = runtime.get(nodeId)?.engine;
+      const stamp = engineFactory.configStamp(nodeId);
+      if (current && current.configStamp === stamp) return current.handle;
+      const entry = await engineFactory.build(nodeId);
+      runtime.transition(nodeId, () => ({ engine: entry }));
+      return entry.handle;
+    },
+    peek: (nodeId) => runtime.get(nodeId)?.engine?.handle,
+    drop: (nodeId) => {
+      runtime.transition(nodeId, () => ({ engine: undefined }));
+    },
+    invalidateAll() {
+      for (const nodeId of runtime.keys()) runtime.transition(nodeId, () => ({ engine: undefined }));
+    },
+    listModels: () => engineFactory.listModels(),
+  };
   queries = createNodeQueryEngine({ engine, turns });
   const compaction = deps.compaction
     ? createCompactionService({
@@ -397,11 +468,14 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
         clock,
         ids,
         syncEngine: (nodeId) => {
-          const node = nodes.get(nodeId);
+          const node = runtime.get(nodeId)?.node;
           const handle = engine.peek(nodeId);
           if (node && handle) syncTranscript(handle, node);
         },
-        trace: { append: (nodeId, turnId, kind, payload) => traces.append(nodeId, turnId, kind, payload) },
+        trace: {
+          beginSpan: (input) => traces.beginSpan(input),
+          endSpan: (nodeId, turnId, spanId, input) => traces.endSpan(nodeId, turnId, spanId, input),
+        },
         events,
       })
     : undefined;
@@ -524,7 +598,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   });
 
   function descendantsOf(nodeId: string): string[] {
-    return descendants(nodeId, nodes.values());
+    return descendants(nodeId, runtime.nodes());
   }
 
   // ---- 转写编排（截断 / 追加增量 / 续写 / 提问）------------------------------
@@ -661,7 +735,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     let items = hydrateSession(sessionId);
     if (items.length === 0) {
       const root = toCanvasNode(store.createNode({ sessionId, title: DEFAULT_ROOT_TITLE, titleState: "default" }));
-      nodes.set(root.id, root);
+      ensureRecord(root.id, root);
       items = [root];
     }
     return items.map(dto);
@@ -687,7 +761,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       node.systemPrompt = parent.systemPrompt;
       store.updateNode(node.id, { systemPrompt: parent.systemPrompt });
     }
-    nodes.set(node.id, node);
+    ensureRecord(node.id, node);
     return dto(node);
   }
 
@@ -713,7 +787,9 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       },
       prepare: async (handle) => {
         await maybeCompactNode(node, "threshold", { turnId: activeTurn?.turnId, signal: activeTurn?.signal, handle });
-        pendingPromptSkillIds.set(arg.nodeId, [...new Set((arg.skillIds ?? []).map((id) => id.trim()).filter(Boolean))]);
+        runtime.transition(arg.nodeId, (r) => ({
+          pendingSkillIds: [...new Set((arg.skillIds ?? []).map((id) => id.trim()).filter(Boolean))],
+        }));
         const text = arg.text.trim();
         const images = (arg.images ?? []).filter((img) => img.data && img.mimeType);
         const content =
@@ -734,9 +810,9 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
         appendDelta(node, handle, from);
       },
     });
-    pendingPromptSkillIds.delete(arg.nodeId);
+    runtime.transition(arg.nodeId, (r) => ({ pendingSkillIds: [] }));
     const { result } = query;
-    liveTurns.invalidateNode(arg.nodeId);
+    clearLiveTurn(arg.nodeId);
     if (!result.ok) {
       if (result.reason === "failed" && isContextOverflow(query.error)) return retrySendAfterOverflow(node, promptFromSeq);
       if (result.reason === "failed") events.emit(arg.nodeId, "error", String((query.error as any)?.message ?? query.error));
@@ -764,8 +840,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   function abort(nodeId: string) {
     const active = queries.state(nodeId);
     queries.abort(nodeId);
-    liveTurns.invalidateNode(nodeId);
-    manualCompactions.get(nodeId)?.abort();
+    clearLiveTurn(nodeId);
+    runtime.get(nodeId)?.manualCompact?.abort();
     if (active) approvals.cancelByTurn(nodeId, active.turnId, "aborted");
     return { ok: true };
   }
@@ -777,16 +853,16 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       return { ok: false, reason: "node-not-found" };
     }
     if (!compaction) return { ok: false, reason: "unavailable" };
-    if (queries.state(nodeId) || manualCompactions.has(nodeId)) return { ok: false, reason: "node_busy" };
+    if (queries.state(nodeId) || runtime.get(nodeId)?.manualCompact !== undefined) return { ok: false, reason: "node_busy" };
     const controller = new AbortController();
-    manualCompactions.set(nodeId, controller);
+    runtime.transition(nodeId, () => ({ manualCompact: controller }));
     try {
       const result = await maybeCompactNode(node, "manual", { signal: controller.signal });
       if (controller.signal.aborted) return { ok: false, reason: "aborted" };
       if (result.ok) return { ok: true, node: dto(node) };
       return { ok: false, reason: result.reason, error: result.error };
     } finally {
-      manualCompactions.delete(nodeId);
+      runtime.transition(nodeId, () => ({ manualCompact: undefined }));
     }
   }
 
@@ -818,7 +894,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       finalize: (handle, from) => appendDelta(node, handle, from),
     });
     const { result } = query;
-    liveTurns.invalidateNode(nodeId);
+    clearLiveTurn(nodeId);
     if (!result.ok) {
       if (result.reason === "failed") events.emit(nodeId, "error", String((query.error as any)?.message ?? query.error));
       return { ok: false, reason: result.reason };
@@ -856,7 +932,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       finalize: (handle, from) => appendDelta(node, handle, from),
     });
     const { result } = query;
-    liveTurns.invalidateNode(arg.nodeId);
+    clearLiveTurn(arg.nodeId);
     if (!result.ok) {
       if (result.reason === "failed") events.emit(arg.nodeId, "error", String((query.error as any)?.message ?? query.error));
       return { ok: false, reason: result.reason };
@@ -893,7 +969,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   function updateLayout(arg: { nodeId: string; layout: NodeLayout }) {
     const result = saveNodeLayout(store, arg?.nodeId, arg?.layout);
     if (result.ok) {
-      const node = nodes.get(arg.nodeId);
+      const node = runtime.get(arg.nodeId)?.node;
       if (node) node.layout = arg.layout;
     }
     return result;
@@ -904,7 +980,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     if (result.ok) {
       const updated = new Set(result.updatedIds);
       for (const item of items) {
-        const node = nodes.get(item.id);
+        const node = runtime.get(item.id)?.node;
         if (node && updated.has(item.id)) node.layout = item.layout;
       }
     }
@@ -918,22 +994,32 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     const deletedIds = [nodeId, ...descendantsOf(nodeId)];
     store.deleteNode(nodeId);
     for (const id of deletedIds) {
-      nodes.delete(id);
-      disposeNode(id, "node deleted");
+      // tombstone：generation++ + disposed + abort 活跃 turn；空闲记录立即移除，
+      // 活跃 turn 记录在 settle 后清理。
+      runtime.markDisposed(id);
+      approvals.cancelByNode(id, "node deleted");
+      policies.clearNodeSession(id);
     }
     return { ok: true, deletedIds };
   }
 
+  /** 重置运行期附件（保留节点）：generation++（abort 活跃 turn）+ 清引擎 + 清 live 投影。 */
   function disposeNode(nodeId: string, reason: string) {
-    queries.invalidate(nodeId);
+    runtime.transition(nodeId, (r) => ({
+      generation: (r.generation ?? 0) + 1,
+      engine: undefined,
+      liveSnapshot: undefined,
+    }));
     approvals.cancelByNode(nodeId, reason);
     policies.clearNodeSession(nodeId);
-    liveTurns.invalidateNode(nodeId);
-    engine.drop(nodeId);
   }
 
   function disposeSession(sessionId: string) {
-    for (const node of store.listNodes(sessionId)) disposeNode(node.id, "session deleted");
+    for (const node of store.listNodes(sessionId)) {
+      runtime.markDisposed(node.id);
+      approvals.cancelByNode(node.id, "session deleted");
+      policies.clearNodeSession(node.id);
+    }
   }
 
   function disposeProject(projectId: string) {
@@ -964,8 +1050,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       node.messages = [];
       node.messageMeta = [];
     }
-    queries.invalidate(nodeId);
-    liveTurns.invalidateNode(nodeId);
+    runtime.transition(nodeId, (r) => ({ generation: (r.generation ?? 0) + 1, liveSnapshot: undefined }));
     approvals.cancelByNode(nodeId, "reset");
     policies.clearNodeSession(nodeId);
     engine.peek(nodeId)?.reset();
@@ -974,11 +1059,9 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
 
   /** 设置变更（模型/baseUrl/key）→ 丢弃所有引擎，下次发送按新配置重建。 */
   function invalidate() {
-    for (const nodeId of nodes.keys()) {
+    for (const nodeId of runtime.keys()) {
       disposeNode(nodeId, "invalidated");
     }
-    queries.invalidateAll();
-    engine.invalidateAll();
   }
 
   function decideApproval(decision: Parameters<typeof approvals.decide>[0]) {
@@ -1040,8 +1123,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     invalidate,
     decideApproval,
     listSkills,
-    liveTurns: () => liveTurns.list(),
-    onLiveTurn: (listener: Parameters<typeof liveTurns.subscribe>[0]) => liveTurns.subscribe(listener),
+    liveTurns: () => runtime.listLive(),
+    onLiveTurn: (listener: Parameters<typeof liveTurnPublisher.subscribe>[0]) => liveTurnPublisher.subscribe(listener),
     disposeSession,
     disposeProject,
     enableSkill: (arg: { nodeId: string; skillId: string }) => appendSkillEvent({ ...arg, action: "skill-enabled" }),

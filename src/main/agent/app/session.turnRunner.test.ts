@@ -5,7 +5,7 @@ import { join } from "path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { FrozenNodeContext } from "../core/context";
 import { createAgentSession } from "./session";
-import type { EngineHandle, EventSinkPort, LlmEnginePort, NodeInit } from "../ports";
+import type { EngineFactory, EngineHandle, EventSinkPort, LlmEnginePort, NodeInit, TracePort } from "../ports";
 import type { AgentTool } from "../core/tool";
 import { createLoomContextCheckpoint } from "../core/messages";
 import type { NodeLayout, NodeRecord, PersistedMessage, SessionRecord, Settings, Store, Project } from "../../store/store";
@@ -124,12 +124,10 @@ function events() {
   return { sink, items };
 }
 
-function createEngine(handle: EngineHandle): LlmEnginePort {
+function createEngine(handle: EngineHandle): EngineFactory {
   return {
-    ensure: async () => handle,
-    peek: () => handle,
-    drop: vi.fn(),
-    invalidateAll: vi.fn(),
+    build: async () => ({ agent: undefined, handle, configStamp: "test" }),
+    configStamp: () => "test",
     listModels: async () => [],
   };
 }
@@ -1333,10 +1331,8 @@ describe("createAgentSession turn runner integration", () => {
       clock: { now: () => 1 },
       getApiKey: () => "key",
       createEngine: () => ({
-        ensure: async (nodeId) => engineMap.get(nodeId) ?? engineA,
-        peek: (nodeId) => engineMap.get(nodeId),
-        drop: vi.fn(),
-        invalidateAll: vi.fn(),
+        build: async (nodeId) => ({ agent: undefined, handle: engineMap.get(nodeId) ?? engineA, configStamp: "test" }),
+        configStamp: () => "test",
         listModels: async () => [],
       }),
     });
@@ -1395,5 +1391,43 @@ describe("createAgentSession turn runner integration", () => {
 
     await expect(run).resolves.toEqual({ ok: false, reason: "stale" });
     expect(session.liveTurns()).toEqual([]);
+  });
+
+  it("records request, tool, and response trace entries during a turn", async () => {
+    const store = new MemoryStore();
+    let trace: TracePort | undefined;
+    const messages: AgentMessage[] = [];
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: (hooks) => {
+        trace = hooks.trace;
+        return createEngine(createHandle(messages, vi.fn(async () => {
+          // 模拟 pi 真实事件顺序：llm_call begin → tool begin/end → llm_call end
+          const llmId = trace?.beginSpan({ nodeId: "n1", kind: "llm_call", name: "p/m", attributes: { model: { provider: "p", id: "m" } } });
+          const toolId = trace?.beginSpan({ nodeId: "n1", kind: "tool", name: "calc", parentSpanId: llmId, attributes: { arguments: { expr: "1+1" } } });
+          if (toolId) trace?.endSpan("n1", toolId, { status: "ok", attributes: { result: "2" } });
+          if (llmId) trace?.endSpan("n1", llmId, { status: "ok", attributes: { usage: { totalTokens: 10 } } });
+          messages.push(assistant("done"));
+        })));
+      },
+    });
+
+    await session.send({ nodeId: "n1", text: "go" });
+
+    const snapshot = session.trace("n1");
+    const record = snapshot.records[0];
+    const kinds = record.spans.map((span) => span.kind);
+    expect(kinds).toContain("llm_call");
+    expect(kinds).toContain("tool");
+    // llm_call span 结束且带 usage
+    const llm = record.spans.find((span) => span.kind === "llm_call");
+    expect(llm).toMatchObject({ status: "ok", attributes: { usage: { totalTokens: 10 } } });
+    // tool span 挂在 llm_call 下
+    const tool = record.spans.find((span) => span.kind === "tool");
+    expect(tool?.parentSpanId).toBe(llm?.spanId);
   });
 });

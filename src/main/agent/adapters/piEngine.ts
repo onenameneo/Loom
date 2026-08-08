@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Message } from "@earendil-works/pi-ai";
 import type { AgentTool } from "../core/tool";
-import type { EngineHandle, EventSinkPort, HookDispatcher, LlmEnginePort, NodeInit } from "../ports";
+import type { EngineCacheEntry, EngineFactory, EngineHandle, EventSinkPort, HookDispatcher, NodeInit, TracePort } from "../ports";
 import { adaptAgentToolsToPi } from "./piTools";
 import { migrateLegacyModelRef, parseStoredModelRef, type StoredModelSelection } from "../../modelConfig/modelRef";
 import { ModelRegistry } from "../../modelConfig/registry";
@@ -21,7 +21,9 @@ import { attributeModelError } from "../../modelConfig/errors";
 import type { RegistryProvider } from "../../modelConfig/types";
 
 // ---------------------------------------------------------------------------
-// ④ 适配器 · pi 引擎：pi（pi-agent-core / pi-ai）的全部使用收敛于此，实现 LlmEnginePort。
+// ④ 适配器 · pi 引擎：pi（pi-agent-core / pi-ai）的全部使用收敛于此，实现 EngineFactory。
+// 无状态：不持有 per-node 缓存；构建出的 EngineCacheEntry 由应用编排持有于
+// NodeRuntime 记录上（session 再包装成 LlmEnginePort）。
 // ② 不直接依赖 pi；分支上下文装配经 buildContext 回调转交 ① 领域核心。
 // ---------------------------------------------------------------------------
 
@@ -45,6 +47,14 @@ function previewText(value: unknown, max = TRACE_TEXT_PREVIEW): string | undefin
     return text.length <= max ? text : `${text.slice(0, max)}...`;
   }
   return undefined;
+}
+
+/** Bounded assistant output for the trace end event; TraceRepository applies its shared redaction sanitizer on write. */
+export function summarizeAssistantResponse(message: unknown): { text: string; truncated: boolean } | undefined {
+  const content = message && typeof message === "object" ? (message as { content?: unknown }).content : undefined;
+  const text = previewText(content);
+  if (!text) return undefined;
+  return { text, truncated: text.length > TRACE_TEXT_PREVIEW };
 }
 
 function summarizeMessage(message: unknown) {
@@ -107,12 +117,12 @@ export interface PiEngineDeps {
   dispatcher: HookDispatcher;
   /** 当前节点活跃 outer turn id；仅用于把工具调用与应用 turn 相关联。 */
   getCurrentTurnId?: (nodeId: string) => string | undefined;
-  captureTrace?: (nodeId: string, kind: "request" | "response" | "tool" | "event" | "error", payload: unknown) => void;
+  /** trace 观测端口：pi 事件 → span（llm_call / tool）。 */
+  trace?: TracePort;
 }
 
-export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
-  const { events, resolveModel, buildContext, getNodeInit, getTools, getProjectRoot, dispatcher, getCurrentTurnId, captureTrace } = deps;
-  const cache = new Map<string, { agent: Agent; handle: EngineHandle; configStamp: string }>();
+export function createPiEngine(deps: PiEngineDeps): EngineFactory {
+  const { events, resolveModel, buildContext, getNodeInit, getTools, getProjectRoot, dispatcher, getCurrentTurnId, trace } = deps;
 
   function fileStamp(filePath: string | undefined) {
     if (!filePath || !existsSync(filePath)) return `${filePath ?? ""}:missing`;
@@ -194,14 +204,13 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
     };
   }
 
-  async function ensure(nodeId: string): Promise<EngineHandle> {
-    const existing = cache.get(nodeId);
-    if (existing && existing.configStamp === configStamp(nodeId)) return existing.handle;
-    if (existing) cache.delete(nodeId);
-
+  async function build(nodeId: string): Promise<EngineCacheEntry> {
     const init = getNodeInit(nodeId);
     const [{ Agent }, modelContext] = await Promise.all([import("@earendil-works/pi-agent-core"), loadRegistryContext(nodeId)]);
     const model = await buildModel(modelContext, init?.model);
+    // span 槽位：llm_call 的 parent（下一个 tool 用）+ tool 按 toolCallId 配对。
+    let pendingLlmSpanId: string | undefined;
+    const toolSpanByCallId = new Map<string, string>();
     const agent = new Agent({
       initialState: {
         systemPrompt: init?.systemPrompt || SYSTEM_PROMPT,
@@ -211,17 +220,33 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
       },
       streamFn: (requestModel, context, options) => {
         const ref = { providerId: String(requestModel.provider), modelId: String(requestModel.id) };
-        captureTrace?.(nodeId, "request", {
-          model: { provider: ref.providerId, id: ref.modelId },
-          systemPrompt: init?.systemPrompt || SYSTEM_PROMPT,
-          messages: summarizeMessages(context.messages),
-          messageCount: context.messages.length,
-          tools: getTools(nodeId).map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })),
-          options,
-        });
+        let llmSpanId: string | undefined;
+        try {
+          // llm_call span 进入：request payload（模型/系统提示/消息摘要/工具清单）作 attributes。
+          llmSpanId = trace?.beginSpan({
+            nodeId,
+            kind: "llm_call",
+            name: `${ref.providerId}/${ref.modelId}`,
+            attributes: {
+              model: { provider: ref.providerId, id: ref.modelId },
+              systemPrompt: init?.systemPrompt || SYSTEM_PROMPT,
+              messages: summarizeMessages(context.messages),
+              messageCount: context.messages.length,
+              tools: getTools(nodeId).map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })),
+              options,
+            },
+          });
+        } catch (error) {
+          // trace 是观测面：捕获失败绝不能让模型调用链丢失/中断。
+          console.warn(`[trace] llm_call begin failed for ${nodeId}:`, error);
+        }
+        // 保留到 message_end 结束；下一次 streamFn 覆盖。工具 span 以此为 parent。
+        pendingLlmSpanId = llmSpanId;
         try {
           return attributedStream(modelContext.models.streamSimple(requestModel, context, options), ref);
         } catch (error) {
+          if (llmSpanId) trace?.endSpan(nodeId, llmSpanId, { status: "error" });
+          pendingLlmSpanId = undefined;
           throw attributeModelError(error, ref);
         }
       },
@@ -232,7 +257,19 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
       //   空注册表下：transformContext 恒等、before/after 返回 undefined → 行为中性。
       transformContext: (messages: AgentMessage[]) => dispatcher.contextTransform(messages),
       beforeToolCall: async ({ toolCall, args }: BeforeToolCallContext) => {
-        captureTrace?.(nodeId, "tool", { state: "start", name: toolCall.name, id: toolCall.id, arguments: args });
+        let spanId: string | undefined;
+        try {
+          spanId = trace?.beginSpan({
+            nodeId,
+            kind: "tool",
+            name: toolCall.name,
+            parentSpanId: pendingLlmSpanId,
+            attributes: { arguments: args, id: toolCall.id },
+          });
+        } catch (error) {
+          console.warn(`[trace] tool begin failed for ${nodeId}:`, error);
+        }
+        if (spanId) toolSpanByCallId.set(toolCall.id, spanId);
         const d = await dispatcher.toolCall({
           nodeId,
           turnId: getCurrentTurnId?.(nodeId),
@@ -243,7 +280,18 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
         return d ? { block: true, reason: d.reason } : undefined;
       },
       afterToolCall: ({ toolCall, args, result, isError }: AfterToolCallContext) => {
-        captureTrace?.(nodeId, "tool", { state: "end", name: toolCall.name, id: toolCall.id, arguments: args, result: result.content, details: result.details, isError, usage: result.usage });
+        const spanId = toolSpanByCallId.get(toolCall.id);
+        toolSpanByCallId.delete(toolCall.id);
+        if (spanId) {
+          try {
+            trace?.endSpan(nodeId, spanId, {
+              status: isError ? "error" : "ok",
+              attributes: { arguments: args, result: result.content, details: result.details, isError, usage: result.usage },
+            });
+          } catch (error) {
+            console.warn(`[trace] tool end failed for ${nodeId}:`, error);
+          }
+        }
         return dispatcher.toolResult({
           nodeId,
           toolName: toolCall.name,
@@ -258,7 +306,6 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
     });
 
     agent.subscribe((event: AgentEvent) => {
-      captureTrace?.(nodeId, "event", { type: event.type });
       switch (event.type) {
         case "agent_start":
           events.emit(nodeId, "thinking");
@@ -271,10 +318,28 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
             events.emit(nodeId, "delta", event.assistantMessageEvent.delta);
           break;
         case "message_end":
-          if (event.message?.role === "assistant") captureTrace?.(nodeId, "response", { message: summarizeMessage(event.message) });
+          if (event.message?.role === "assistant") {
+            // llm_call span 结束（streamFn 已 begin）；不清理 pendingLlmSpanId，
+            // 让紧随的工具调用以它作 parent；下次 streamFn 会覆盖。
+            if (pendingLlmSpanId) {
+              const usage = (event.message as unknown as { usage?: unknown })?.usage;
+              const response = summarizeAssistantResponse(event.message);
+              try {
+                trace?.endSpan(nodeId, pendingLlmSpanId, {
+                  status: "ok",
+                  attributes: { ...(usage ? { usage } : {}), ...(response ? { response } : {}) },
+                });
+              } catch (error) {
+                console.warn(`[trace] llm_call end failed for ${nodeId}:`, error);
+              }
+            }
+          }
           break;
         case "agent_end":
           events.emit(nodeId, "done");
+          // 未结束的 span 由 finishTurn 兜底标 aborted；清空槽位。
+          pendingLlmSpanId = undefined;
+          toolSpanByCallId.clear();
           break;
       }
       // Hook 观测面：把每个 pi 事件广播给已注册 hook（H1 工具时间线等）。
@@ -282,19 +347,12 @@ export function createPiEngine(deps: PiEngineDeps): LlmEnginePort {
     });
 
     const handle = wrap(agent);
-    cache.set(nodeId, { agent, handle, configStamp: modelContext.configStamp });
-    return handle;
+    return { agent, handle, configStamp: modelContext.configStamp };
   }
 
   return {
-    ensure,
-    peek: (nodeId) => cache.get(nodeId)?.handle,
-    drop: (nodeId) => {
-      cache.delete(nodeId);
-    },
-    invalidateAll: () => {
-      cache.clear();
-    },
+    build,
+    configStamp,
     async listModels() {
       const { registry } = await loadRegistryContext();
       return modelsForSwitching(registry.listProviders());
