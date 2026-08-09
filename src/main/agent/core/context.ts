@@ -25,7 +25,7 @@ export function isLlmMessage(msg: AgentMessage): msg is Message {
   return role === "user" || role === "assistant" || role === "toolResult";
 }
 
-/** 抽取消息里的可读文本（text / thinking 拼接）。 */
+/** 抽取消息里的可见文本（不包含 thinking）。 */
 export function textOf(msg: AgentMessage): string {
   const content = (msg as any)?.content;
   if (typeof content === "string") return content;
@@ -33,9 +33,17 @@ export function textOf(msg: AgentMessage): string {
   return content
     .map((c: any) => {
       if (c?.type === "text") return c.text ?? "";
-      if (c?.type === "thinking") return c.thinking ?? "";
       return "";
     })
+    .join("");
+}
+
+/** 抽取 assistant thinking，用于 UI 展示；LLM 上下文仍保留原始 content blocks。 */
+export function thinkingOf(msg: AgentMessage): string {
+  const content = (msg as any)?.content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((c: any) => (c?.type === "thinking" ? c.thinking ?? "" : ""))
     .join("");
 }
 

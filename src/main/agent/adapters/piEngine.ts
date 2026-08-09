@@ -215,6 +215,7 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
       initialState: {
         systemPrompt: init?.systemPrompt || SYSTEM_PROMPT,
         model,
+        thinkingLevel: init?.thinkingLevel,
         messages: [...(init?.messages ?? [])],
         tools: adaptAgentToolsToPi(getTools(nodeId)),
       },
@@ -316,6 +317,8 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
         case "message_update":
           if (event.assistantMessageEvent?.type === "text_delta")
             events.emit(nodeId, "delta", event.assistantMessageEvent.delta);
+          if (event.assistantMessageEvent?.type === "thinking_delta")
+            events.emit(nodeId, "thinking_delta", event.assistantMessageEvent.delta);
           break;
         case "message_end":
           if (event.message?.role === "assistant") {

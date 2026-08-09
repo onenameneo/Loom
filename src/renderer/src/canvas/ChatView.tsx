@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import type { ApprovalRequestPayload, ModelSelection, NodeBudget, NodeMsg, SkillEffectiveDto, TurnCanvasEventPayload } from "../env";
+import type { ApprovalRequestPayload, ModelSelection, NodeBudget, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
 import { IconSplit, IconProject } from "../icons";
 import { Message } from "../message/Message";
 import { Composer, type ComposerImage } from "../composer/Composer";
@@ -12,7 +12,7 @@ import { ApprovalPrompt, type ApprovalState } from "./ApprovalPrompt";
 import { selectNodeLiveTurn, useWorkspaceStore } from "../workspace/store";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
-type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
+type Msg = { id: number; role: Role; text: string; thinking?: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
 
 function formatModelSelection(model?: ModelSelection) {
   if (!model) return undefined;
@@ -33,6 +33,7 @@ export default function ChatView({
   hasFrozenContext,
   systemPrompt,
   model,
+  thinkingLevel: initialThinkingLevel,
   onBranch,
   onExpandCanvas,
   onTreeChange,
@@ -44,6 +45,7 @@ export default function ChatView({
   hasFrozenContext: boolean;
   systemPrompt?: string;
   model?: ModelSelection;
+  thinkingLevel?: ThinkingLevel;
   onBranch: (seedText: string, includeParentContext: boolean) => void;
   onExpandCanvas: () => void;
   onTreeChange?: () => void;
@@ -58,6 +60,7 @@ export default function ChatView({
     id: idRef.current++,
     role: m.role as Role,
     text: m.text,
+    thinking: m.thinking,
     images: m.images,
     seq: m.seq,
     usage: m.usage,
@@ -77,6 +80,7 @@ export default function ChatView({
   const [personaOpen, setPersonaOpen] = useState(false);
   const [persona, setPersona] = useState(systemPrompt ?? "");
   const [nodeModel, setNodeModel] = useState<string | undefined>(formatModelSelection(model));
+  const [thinkingLevel, setThinkingLevelState] = useState<ThinkingLevel>(initialThinkingLevel ?? "off");
   const [budget, setBudget] = useState<NodeBudget | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -132,15 +136,19 @@ export default function ChatView({
   useTitlebarActions(titlebarActions);
 
   const reloadFromInitial = useCallback((items: NodeMsg[], targetNodeId: string) => {
-    const restored: Msg[] = items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }));
+    const restored: Msg[] = items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }));
     // A tree refresh can race an in-flight Node. Merge the authoritative live
     // snapshot into the refreshed transcript instead of briefly replacing it
     // with an older persisted copy.
     const live = useWorkspaceStore.getState().turnsByNodeId[targetNodeId];
     if (live) {
       const last = restored[restored.length - 1];
-      if (last?.role === "assistant") last.text = live.assistantText;
-      else restored.push({ id: idRef.current++, role: "assistant", text: live.assistantText });
+      if (last?.role === "assistant") {
+        last.text = live.assistantText;
+        last.thinking = live.assistantThinking;
+      } else {
+        restored.push({ id: idRef.current++, role: "assistant", text: live.assistantText, thinking: live.assistantThinking });
+      }
     }
     setMsgs(restored);
   }, []);
@@ -173,11 +181,11 @@ export default function ChatView({
     setMsgs((current) => {
       const last = current[current.length - 1];
       if (last?.role === "assistant") {
-        return last.text === liveTurn.assistantText
+        return last.text === liveTurn.assistantText && last.thinking === liveTurn.assistantThinking
           ? current
-          : [...current.slice(0, -1), { ...last, text: liveTurn.assistantText }];
+          : [...current.slice(0, -1), { ...last, text: liveTurn.assistantText, thinking: liveTurn.assistantThinking }];
       }
-      return [...current, { id: idRef.current++, role: "assistant", text: liveTurn.assistantText }];
+      return [...current, { id: idRef.current++, role: "assistant", text: liveTurn.assistantText, thinking: liveTurn.assistantThinking }];
     });
   }, [liveTurn]);
 
@@ -190,8 +198,9 @@ export default function ChatView({
     setApproval(null);
     setPersona(systemPrompt ?? "");
     setNodeModel(formatModelSelection(model));
+    setThinkingLevelState(initialThinkingLevel ?? "off");
     refreshBudget();
-  }, [model, nodeId, refreshBudget, systemPrompt]);
+  }, [initialThinkingLevel, model, nodeId, refreshBudget, systemPrompt]);
 
   useEffect(() => {
     localStorage.setItem(`loom:draft:${nodeId}`, input);
@@ -372,6 +381,11 @@ export default function ChatView({
     if (r.ok) setNodeModel(next);
   }
 
+  async function setThinkingLevel(level: ThinkingLevel) {
+    const r = await window.api.canvas.setThinkingLevel(nodeId, level);
+    if (r.ok) setThinkingLevelState(level);
+  }
+
   async function compactNode() {
     if (!window.api || isBusy) return;
     setBusy(true);
@@ -466,6 +480,7 @@ export default function ChatView({
                 key={item.message.id}
                 role={item.message.role}
                 text={item.message.text}
+                thinking={item.message.thinking}
                 images={item.message.images}
                 density="comfortable"
                 streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1].id}
@@ -542,6 +557,7 @@ export default function ChatView({
           activeSkills={draftSkills}
           canRegenerate={msgs.some((m) => m.role === "user") && !isBusy}
           model={nodeModel}
+          thinkingLevel={thinkingLevel}
           budgetLine={`将发送 ~${(hasFrozenContext ? budget?.withAncestors : budget?.withoutAncestors) ?? 0} tokens`}
           onSubmit={submit}
           onStop={stop}
@@ -549,6 +565,7 @@ export default function ChatView({
           onClearNode={clearNode}
           onRegenerate={regenerate}
           onSetModel={setModel}
+          onSetThinkingLevel={setThinkingLevel}
           onCompact={compactNode}
           onEnableSkill={enableSkill}
           onDisableSkill={disableDraftSkill}

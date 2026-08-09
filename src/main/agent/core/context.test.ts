@@ -18,6 +18,18 @@ describe("roleOf / textOf / isLlmMessage", () => {
     expect(textOf(user("hello"))).toBe("hello");
     expect(textOf(asst("world"))).toBe("world");
   });
+  it("keeps assistant thinking separate from visible text", () => {
+    const msg = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "private chain" },
+        { type: "text", text: "visible answer" },
+      ],
+      timestamp: 0,
+    } as unknown as AgentMessage;
+
+    expect(textOf(msg)).toBe("visible answer");
+  });
   it("classifies only user/assistant/toolResult as LLM messages", () => {
     expect(isLlmMessage(user("a"))).toBe(true);
     expect(isLlmMessage(asst("b"))).toBe(true);

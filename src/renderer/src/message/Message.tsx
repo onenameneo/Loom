@@ -1,7 +1,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { BookOpen, Check, Copy, Pencil, RefreshCcw } from "lucide-react";
+import { BookOpen, Brain, Check, Copy, Pencil, RefreshCcw } from "lucide-react";
 import type { NodeMsg } from "../env";
 import { CodeBlock } from "./CodeBlock";
 
@@ -101,10 +101,23 @@ function CheckpointView({ checkpoint, text }: { checkpoint?: CheckpointInfo; tex
   );
 }
 
+function ThinkingView({ text }: { text: string }) {
+  return (
+    <details className="m__thinking">
+      <summary>
+        <Brain size={13} />
+        <span>Thinking</span>
+      </summary>
+      <div className="m__thinking-body">{text}</div>
+    </details>
+  );
+}
+
 // 共用消息组件：画布节点与 ChatView 都用它。助手消息渲染 Markdown，其余纯文本。
 export function Message({
   role,
   text,
+  thinking,
   images,
   density = "comfortable",
   streaming = false,
@@ -118,6 +131,7 @@ export function Message({
 }: {
   role: MsgRole;
   text: string;
+  thinking?: string;
   images?: { data: string; mimeType: string }[];
   density?: Density;
   streaming?: boolean;
@@ -198,6 +212,7 @@ export function Message({
         <span className="m__plain m__skill"><BookOpen size={13} /> {text}</span>
       ) : role === "assistant" ? (
         <div className="m__md">
+          {thinking && <ThinkingView text={thinking} />}
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
             {text}
           </ReactMarkdown>

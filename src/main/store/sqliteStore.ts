@@ -20,6 +20,7 @@ import {
 } from "./store";
 import { DEFAULT_SESSION_TITLE, type DefaultTitleState } from "../../common/titleDefaults";
 import { parseStoredModelRef, type StoredModelSelection } from "../modelConfig/modelRef";
+import { isThinkingLevel, type ThinkingLevel } from "../modelConfig/thinkingLevels";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { FrozenNodeContext } from "../agent/core/context";
 
@@ -406,7 +407,7 @@ export class SqliteStore implements Store {
 
   updateNode(
     id: string,
-    patch: Partial<{ title: string; titleState: DefaultTitleState; seed: unknown; frozenContext: FrozenNodeContext; systemPrompt: string; model: StoredModelSelection; color: string }>,
+    patch: Partial<{ title: string; titleState: DefaultTitleState; seed: unknown; frozenContext: FrozenNodeContext; systemPrompt: string; model: StoredModelSelection; thinkingLevel: ThinkingLevel; color: string }>,
   ): void {
     const current = this.getNode(id);
     if (!current) return;
@@ -427,6 +428,10 @@ export class SqliteStore implements Store {
       if (parsed.kind === "ref") meta.model = parsed.ref;
       else if (parsed.kind === "legacy") meta.model = parsed.legacyModel;
       else delete meta.model;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "thinkingLevel")) {
+      if (isThinkingLevel(patch.thinkingLevel)) meta.thinkingLevel = patch.thinkingLevel;
+      else delete meta.thinkingLevel;
     }
     if (Object.prototype.hasOwnProperty.call(patch, "color")) {
       const color = patch.color?.trim() ?? "";
@@ -551,6 +556,7 @@ export class SqliteStore implements Store {
     const systemPrompt = typeof meta.systemPrompt === "string" ? meta.systemPrompt : undefined;
     const parsedModel = parseStoredModelRef(meta.model);
     const model = parsedModel.kind === "ref" ? parsedModel.ref : parsedModel.kind === "legacy" ? parsedModel.legacyModel : undefined;
+    const thinkingLevel = isThinkingLevel(meta.thinkingLevel) ? meta.thinkingLevel : undefined;
     const color = typeof meta.color === "string" ? meta.color : undefined;
     const titleState = meta.titleState === "default" || meta.titleState === "manual" ? meta.titleState : undefined;
     const frozenContext = meta.frozenContext && typeof meta.frozenContext === "object" ? meta.frozenContext as FrozenNodeContext : undefined;
@@ -564,6 +570,7 @@ export class SqliteStore implements Store {
       seed: decode(row.seed, undefined),
       systemPrompt,
       model,
+      thinkingLevel,
       color,
       layout: toLayout(row),
       frozenContext,

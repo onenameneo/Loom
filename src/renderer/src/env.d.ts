@@ -15,6 +15,7 @@ export interface ToolCallDto {
 export interface NodeMsg {
   role: "user" | "assistant" | "tool" | "skill" | "checkpoint";
   text: string;
+  thinking?: string;
   images?: { data: string; mimeType: string }[];
   seq: number;
   usage?: { totalTokens?: number };
@@ -53,6 +54,7 @@ export interface NodeSeed {
   parent: string;
 }
 export type ModelSelection = string | { providerId: string; modelId: string };
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export interface CanvasNodeDto {
   id: string;
   sessionId: string;
@@ -65,6 +67,7 @@ export interface CanvasNodeDto {
   frozenContextTokenEstimate?: number;
   systemPrompt?: string;
   model?: ModelSelection;
+  thinkingLevel?: ThinkingLevel;
   color?: string;
   layout?: { x: number; y: number; width: number; height: number };
   messages: NodeMsg[];
@@ -97,6 +100,7 @@ export interface LiveTurnSnapshot {
   state: Extract<TurnState, "running" | "awaiting_approval">;
   revision: number;
   assistantText: string;
+  assistantThinking?: string;
   approval?: {
     requestId: string;
     toolName: string;
@@ -409,7 +413,14 @@ export interface ModelListItem {
   modelId?: string;
   available?: boolean;
   availability?: string;
-  capabilities?: unknown;
+  capabilities?: {
+    reasoning?: boolean;
+    thinkingLevels?: ThinkingLevel[];
+    images?: boolean;
+    contextWindow?: number;
+    maxOutputTokens?: number;
+    compatibility?: unknown;
+  };
 }
 
 export interface ModelRegistryPayload {
@@ -433,6 +444,7 @@ export interface ModelRegistryPayload {
       diagnostics: Array<{ code: string; message: string; field?: string }>;
       capabilities: {
         reasoning: boolean;
+        thinkingLevels?: ThinkingLevel[];
         images: boolean;
         contextWindow: number;
         maxOutputTokens: number;
@@ -484,6 +496,7 @@ declare global {
           items: Array<{ id: string; layout: { x: number; y: number; width: number; height: number } }>,
         ) => Promise<{ ok: boolean; updatedIds: string[]; reason?: "invalid" | "storage" }>;
         setModel: (nodeId: string, model: string | { providerId: string; modelId: string }) => Promise<{ ok: boolean }>;
+        setThinkingLevel: (nodeId: string, thinkingLevel: ThinkingLevel) => Promise<{ ok: boolean }>;
         models: () => Promise<ModelListItem[]>;
         budget: (nodeId: string) => Promise<NodeBudget>;
         trace: (nodeId: string) => Promise<import("./workbench/traceState").TraceSnapshotDto>;

@@ -82,6 +82,17 @@ function stringArrayField(value: JsonObject, key: string): ("text" | "image")[] 
   return items.length ? items : undefined;
 }
 
+function thinkingLevelMapField(value: JsonObject, key: string): Model<Api>["thinkingLevelMap"] | undefined {
+  const field = value[key];
+  if (!isObject(field)) return undefined;
+  const map: Record<string, string | null> = {};
+  for (const level of ["off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+    const mapped = field[level];
+    if (typeof mapped === "string" || mapped === null) map[level] = mapped;
+  }
+  return Object.keys(map).length ? map as Model<Api>["thinkingLevelMap"] : undefined;
+}
+
 function toRuntimeModel(provider: RegistryProvider, id: string, raw: JsonObject, base?: RegistryModel): Model<Api> {
   const api = stringField(raw, "api") ?? base?.api ?? ("" as Api);
   const contextWindow = numberField(raw, "contextWindow") ?? numberField(raw, "context") ?? base?.capabilities.contextWindow ?? 0;
@@ -106,6 +117,10 @@ function toRuntimeModel(provider: RegistryProvider, id: string, raw: JsonObject,
     api: api as Api,
     baseUrl: provider.baseUrl || base?.baseUrl || "",
     reasoning: booleanField(raw, "reasoning") ?? base?.capabilities.reasoning ?? false,
+    thinkingLevelMap: {
+      ...base?.runtimeModel.thinkingLevelMap,
+      ...thinkingLevelMapField(raw, "thinkingLevelMap"),
+    },
     input,
     contextWindow,
     maxTokens,

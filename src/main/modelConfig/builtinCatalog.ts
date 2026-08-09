@@ -1,5 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { BuiltinCatalog, RegistryModel, RegistryProvider } from "./types";
+import { supportedThinkingLevels } from "./thinkingLevels";
 
 function cloneModel(model: Model<Api>): Model<Api> {
   return {
@@ -24,6 +25,7 @@ export function adaptPiModel(model: Model<Api>, source: RegistryModel["source"])
     source,
     capabilities: {
       reasoning: Boolean(cloned.reasoning),
+      thinkingLevels: supportedThinkingLevels(cloned),
       images: cloned.input.includes("image"),
       contextWindow: cloned.contextWindow,
       maxOutputTokens: cloned.maxTokens,

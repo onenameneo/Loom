@@ -16,6 +16,7 @@ export interface ModelDiagnostic {
 
 export interface ModelCapabilities {
   reasoning: boolean;
+  thinkingLevels: string[];
   images: boolean;
   contextWindow: number;
   maxOutputTokens: number;

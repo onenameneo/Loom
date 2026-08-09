@@ -51,6 +51,7 @@ export function applyToolEvent(
 export interface ToolTimelineMessage {
   role: string;
   text: string;
+  thinking?: string;
   images?: unknown[];
   toolCall?: ToolCallView;
 }
@@ -74,7 +75,7 @@ export function groupToolTimelineMessages<T extends ToolTimelineMessage & { id: 
   };
 
   for (const message of messages) {
-    if (message.role === "assistant" && message.text.trim() === "" && !message.images?.length) {
+    if (message.role === "assistant" && message.text.trim() === "" && !message.thinking?.trim() && !message.images?.length) {
       continue;
     }
     if (message.role === "tool" && message.toolCall) {
@@ -105,7 +106,7 @@ export function upsertToolTimelineMessage<T extends ToolTimelineMessage>(
     return copy;
   }
   const last = messages.at(-1);
-  const base = last?.role === "assistant" && last.text === "" ? messages.slice(0, -1) : messages;
+  const base = last?.role === "assistant" && last.text === "" && !last.thinking?.trim() ? messages.slice(0, -1) : messages;
   return [...base, createMessage(toolCall)];
 }
 

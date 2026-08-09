@@ -12,6 +12,7 @@ import { createCanvasRuntime } from "./agent/app/session";
 import type { Seed } from "./agent/core/graph";
 import type { ApprovalDecision } from "./agent/ports";
 import type { StoredModelSelection } from "./modelConfig/modelRef";
+import type { ThinkingLevel } from "./modelConfig/thinkingLevels";
 import { ModelRegistry } from "./modelConfig/registry";
 import { createRuntimeModelsFromRegistry } from "./modelConfig/runtimeModels";
 import { loadScopedModelSettings, resolveSelectedModel } from "./modelConfig/scopes";
@@ -110,6 +111,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   ipcMain.handle("node:trace", (_e, nodeId: string) => runtime.trace(nodeId));
   ipcMain.handle("node:models", () => runtime.models());
   ipcMain.handle("node:setModel", (_e, arg: { nodeId: string; model: StoredModelSelection }) => runtime.setModel(arg));
+  ipcMain.handle("node:setThinkingLevel", (_e, arg: { nodeId: string; thinkingLevel: ThinkingLevel }) => runtime.setThinkingLevel(arg));
   ipcMain.handle("node:reset", (_e, nodeId: string) => runtime.reset(nodeId));
   ipcMain.handle("node:skills", (_e, nodeId: string) => runtime.listSkills(nodeId));
   ipcMain.handle("node:enableSkill", (_e, arg: { nodeId: string; skillId: string }) => runtime.enableSkill(arg));

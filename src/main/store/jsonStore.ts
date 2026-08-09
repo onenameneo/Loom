@@ -17,6 +17,7 @@ import {
 } from "./store";
 import { DEFAULT_SESSION_TITLE, type DefaultTitleState } from "../../common/titleDefaults";
 import type { StoredModelSelection } from "../modelConfig/modelRef";
+import type { ThinkingLevel } from "../modelConfig/thinkingLevels";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { FrozenNodeContext } from "../agent/core/context";
 
@@ -220,7 +221,7 @@ export class JsonStore implements Store {
   }
   updateNode(
     _id: string,
-    _patch: Partial<{ title: string; titleState: DefaultTitleState; seed: unknown; frozenContext: FrozenNodeContext; systemPrompt: string; model: StoredModelSelection; color: string }>,
+    _patch: Partial<{ title: string; titleState: DefaultTitleState; seed: unknown; frozenContext: FrozenNodeContext; systemPrompt: string; model: StoredModelSelection; thinkingLevel: ThinkingLevel; color: string }>,
   ): void {}
   updateNodeLayout(_id: string, _layout: NodeLayout): boolean {
     return false;

@@ -21,7 +21,7 @@ function provider(models: Array<{ id: string; source: "builtin" | "user-custom" 
       availability: model.available ? "available" : "missing-authentication",
       available: model.available,
       diagnostics: [],
-      capabilities: { reasoning: false, images: false, contextWindow: 128000, maxOutputTokens: 8192 },
+      capabilities: { reasoning: false, thinkingLevels: ["off"], images: false, contextWindow: 128000, maxOutputTokens: 8192 },
       runtimeModel: {} as never,
     })),
   };

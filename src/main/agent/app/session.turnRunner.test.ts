@@ -1233,6 +1233,37 @@ describe("createAgentSession turn runner integration", () => {
     expect(session.liveTurns()).toEqual([]);
   });
 
+  it("defaults unspecified node thinking level to off when building the engine", async () => {
+    const store = new MemoryStore();
+    let observedInit: NodeInit | undefined;
+    const messages: AgentMessage[] = [];
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: (hooks) => ({
+        build: async (nodeId) => {
+          observedInit = hooks.getNodeInit(nodeId);
+          return {
+            agent: undefined,
+            handle: createHandle(messages, vi.fn(async (msg) => {
+              messages.push(msg, assistant("done"));
+            })),
+            configStamp: "test",
+          };
+        },
+        configStamp: () => "test",
+        listModels: async () => [],
+      }),
+    });
+
+    await expect(session.send({ nodeId: "n1", text: "go" })).resolves.toEqual({ ok: true });
+
+    expect(observedInit?.thinkingLevel).toBe("off");
+  });
+
   it("invalidates a background turn before its Session is deleted", async () => {
     const store = new MemoryStore();
     const gate = deferred();

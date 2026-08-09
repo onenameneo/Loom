@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { TurnLifecycleEvent } from "../ports";
 import {
   appendAssistantDeltaToSnapshot,
+  appendAssistantThinkingToSnapshot,
   applyLifecycleToSnapshot,
   beginTurnSnapshot,
   createLiveTurnPublisher,
@@ -34,6 +35,13 @@ describe("live snapshot pure transforms", () => {
     const updated = appendAssistantDeltaToSnapshot(snap, "hello");
     expect(updated.assistantText).toBe("hello");
     expect(snap.assistantText).toBe("");
+  });
+
+  it("appends assistant thinking separately from visible text", () => {
+    const snap = beginTurnSnapshot({ nodeId: "n", sessionId: "s", turnId: "t", operation: "send" });
+    const updated = appendAssistantThinkingToSnapshot(snap, "plan");
+    expect(updated.assistantThinking).toBe("plan");
+    expect(updated.assistantText).toBe("");
   });
 
   it("maps a non-terminal lifecycle to a snapshot update", () => {

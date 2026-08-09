@@ -8,6 +8,7 @@ export type LiveTurnSnapshot = {
   state: Extract<TurnLifecycleEvent["state"], "running" | "awaiting_approval">;
   revision: number;
   assistantText: string;
+  assistantThinking?: string;
   approval?: TurnLifecycleEvent["approval"];
 };
 
@@ -52,6 +53,10 @@ export function beginTurnSnapshot(input: {
 
 export function appendAssistantDeltaToSnapshot(snapshot: LiveTurnSnapshot, delta: string): LiveTurnSnapshot {
   return { ...snapshot, assistantText: `${snapshot.assistantText}${delta}` };
+}
+
+export function appendAssistantThinkingToSnapshot(snapshot: LiveTurnSnapshot, delta: string): LiveTurnSnapshot {
+  return { ...snapshot, assistantThinking: `${snapshot.assistantThinking ?? ""}${delta}` };
 }
 
 /** 非终态生命周期 → 更新快照；终态（completed/aborted/failed）→ 返回 undefined 以触发移除。 */

@@ -2,6 +2,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { FrozenNodeContext } from "../agent/core/context";
 import type { DefaultTitleState } from "../../common/titleDefaults";
 import type { StoredModelSelection } from "../modelConfig/modelRef";
+import type { ThinkingLevel } from "../modelConfig/thinkingLevels";
 import {
   isApprovalPolicy,
   isApprovalsReviewer,
@@ -170,6 +171,7 @@ export interface NodeRecord {
   seed?: unknown;
   systemPrompt?: string;
   model?: StoredModelSelection;
+  thinkingLevel?: ThinkingLevel;
   color?: string;
   layout?: NodeLayout;
   /** Versioned child-owned context captured at branch creation. */
@@ -211,7 +213,7 @@ export interface Store {
   }): NodeRecord;
   updateNode(
     id: string,
-    patch: Partial<{ title: string; titleState: DefaultTitleState; seed: unknown; frozenContext: FrozenNodeContext; systemPrompt: string; model: StoredModelSelection; color: string }>,
+    patch: Partial<{ title: string; titleState: DefaultTitleState; seed: unknown; frozenContext: FrozenNodeContext; systemPrompt: string; model: StoredModelSelection; thinkingLevel: ThinkingLevel; color: string }>,
   ): void;
   updateNodeLayout(id: string, layout: NodeLayout): boolean;
   updateNodeLayouts(items: Array<{ id: string; layout: NodeLayout }>): string[];

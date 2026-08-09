@@ -1,7 +1,7 @@
 import { memo, useCallback, useContext, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Handle, NodeResizeControl, Position, type ResizeParams } from "@xyflow/react";
 import { Check, ChevronDown, MessageSquareText, Pencil, Trash2 } from "lucide-react";
-import type { ApprovalRequestPayload, ModelSelection, NodeBudget, NodeMsg, SkillEffectiveDto, TurnCanvasEventPayload } from "../env";
+import type { ApprovalRequestPayload, ModelSelection, NodeBudget, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
 import { Composer, type ComposerImage } from "../composer/Composer";
 import { IconArrowUpRight, IconChevronRight, IconSplit } from "../icons";
 import { Message } from "../message/Message";
@@ -14,7 +14,7 @@ import { type NodeUpdate } from "./nodeUpdates";
 import { selectNodeLiveTurn, useWorkspaceStore } from "../workspace/store";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
-type Msg = { id: number; role: Role; text: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
+type Msg = { id: number; role: Role; text: string; thinking?: string; images?: ComposerImage[]; seq?: number; usage?: { totalTokens?: number }; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
 type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number; includeParentContext: boolean };
 type RectLike = Pick<DOMRect, "left" | "top" | "bottom" | "width" | "height">;
 
@@ -90,7 +90,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   const idRef = useRef(1);
 
   const toMsgs = useCallback((items: NodeMsg[] = []) => (
-    items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }))
+    items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }))
   ), []);
 
   const [msgs, setMsgs] = useState<Msg[]>(() => toMsgs(data.messages ?? []));
@@ -125,6 +125,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   const [personaOpen, setPersonaOpen] = useState(false);
   const [persona, setPersona] = useState(String(data.systemPrompt ?? ""));
   const [nodeModel, setNodeModel] = useState<string | undefined>(formatModelSelection(data.model));
+  const [thinkingLevel, setThinkingLevelState] = useState<ThinkingLevel>(data.thinkingLevel ?? "off");
   const [draftSkills, setDraftSkills] = useState<SkillEffectiveDto[]>([]);
   const [skillCount, setSkillCount] = useState<number>(Array.isArray(data.skills) ? data.skills.length : 0);
   const [colorOpen, setColorOpen] = useState(false);
@@ -141,8 +142,9 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     setTitle(String(data.title ?? ""));
     setPersona(String(data.systemPrompt ?? ""));
     setNodeModel(formatModelSelection(data.model));
+    setThinkingLevelState(data.thinkingLevel ?? "off");
     setSkillCount(Array.isArray(data.skills) ? data.skills.length : 0);
-  }, [data.messages, data.title, data.systemPrompt, data.model, data.skills, toMsgs]);
+  }, [data.messages, data.title, data.systemPrompt, data.model, data.thinkingLevel, data.skills, toMsgs]);
 
   useEffect(() => {
     if (!liveTurn) return;
@@ -150,11 +152,11 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     setMsgs((current) => {
       const last = current[current.length - 1];
       if (last?.role === "assistant") {
-        return last.text === liveTurn.assistantText
+        return last.text === liveTurn.assistantText && last.thinking === liveTurn.assistantThinking
           ? current
-          : [...current.slice(0, -1), { ...last, text: liveTurn.assistantText }];
+          : [...current.slice(0, -1), { ...last, text: liveTurn.assistantText, thinking: liveTurn.assistantThinking }];
       }
-      return [...current, { id: idRef.current++, role: "assistant", text: liveTurn.assistantText }];
+      return [...current, { id: idRef.current++, role: "assistant", text: liveTurn.assistantText, thinking: liveTurn.assistantThinking }];
     });
   }, [liveTurn]);
 
@@ -181,6 +183,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
       setTitle(next.title);
       setPersona(next.systemPrompt ?? "");
       setNodeModel(formatModelSelection(next.model));
+      setThinkingLevelState(next.thinkingLevel ?? "off");
       setSkillCount(next.skills?.length ?? 0);
       data.onNodeUpdated?.({
         id: next.id,
@@ -416,6 +419,14 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     const r = await window.api.canvas.setModel(id, parseModelSelection(next));
     if (r.ok) {
       setNodeModel(next);
+      data.onTreeChange?.();
+    }
+  }
+
+  async function setThinkingLevel(level: ThinkingLevel) {
+    const r = await window.api.canvas.setThinkingLevel(id, level);
+    if (r.ok) {
+      setThinkingLevelState(level);
       data.onTreeChange?.();
     }
   }
@@ -732,6 +743,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
                 key={item.message.id}
                 role={item.message.role}
                 text={item.message.text}
+                thinking={item.message.thinking}
                 images={item.message.images}
                 density="compact"
                 streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1]?.id}
@@ -816,12 +828,14 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           activeSkills={draftSkills}
           canRegenerate={msgs.some((m) => m.role === "user") && !isBusy}
           model={nodeModel}
+          thinkingLevel={thinkingLevel}
           onSubmit={submit}
           onStop={stop}
           onOpenPersona={() => setPersonaOpen(true)}
           onClearNode={clearNode}
           onRegenerate={regenerate}
           onSetModel={setModel}
+          onSetThinkingLevel={setThinkingLevel}
           onCompact={compactNode}
           onEnableSkill={enableSkill}
           onDisableSkill={disableDraftSkill}

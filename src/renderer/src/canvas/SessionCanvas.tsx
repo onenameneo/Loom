@@ -118,6 +118,7 @@ export default function SessionCanvas({
           hasFrozenContext={Boolean(chatNode.hasFrozenContext)}
           systemPrompt={chatNode.systemPrompt}
           model={chatNode.model || model}
+          thinkingLevel={chatNode.thinkingLevel}
           onBranch={branchFromChat}
           onExpandCanvas={expandCanvas}
           onTreeChange={onTreeChange}

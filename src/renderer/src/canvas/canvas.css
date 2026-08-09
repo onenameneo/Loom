@@ -223,6 +223,10 @@
   /* 始终盖在消息之上：悬停的消息会被抬到 z-index:3，输入框必须更高，否则会被消息文字遮住 */
   z-index: 12;
 }
+.chatview .composer:has(.composer-popover),
+.card__foot:has(.composer-popover) {
+  z-index: 60;
+}
 .composer-wrap {
   display: flex;
   flex-direction: column;
@@ -1286,7 +1290,7 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-float);
-  z-index: 40;
+  z-index: 70;
 }
 .cmd-menu {
   left: 0;
@@ -1351,7 +1355,7 @@
 .model-switcher-root {
   position: relative;
   flex: none;
-  max-width: 180px;
+  max-width: 260px;
 }
 .model-switcher {
   display: inline-flex;
@@ -1373,6 +1377,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.model-switcher__thinking {
+  flex: none;
+  padding-left: 4px;
+  border-left: 1px solid var(--border);
+  font-family: var(--font-mono);
+  color: var(--faint);
+}
 .model-switcher:hover,
 .model-switcher:focus-visible,
 .model-switcher.is-open {
@@ -1385,11 +1396,16 @@
   flex: none;
 }
 .model-switcher-menu {
-  right: 0;
-  left: auto;
-  width: max-content;
-  min-width: 220px;
-  max-width: min(300px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  left: 0;
+  right: auto;
+  width: min(320px, calc(100vw - 32px));
+  min-width: min(280px, calc(100vw - 32px));
+  max-height: 320px;
+  overflow: hidden;
+  padding: 0;
+  z-index: 70;
 }
 .model-switcher-menu .cmd-row small {
   font-family: var(--font-mono);
@@ -1399,6 +1415,114 @@
   grid-template-areas:
     "label"
     "hint";
+}
+.model-switcher-menu .cmd-row:disabled {
+  cursor: default;
+  color: var(--faint);
+}
+.model-switcher-menu .cmd-row:disabled:hover,
+.model-switcher-menu .cmd-row:disabled:focus-visible {
+  background: transparent;
+}
+.model-switcher-list {
+  min-height: 0;
+  max-height: 236px;
+  overflow-y: auto;
+  padding: 5px;
+}
+.model-switcher-thinking {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 13px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.model-switcher-thinking-label {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.model-switcher-thinking-label svg {
+  flex: none;
+  color: var(--muted);
+}
+.model-switcher-thinking-label span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-switcher-thinking-label small {
+  flex: none;
+  font-size: 11px;
+  color: var(--faint);
+}
+.model-switcher-thinking-slider-shell {
+  flex: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 126px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent-soft) 46%, var(--surface));
+}
+.model-switcher-thinking-slider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 102px;
+  height: 100%;
+  touch-action: none;
+  user-select: none;
+}
+.model-switcher-thinking-slider-track {
+  position: relative;
+  flex: 1;
+  height: 1.5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 28%, transparent);
+}
+.model-switcher-thinking-slider-range {
+  position: absolute;
+  height: 100%;
+  height: 1.5px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.model-switcher-thinking-slider-thumb {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--accent);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-float);
+  cursor: pointer;
+}
+.model-switcher-thinking-slider-thumb:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px var(--accent-soft),
+    var(--shadow-float);
+}
+.model-switcher-thinking-slider[data-disabled],
+.model-switcher-thinking-slider-shell:has(.model-switcher-thinking-slider[data-disabled]) {
+  opacity: 0.56;
+}
+.model-switcher-thinking-slider[data-disabled] .model-switcher-thinking-slider-thumb {
+  cursor: default;
 }
 .composer-images {
   display: flex;

@@ -59,7 +59,8 @@ describe("model registry", () => {
               api: "anthropic-messages",
               contextWindow: 1234,
               maxTokens: 567,
-              reasoning: false,
+              reasoning: true,
+              thinkingLevelMap: { minimal: null, low: "low", medium: "medium", high: "high", xhigh: "xhigh" },
               input: ["text"],
             },
           },
@@ -67,6 +68,7 @@ describe("model registry", () => {
             "claude-sonnet-4-5": {
               name: "Proxy Sonnet",
               maxTokens: 2048,
+              thinkingLevelMap: { xhigh: "xhigh", max: null },
             },
           },
         },
@@ -81,8 +83,11 @@ describe("model registry", () => {
     expect(builtin.baseUrl).toBe("https://anthropic-proxy.test");
     expect(builtin.name).toBe("Proxy Sonnet");
     expect(builtin.capabilities.maxOutputTokens).toBe(2048);
+    expect(builtin.capabilities.thinkingLevels).toEqual(expect.arrayContaining(["off", "minimal", "low", "medium", "high", "xhigh"]));
+    expect(builtin.capabilities.thinkingLevels).not.toContain("max");
     expect(builtin.source).toBe("user-overridden");
     expect(custom.source).toBe("user-custom");
+    expect(custom.capabilities.thinkingLevels).toEqual(["off", "low", "medium", "high", "xhigh"]);
     expect(custom.available).toBe(true);
   });
 

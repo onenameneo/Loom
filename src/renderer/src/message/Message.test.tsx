@@ -6,6 +6,24 @@ import "./message.css";
 
 afterEach(() => cleanup());
 
+describe("Message thinking", () => {
+  it("renders assistant thinking as a collapsed detail separate from the answer", () => {
+    const { container } = render(
+      <Message
+        role="assistant"
+        text="Final answer"
+        thinking="I should inspect the code path first."
+      />,
+    );
+
+    const details = container.querySelector("details.m__thinking");
+    expect(details?.hasAttribute("open")).toBe(false);
+    expect(screen.getByText("Thinking")).toBeTruthy();
+    expect(screen.getByText("Final answer")).toBeTruthy();
+    expect(screen.getByText("I should inspect the code path first.")).toBeTruthy();
+  });
+});
+
 describe("Message checkpoint timeline item", () => {
   it("renders checkpoint metadata as a default-collapsed timeline item", () => {
     const { container } = render(

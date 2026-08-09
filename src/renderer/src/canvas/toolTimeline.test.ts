@@ -48,6 +48,21 @@ describe("tool timeline state", () => {
     expect(next[1].toolCall).toMatchObject({ id: "call-1", name: "now", state: "start" });
   });
 
+  it("keeps a thinking-only assistant message before inserting a tool message", () => {
+    const messages: Array<ToolTimelineMessage & { id: number }> = [
+      { id: 1, role: "assistant", text: "", thinking: "Planning the tool call." },
+    ];
+    const next = upsertToolTimelineMessage(messages, { state: "start", toolCallId: "call-1", toolName: "now" }, (toolCall) => ({
+      id: 2,
+      role: "tool",
+      text: toolCall.summary ?? "",
+      toolCall,
+    }));
+
+    expect(next.map((m) => m.role)).toEqual(["assistant", "tool"]);
+    expect(next[0]).toMatchObject({ thinking: "Planning the tool call." });
+  });
+
   it("updates the existing tool message by id", () => {
     const started = upsertToolTimelineMessage([], { state: "start", toolCallId: "call-1", toolName: "calc" }, (toolCall) => ({
       id: 1,
@@ -92,5 +107,15 @@ describe("tool timeline state", () => {
     expect(grouped).toHaveLength(2);
     expect(grouped[0]).toMatchObject({ kind: "tools", calls: [{ id: "call-1" }, { id: "call-2" }] });
     expect(grouped[1]).toMatchObject({ kind: "message", message: { text: "done" } });
+  });
+
+  it("groups thinking-only assistant messages as renderable messages", () => {
+    const messages: Array<ToolTimelineMessage & { id: number }> = [
+      { id: 1, role: "assistant", text: "", thinking: "Reasoning notes" },
+    ];
+
+    expect(groupToolTimelineMessages(messages)).toEqual([
+      { kind: "message", message: messages[0] },
+    ]);
   });
 });

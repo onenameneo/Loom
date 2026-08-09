@@ -15,7 +15,6 @@ import {
   type Edge,
   type Node,
 } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
 import type { CanvasNodeDto, ModelSelection } from "../env";
 import { useTitlebarActions } from "../titlebar/Titlebar";
 import { CanvasTitlebarActions, CanvasZoomControls } from "./CanvasControls";

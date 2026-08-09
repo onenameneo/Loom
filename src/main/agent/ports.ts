@@ -2,6 +2,7 @@ import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent, Usage } from "@earendil-works/pi-ai";
 import type { Store } from "../store/store";
 import type { StoredModelSelection } from "../modelConfig/modelRef";
+import type { ThinkingLevel } from "../modelConfig/thinkingLevels";
 import type { ApprovalPolicy, ApprovalsReviewer, PermissionReason, SandboxMode } from "./core/permissions";
 import type { PermissionContext } from "./core/permissions";
 
@@ -18,6 +19,7 @@ import type { PermissionContext } from "./core/permissions";
 export interface NodeInit {
   systemPrompt?: string;
   model?: StoredModelSelection;
+  thinkingLevel?: ThinkingLevel;
   messages: AgentMessage[];
 }
 

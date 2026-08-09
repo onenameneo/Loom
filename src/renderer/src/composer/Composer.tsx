@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ClipboardEvent } from "react";
-import { BookOpen, ChevronDown, Square, X } from "lucide-react";
-import type { ModelListItem, SkillEffectiveDto } from "../env";
+import { BookOpen, Brain, ChevronDown, Square, X } from "lucide-react";
+import { Slider } from "radix-ui";
+import type { ModelListItem, SkillEffectiveDto, ThinkingLevel } from "../env";
 import { IconSend } from "../icons";
 import type { CmdCtx } from "./commands";
 import { CommandMenu } from "./CommandMenu";
@@ -17,6 +18,7 @@ export function Composer({
   placeholder,
   canRegenerate,
   model,
+  thinkingLevel = "off",
   budgetLine,
   activeSkills,
   topAccessory,
@@ -26,6 +28,7 @@ export function Composer({
   onClearNode,
   onRegenerate,
   onSetModel,
+  onSetThinkingLevel = () => {},
   onCompact,
   onEnableSkill,
   onDisableSkill,
@@ -38,6 +41,7 @@ export function Composer({
   placeholder: string;
   canRegenerate: boolean;
   model?: string;
+  thinkingLevel?: ThinkingLevel;
   budgetLine?: string;
   activeSkills?: SkillEffectiveDto[];
   topAccessory?: ReactNode;
@@ -47,6 +51,7 @@ export function Composer({
   onClearNode: () => void;
   onRegenerate: () => void;
   onSetModel: (model: string) => void;
+  onSetThinkingLevel?: (level: ThinkingLevel) => void;
   onCompact: () => void;
   onEnableSkill?: (skillId: string) => void;
   onDisableSkill?: (skillId: string) => void;
@@ -125,9 +130,12 @@ export function Composer({
 
   useEffect(() => {
     if (!modelOpen) return;
-    requestAnimationFrame(() => modelMenuRef.current?.focus());
+    requestAnimationFrame(() => {
+      modelMenuRef.current?.focus();
+    });
     const onPointerDown = (event: PointerEvent) => {
-      if (!modelRootRef.current?.contains(event.target as Node)) setModelOpen(false);
+      const target = event.target as Node;
+      if (!modelRootRef.current?.contains(target)) setModelOpen(false);
     };
     window.addEventListener("pointerdown", onPointerDown);
     return () => window.removeEventListener("pointerdown", onPointerDown);
@@ -179,7 +187,34 @@ export function Composer({
 
   function selectModel(model: ModelListItem) {
     onSetModel(model.id);
-    setModelOpen(false);
+  }
+
+  const currentModel = useMemo(() => {
+    if (!model) return undefined;
+    return modelOptions.find((item) => item.id === model || `${item.providerId ?? ""}/${item.modelId ?? ""}` === model);
+  }, [model, modelOptions]);
+
+  const thinkingOptions = useMemo<ThinkingLevel[]>(() => {
+    const configured = currentModel?.capabilities?.thinkingLevels?.filter((level): level is ThinkingLevel =>
+      ["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(level),
+    );
+    if (configured?.length) return configured;
+    if (currentModel?.capabilities?.reasoning) return ["off", "minimal", "low", "medium", "high"];
+    return ["off"];
+  }, [currentModel]);
+
+  const effectiveThinkingLevel = thinkingOptions.includes(thinkingLevel) ? thinkingLevel : thinkingOptions[0] ?? "off";
+  const thinkingDisabled = thinkingOptions.length <= 1;
+  const modelLabel = model ?? "选择模型";
+  const thinkingActiveIndex = Math.max(0, thinkingOptions.indexOf(effectiveThinkingLevel));
+
+  function selectThinkingLevel(level: ThinkingLevel) {
+    onSetThinkingLevel(level);
+  }
+
+  function selectThinkingIndex(index: number) {
+    const level = thinkingOptions[index];
+    if (level) selectThinkingLevel(level);
   }
 
   function submit() {
@@ -291,7 +326,8 @@ export function Composer({
             <button
               type="button"
               className={`model-switcher ${modelOpen ? "is-open" : ""}`}
-              title={model ?? "切换模型"}
+              title={`${modelLabel} · ${effectiveThinkingLevel}`}
+              aria-label={`${modelLabel} · ${effectiveThinkingLevel}`}
               aria-haspopup="menu"
               aria-expanded={modelOpen}
               onClick={() => {
@@ -306,7 +342,8 @@ export function Composer({
                 }
               }}
             >
-              <span className="model-switcher__label">{model ?? "选择模型"}</span>
+              <span className="model-switcher__label">{modelLabel}</span>
+              <span className="model-switcher__thinking">{effectiveThinkingLevel}</span>
               <ChevronDown size={13} />
             </button>
             {modelOpen && (
@@ -332,20 +369,46 @@ export function Composer({
                   }
                 }}
               >
-                {modelOptions.length === 0 && <div className="cmd-empty">没有可用的模型</div>}
-                {modelOptions.map((item, index) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    role="menuitem"
-                    className={`cmd-row ${index === modelActive ? "is-active" : ""}`}
-                    onMouseEnter={() => setModelActive(index)}
-                    onClick={() => selectModel(item)}
-                  >
-                    <span>{item.name || item.id}</span>
-                    <small>{item.providerId ?? ""}</small>
-                  </button>
-                ))}
+                <div className="model-switcher-list" role="group" aria-label="Models">
+                  {modelOptions.length === 0 && <div className="cmd-empty">没有可用的模型</div>}
+                  {modelOptions.map((item, index) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="menuitem"
+                      className={`cmd-row ${index === modelActive ? "is-active" : ""}`}
+                      onMouseEnter={() => setModelActive(index)}
+                      onClick={() => selectModel(item)}
+                    >
+                      <span>{item.name || item.id}</span>
+                      <small>{item.providerId ?? ""}</small>
+                    </button>
+                  ))}
+                </div>
+                <div className="model-switcher-thinking" role="group" aria-label="Thinking">
+                  <div className="model-switcher-thinking-label">
+                    <Brain size={15} />
+                    <span>Thinking</span>
+                    <small>({effectiveThinkingLevel})</small>
+                  </div>
+                  <div className="model-switcher-thinking-slider-shell">
+                    <Slider.Root
+                      className="model-switcher-thinking-slider"
+                      aria-label="Thinking level"
+                      min={0}
+                      max={Math.max(1, thinkingOptions.length - 1)}
+                      step={1}
+                      value={[thinkingActiveIndex]}
+                      disabled={thinkingDisabled}
+                      onValueChange={([next]) => selectThinkingIndex(next ?? 0)}
+                    >
+                      <Slider.Track className="model-switcher-thinking-slider-track">
+                        <Slider.Range className="model-switcher-thinking-slider-range" />
+                      </Slider.Track>
+                      <Slider.Thumb className="model-switcher-thinking-slider-thumb" title={`Thinking ${effectiveThinkingLevel}`} />
+                    </Slider.Root>
+                  </div>
+                </div>
               </div>
             )}
           </div>

@@ -2,9 +2,10 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { NodeLayout, NodeRecord, PersistedMessage } from "../../store/store";
 import type { StoredModelSelection } from "../../modelConfig/modelRef";
+import { isThinkingLevel, type ThinkingLevel } from "../../modelConfig/thinkingLevels";
 import { saveNodeLayout, saveNodeLayouts } from "../../store/layoutPersistence";
 import { ancestorChain, descendants, type Seed } from "../core/graph";
-import { buildContextPlan, isLlmMessage, roleOf, textOf, type FrozenNodeContext } from "../core/context";
+import { buildContextPlan, isLlmMessage, roleOf, textOf, thinkingOf, type FrozenNodeContext } from "../core/context";
 import { estTokens, estimateMessageTokensUnbounded, type Budget } from "../core/budget";
 import { isLoomContextCheckpoint, isLoomFrozenBranchSummary, type LoomBudgetDiagnostics, type LoomCompactionReason, type LoomUsageDiagnostic } from "../core/messages";
 import type { AgentTool } from "../core/tool";
@@ -29,6 +30,7 @@ import { createCompactionService, type CompactNodeResult, type CompactionService
 import { createApprovalGate } from "../hooks/tools/approvalGate";
 import {
   appendAssistantDeltaToSnapshot,
+  appendAssistantThinkingToSnapshot,
   applyLifecycleToSnapshot,
   beginTurnSnapshot,
   createLiveTurnPublisher,
@@ -76,6 +78,7 @@ export interface CanvasNode {
   seed?: Seed;
   systemPrompt?: string;
   model?: StoredModelSelection;
+  thinkingLevel?: ThinkingLevel;
   color?: string;
   layout?: NodeLayout;
   frozenContext?: FrozenNodeContext;
@@ -118,6 +121,7 @@ export interface CanvasRuntimeDeps {
 interface CanvasMessageDto {
   role: "user" | "assistant" | "tool" | "skill" | "checkpoint";
   text: string;
+  thinking?: string;
   images?: { data: string; mimeType: string }[];
   seq: number;
   usage?: { totalTokens?: number };
@@ -168,6 +172,11 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       if (type === "delta") {
         runtime.transition(nodeId, (r) =>
           r.liveSnapshot ? { liveSnapshot: appendAssistantDeltaToSnapshot(r.liveSnapshot, String(payload ?? "")) } : {},
+        );
+      }
+      if (type === "thinking_delta") {
+        runtime.transition(nodeId, (r) =>
+          r.liveSnapshot ? { liveSnapshot: appendAssistantThinkingToSnapshot(r.liveSnapshot, String(payload ?? "")) } : {},
         );
       }
       if (type === "turn" && payload && typeof payload === "object") {
@@ -234,6 +243,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       seed: record.seed as Seed | undefined,
       systemPrompt: record.systemPrompt,
       model: record.model,
+      thinkingLevel: record.thinkingLevel,
       color: record.color,
       layout: record.layout,
       frozenContext: record.frozenContext,
@@ -258,6 +268,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       // A running turn closes over this object. Keep its transcript identity;
       // only refresh durable node metadata while the turn is in flight.
       current.title = record.title;
+      current.thinkingLevel = record.thinkingLevel;
       current.seed = record.seed as Seed | undefined;
       current.systemPrompt = record.systemPrompt;
       current.model = record.model;
@@ -355,6 +366,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return {
       systemPrompt: [n.systemPrompt || DEFAULT_SYSTEM_PROMPT, skillIndex].filter(Boolean).join("\n\n"),
       model: n.model,
+      thinkingLevel: n.thinkingLevel ?? "off",
       messages: effectiveMessages(n),
     };
   }
@@ -509,6 +521,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     ) ?? 0,
     systemPrompt: n.systemPrompt,
     model: n.model,
+    thinkingLevel: n.thinkingLevel,
     color: n.color,
     layout: n.layout,
     messages: n.messages.flatMap<CanvasMessageDto>((m, seq) => {
@@ -579,7 +592,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       }
       if (role !== "user" && role !== "assistant") return [];
       const usage = (m as any)?.usage;
-      return [{ role, text: textOf(m), images: imagesOf(m), seq, usage, meta: n.messageMeta[seq] }];
+      const thinking = role === "assistant" ? thinkingOf(m) : "";
+      return [{ role, text: textOf(m), thinking: thinking || undefined, images: imagesOf(m), seq, usage, meta: n.messageMeta[seq] }];
     }),
     skills: effectiveSkillsFor(n.id).skills.map((skill) => ({
       id: skill.id,
@@ -1043,6 +1057,15 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return { ok: true };
   }
 
+  function setThinkingLevel(arg: { nodeId: string; thinkingLevel: string }) {
+    if (!isThinkingLevel(arg.thinkingLevel)) return { ok: false, reason: "invalid-thinking-level" };
+    const node = loadNode(arg.nodeId);
+    store.updateNode(arg.nodeId, { thinkingLevel: arg.thinkingLevel });
+    if (node) node.thinkingLevel = arg.thinkingLevel;
+    disposeNode(arg.nodeId, "thinking level changed");
+    return { ok: true };
+  }
+
   function reset(nodeId: string) {
     const node = loadNode(nodeId);
     store.deleteMessagesFrom(nodeId, 0);
@@ -1119,6 +1142,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     budget,
     models,
     setModel,
+    setThinkingLevel,
     reset,
     invalidate,
     decideApproval,

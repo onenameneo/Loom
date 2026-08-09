@@ -88,6 +88,8 @@ const api = {
       ipcRenderer.invoke("node:updateLayouts", items),
     setModel: (nodeId: string, model: string | { providerId: string; modelId: string }): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("node:setModel", { nodeId, model }),
+    setThinkingLevel: (nodeId: string, thinkingLevel: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke("node:setThinkingLevel", { nodeId, thinkingLevel }),
     models: (): Promise<{ id: string; name: string }[]> => ipcRenderer.invoke("node:models"),
     budget: (nodeId: string): Promise<{ withoutAncestors: number; withAncestors: number; estimated: boolean }> =>
       ipcRenderer.invoke("node:budget", nodeId),
