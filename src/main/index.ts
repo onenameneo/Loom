@@ -297,7 +297,7 @@ app.whenReady().then(() => {
   store = new SqliteStore(dbPath(app.getPath("userData")));
   ensureLoomAgentDefaults({ homeDir: app.getPath("home"), legacyApiKeyPresent: Boolean(store.getApiKeyEnc()) });
   applyThemeSource();
-  canvas = registerCanvas({ getWin: () => win, store });
+  canvas = registerCanvas({ getWin: () => win, store, userDataDir: app.getPath("userData") });
   monitor = registerMonitor({ getWin: () => win, store });
   acp = registerAcp({ getWin: () => win, store });
   collector = registerCollector({ getWin: () => win, store });

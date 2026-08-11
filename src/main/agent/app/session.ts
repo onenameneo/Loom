@@ -7,6 +7,13 @@ import { saveNodeLayout, saveNodeLayouts } from "../../store/layoutPersistence";
 import { ancestorChain, descendants, type Seed } from "../core/graph";
 import { buildContextPlan, isLlmMessage, roleOf, textOf, thinkingOf, type FrozenNodeContext } from "../core/context";
 import { estTokens, estimateMessageTokensUnbounded, type Budget } from "../core/budget";
+import {
+  applyToolResultBudget,
+  createToolResultBudgetState,
+  persistToolResultSidecars,
+  toolResultSidecarPathForMessage,
+  type ToolResultBudgetState,
+} from "../core/toolResultBudget";
 import { isLoomContextCheckpoint, isLoomFrozenBranchSummary, type LoomBudgetDiagnostics, type LoomCompactionReason, type LoomUsageDiagnostic } from "../core/messages";
 import type { AgentTool } from "../core/tool";
 import type { CommandPort } from "../ports";
@@ -94,6 +101,8 @@ export interface CanvasRuntimeDeps {
   /** 现取 API key（未配置返回空），用于发送前拦截。 */
   getApiKey: () => string | undefined;
   command?: CommandPort;
+  /** Electron app.getPath("userData"). Used for session-local tool result sidecars. */
+  userDataDir?: string;
   compaction?: {
     summarize: CompactionServiceDeps["summarize"];
     thresholdTokens?: number;
@@ -162,6 +171,7 @@ const DEFAULT_SYSTEM_PROMPT = "你是一个冷静、精确、克制的思考助�
 const DEFAULT_COMPACTION_THRESHOLD_TOKENS = 32_000;
 const DEFAULT_COMPACTION_TAIL_BUDGET_TOKENS = 12_000;
 const DEFAULT_MANUAL_COMPACTION_TAIL_BUDGET_TOKENS = 6_000;
+const TOOL_RESULT_BUDGET_OPT_OUT_TOOLS = new Set(["project_read_file", "skill_read"]);
 
 export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   const { store, events: eventSink, ids, clock, getApiKey } = deps;
@@ -348,15 +358,33 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return { withoutAncestors: projected, withAncestors: projected, estimated: true };
   }
 
-  // convertToLlm 接收的 state 已由统一投影初始化/同步；这里仅过滤 UI-only 消息。
+  function toolResultBudgetStateFor(nodeId: string): ToolResultBudgetState {
+    const record = runtime.get(nodeId);
+    if (!record) return createToolResultBudgetState();
+    if (!record.toolResultBudget) record.toolResultBudget = createToolResultBudgetState();
+    return record.toolResultBudget;
+  }
+
+  function applyToolResultBudgetFor(node: CanvasNode, messages: Message[]): Message[] {
+    const result = applyToolResultBudget(messages, toolResultBudgetStateFor(node.id), {
+      skipToolNames: TOOL_RESULT_BUDGET_OPT_OUT_TOOLS,
+      referenceFor: (message) =>
+        deps.userDataDir ? toolResultSidecarPathForMessage(deps.userDataDir, node.sessionId, message) : `toolResult:${message.toolCallId}`,
+    });
+    persistToolResultSidecars(result.persistedResults);
+    return result.messages;
+  }
+
+  // convertToLlm 接收的 state 已由统一投影初始化/同步；这里过滤 UI-only 后应用 tool result budget。
   function buildContext(nodeId: string, own: AgentMessage[]): Message[] {
     const node = runtime.get(nodeId)?.node;
-    if (node && own.length === 0) return buildContextPlan(node, node.messages, clock.now());
-    return own.filter(isLlmMessage);
+    if (node && own.length === 0) return effectiveMessages(node) as Message[];
+    const messages = own.filter(isLlmMessage);
+    return node ? applyToolResultBudgetFor(node, messages) : messages;
   }
 
   function effectiveMessages(node: CanvasNode): AgentMessage[] {
-    return buildContextPlan(node, node.messages, clock.now()) as AgentMessage[];
+    return applyToolResultBudgetFor(node, buildContextPlan(node, node.messages, clock.now())) as AgentMessage[];
   }
 
   function getNodeInit(nodeId: string): NodeInit | undefined {
@@ -626,6 +654,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     store.deleteMessagesFrom(node.id, seqFrom);
     node.messages = node.messages.slice(0, seqFrom);
     node.messageMeta = node.messageMeta.slice(0, seqFrom);
+    runtime.transition(node.id, () => ({ toolResultBudget: createToolResultBudgetState() }));
     if (handle) syncTranscript(handle, node);
   }
 
@@ -1073,7 +1102,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       node.messages = [];
       node.messageMeta = [];
     }
-    runtime.transition(nodeId, (r) => ({ generation: (r.generation ?? 0) + 1, liveSnapshot: undefined }));
+    runtime.transition(nodeId, (r) => ({ generation: (r.generation ?? 0) + 1, liveSnapshot: undefined, toolResultBudget: createToolResultBudgetState() }));
     approvals.cancelByNode(nodeId, "reset");
     policies.clearNodeSession(nodeId);
     engine.peek(nodeId)?.reset();

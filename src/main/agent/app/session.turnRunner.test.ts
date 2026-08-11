@@ -149,8 +149,55 @@ function createHandle(messages: AgentMessage[], prompt: EngineHandle["prompt"]):
 
 const user = (text: string): AgentMessage => ({ role: "user", content: text, timestamp: 0 }) as AgentMessage;
 const assistant = (text: string): AgentMessage => ({ role: "assistant", content: text, timestamp: 0 }) as unknown as AgentMessage;
+const toolResult = (toolCallId: string, toolName: string, text: string): AgentMessage =>
+  ({
+    role: "toolResult",
+    toolCallId,
+    toolName,
+    content: [{ type: "text", text }],
+    isError: false,
+    timestamp: 0,
+  }) as unknown as AgentMessage;
 
 describe("createAgentSession turn runner integration", () => {
+  it("bounds model-facing tool results without mutating stored transcript", () => {
+    const userDataDir = mkdtempSync(join(tmpdir(), "loom-user-data-"));
+    const sourceRoot = mkdtempSync(join(tmpdir(), "loom-source-root-"));
+    const huge = "x".repeat(200_001);
+    const store = new MemoryStore([toolResult("tc-big", "big_tool", huge)]);
+    store.projects[0].sourceRoots = [sourceRoot];
+    const eventLog = events();
+    let init: NodeInit | undefined;
+
+    try {
+      createAgentSession({
+        store,
+        events: eventLog.sink,
+        ids: { message: () => "id" },
+        clock: { now: () => 1 },
+        getApiKey: () => "key",
+        userDataDir,
+        createEngine: (hooks) => {
+          init = hooks.getNodeInit("n1");
+          return createEngine(createHandle([], vi.fn()));
+        },
+      });
+
+      const projected = init?.messages[0] as any;
+      expect(projected.content[0].text).toContain("tool_result_group_budget_exceeded");
+      expect(projected.content[0].text).toContain(join(userDataDir, "sessions", "sess", "tool-results", "tc-big.txt"));
+      expect(projected.content[0].text).not.toContain(huge);
+
+      const stored = store.getNode("n1")?.messages[0]?.content as any;
+      expect(stored.content[0].text).toBe(huge);
+      expect(readFileSync(join(userDataDir, "sessions", "sess", "tool-results", "tc-big.txt"), "utf-8")).toBe(huge);
+      expect(existsSync(join(sourceRoot, "sess", "tool-results", "tc-big.txt"))).toBe(false);
+    } finally {
+      rmSync(userDataDir, { recursive: true, force: true });
+      rmSync(sourceRoot, { recursive: true, force: true });
+    }
+  });
+
   it("does not resolve local coding tools for an unlinked project", () => {
     const store = new MemoryStore();
     const eventLog = events();

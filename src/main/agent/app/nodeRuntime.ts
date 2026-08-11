@@ -1,4 +1,5 @@
 import type { EngineCacheEntry } from "../ports";
+import type { ToolResultBudgetState } from "../core/toolResultBudget";
 import type { LiveTurnEvent, LiveTurnSnapshot } from "./liveTurns";
 import type { CanvasNode } from "./session";
 import type { ActiveTurn } from "./turnRunner";
@@ -19,6 +20,8 @@ export interface NodeRuntime {
   generation?: number;
   /** 引擎缓存条目（session 持有；piEngine 不再自持缓存）。 */
   engine?: EngineCacheEntry;
+  /** 模型上下文投影用的 tool result replacement 决策状态。 */
+  toolResultBudget?: ToolResultBudgetState;
   /** tombstone：dispose/删除后拒绝后续 transition，等 in-flight turn settle 后清理。 */
   disposed?: boolean;
 }

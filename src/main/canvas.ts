@@ -29,7 +29,7 @@ import { loadScopedModelSettings, resolveSelectedModel } from "./modelConfig/sco
 
 export type { Seed };
 
-export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store: Store }) {
+export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store: Store; userDataDir?: string }) {
   const { getWin, store } = opts;
 
   const events = createIpcEventSink(getWin);
@@ -59,6 +59,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     clock,
     getApiKey: () => "registry-managed",
     command: createCommandPort(),
+    userDataDir: opts.userDataDir,
     compaction: {
       summarize: (input, options) => summarizer.summarize(input, options),
     },
