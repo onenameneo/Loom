@@ -160,6 +160,148 @@ const toolResult = (toolCallId: string, toolName: string, text: string): AgentMe
   }) as unknown as AgentMessage;
 
 describe("createAgentSession turn runner integration", () => {
+  it("microCompacts stale model-facing tool results without mutating stored transcript", () => {
+    const userDataDir = mkdtempSync(join(tmpdir(), "loom-microcompact-user-data-"));
+    const sourceRoot = mkdtempSync(join(tmpdir(), "loom-microcompact-source-root-"));
+    const oldOutput = "old tool output that should stay out of diagnostics";
+    const recentOutput = "recent tool output";
+    const store = new MemoryStore([
+      assistant("done"),
+      toolResult("tc-old", "project_grep", oldOutput),
+      toolResult("tc-recent", "project_grep", recentOutput),
+    ]);
+    store.projects[0].sourceRoots = [sourceRoot];
+    const eventLog = events();
+    let init: NodeInit | undefined;
+
+    try {
+      createAgentSession({
+        store,
+        events: eventLog.sink,
+        ids: { message: () => "id" },
+        clock: { now: () => 90 * 60_000 },
+        getApiKey: () => "key",
+        userDataDir,
+        toolResultMicroCompact: { idleGapMinutes: 60, keepRecentToolResults: 1 },
+        createEngine: (hooks) => {
+          init = hooks.getNodeInit("n1");
+          return createEngine(createHandle([], vi.fn()));
+        },
+      });
+
+      const projectedOld = init?.messages[1] as any;
+      const projectedRecent = init?.messages[2] as any;
+      expect(projectedOld.content[0].text).toContain("stale_tool_result_microcompact");
+      expect(projectedOld.content[0].text).toContain("toolCallId: tc-old");
+      expect(projectedOld.content[0].text).toContain(join(userDataDir, "sessions", "sess", "tool-results", "tc-old.txt"));
+      expect(projectedOld.content[0].text).not.toContain(oldOutput);
+      expect(projectedRecent.content[0].text).toBe(recentOutput);
+
+      const stored = store.getNode("n1")?.messages[1]?.content as any;
+      expect(stored.content[0].text).toBe(oldOutput);
+      expect(readFileSync(join(userDataDir, "sessions", "sess", "tool-results", "tc-old.txt"), "utf-8")).toBe(oldOutput);
+      expect(existsSync(join(sourceRoot, "sess", "tool-results", "tc-old.txt"))).toBe(false);
+
+      const event = eventLog.items.find((item) => item.type === "microcompact");
+      expect(event).toMatchObject({
+        nodeId: "n1",
+        type: "microcompact",
+        payload: expect.objectContaining({
+          trigger: "time_idle",
+          idleGapMinutes: 90,
+          retainedCount: 1,
+          replacedCount: 1,
+        }),
+      });
+      expect(JSON.stringify(event?.payload)).not.toContain(oldOutput);
+    } finally {
+      rmSync(userDataDir, { recursive: true, force: true });
+      rmSync(sourceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not emit microCompact diagnostics when projection is a no-op", () => {
+    const store = new MemoryStore([
+      assistant("done"),
+      toolResult("tc-old", "project_grep", "old"),
+      toolResult("tc-recent", "project_grep", "recent"),
+    ]);
+    const eventLog = events();
+
+    createAgentSession({
+      store,
+      events: eventLog.sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 10 * 60_000 },
+      getApiKey: () => "key",
+      toolResultMicroCompact: { idleGapMinutes: 60, keepRecentToolResults: 1 },
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    expect(eventLog.items.some((item) => item.type === "microcompact")).toBe(false);
+  });
+
+  it("keeps raw budget estimates free of microCompact side effects", () => {
+    const userDataDir = mkdtempSync(join(tmpdir(), "loom-budget-microcompact-user-data-"));
+    const store = new MemoryStore([
+      assistant("done"),
+      toolResult("tc-old", "project_grep", "old output"),
+      toolResult("tc-recent", "project_grep", "recent output"),
+    ]);
+    const eventLog = events();
+    const session = createAgentSession({
+      store,
+      events: eventLog.sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 90 * 60_000 },
+      getApiKey: () => "key",
+      userDataDir,
+      toolResultMicroCompact: { idleGapMinutes: 60, keepRecentToolResults: 1 },
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    try {
+      expect(session.budget("n1").estimated).toBe(true);
+      expect(eventLog.items.some((item) => item.type === "microcompact")).toBe(false);
+      expect(existsSync(join(userDataDir, "sessions", "sess", "tool-results", "tc-old.txt"))).toBe(false);
+    } finally {
+      rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("resets microCompact state after edit-resend truncation", async () => {
+    const store = new MemoryStore([
+      assistant("done"),
+      toolResult("tc-old", "project_grep", "old output"),
+      toolResult("tc-recent", "project_grep", "recent output"),
+      user("retry from here"),
+    ]);
+    const eventLog = events();
+    let init: NodeInit | undefined;
+    const messages: AgentMessage[] = [];
+    const session = createAgentSession({
+      store,
+      events: eventLog.sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 90 * 60_000 },
+      getApiKey: () => "key",
+      toolResultMicroCompact: { idleGapMinutes: 60, keepRecentToolResults: 1 },
+      createEngine: (hooks) => {
+        init = hooks.getNodeInit("n1");
+        return createEngine(createHandle(messages, vi.fn(async (msg) => {
+          messages.push(msg, assistant("updated"));
+        })));
+      },
+    });
+    expect((init?.messages[1] as any).content[0].text).toContain("stale_tool_result_microcompact");
+    const before = eventLog.items.filter((item) => item.type === "microcompact").length;
+
+    await expect(session.editResend({ nodeId: "n1", seq: 3, text: "retry edited" })).resolves.toMatchObject({ ok: true });
+
+    const after = eventLog.items.filter((item) => item.type === "microcompact").length;
+    expect(after).toBe(before + 1);
+  });
+
   it("bounds model-facing tool results without mutating stored transcript", () => {
     const userDataDir = mkdtempSync(join(tmpdir(), "loom-user-data-"));
     const sourceRoot = mkdtempSync(join(tmpdir(), "loom-source-root-"));

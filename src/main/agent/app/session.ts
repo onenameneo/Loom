@@ -14,6 +14,14 @@ import {
   toolResultSidecarPathForMessage,
   type ToolResultBudgetState,
 } from "../core/toolResultBudget";
+import {
+  applyToolResultMicroCompact,
+  createToolResultMicroCompactState,
+  DEFAULT_TOOL_RESULT_MICROCOMPACT_IDLE_GAP_MINUTES,
+  DEFAULT_TOOL_RESULT_MICROCOMPACT_KEEP_RECENT,
+  type ToolResultMicroCompactDiagnostics,
+  type ToolResultMicroCompactState,
+} from "../core/toolResultMicroCompact";
 import { isLoomContextCheckpoint, isLoomFrozenBranchSummary, type LoomBudgetDiagnostics, type LoomCompactionReason, type LoomUsageDiagnostic } from "../core/messages";
 import type { AgentTool } from "../core/tool";
 import type { CommandPort } from "../ports";
@@ -109,6 +117,11 @@ export interface CanvasRuntimeDeps {
     tailBudgetTokens?: number;
     manualTailBudgetTokens?: number;
     maxSummaryOutputTokens?: number;
+  };
+  toolResultMicroCompact?: {
+    enabled?: boolean;
+    idleGapMinutes?: number;
+    keepRecentToolResults?: number;
   };
   titleGenerator?: {
     generate(input: { prompt: string; response?: string; signal?: AbortSignal }): Promise<string>;
@@ -346,7 +359,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     const node = loadNode(nodeId);
     if (!node) return { withoutAncestors: 0, withAncestors: 0, estimated: true };
     const projectedTokens = (messages: Message[]) => estTokens(messages.reduce((sum, msg) => sum + textOf(msg as AgentMessage).length, 0));
-    const systemPrompt = getNodeInit(nodeId)?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+    const skillIndex = compileAvailableSkillsIndex(catalogFor(nodeId).skills);
+    const systemPrompt = [node.systemPrompt || DEFAULT_SYSTEM_PROMPT, skillIndex].filter(Boolean).join("\n\n");
     const systemTokens = estTokens(systemPrompt.length);
     const toolTokens = estTokens(JSON.stringify(toolsFor(nodeId).map((tool) => ({
       name: tool.name,
@@ -354,6 +368,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       parameters: tool.parameters,
     }))).length);
     const fixedTokens = systemTokens + toolTokens;
+    // Budget diagnostics intentionally estimate the checkpoint-projected transcript before lossy tool-result projections.
     const projected = fixedTokens + projectedTokens(buildContextPlan(node, node.messages, clock.now()));
     return { withoutAncestors: projected, withAncestors: projected, estimated: true };
   }
@@ -375,16 +390,50 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return result.messages;
   }
 
+  function toolResultMicroCompactStateFor(nodeId: string): ToolResultMicroCompactState {
+    const record = runtime.get(nodeId);
+    if (!record) return createToolResultMicroCompactState();
+    if (!record.toolResultMicroCompact) record.toolResultMicroCompact = createToolResultMicroCompactState();
+    return record.toolResultMicroCompact;
+  }
+
+  function applyToolResultMicroCompactFor(node: CanvasNode, messages: Message[]): Message[] {
+    const result = applyToolResultMicroCompact(messages, toolResultMicroCompactStateFor(node.id), {
+      enabled: deps.toolResultMicroCompact?.enabled,
+      now: clock.now(),
+      sourceMessages: node.messages,
+      idleGapMinutes: deps.toolResultMicroCompact?.idleGapMinutes ?? DEFAULT_TOOL_RESULT_MICROCOMPACT_IDLE_GAP_MINUTES,
+      keepRecentToolResults: deps.toolResultMicroCompact?.keepRecentToolResults ?? DEFAULT_TOOL_RESULT_MICROCOMPACT_KEEP_RECENT,
+      skipToolNames: TOOL_RESULT_BUDGET_OPT_OUT_TOOLS,
+      referenceFor: (message) =>
+        deps.userDataDir ? toolResultSidecarPathForMessage(deps.userDataDir, node.sessionId, message) : `toolResult:${message.toolCallId}`,
+    });
+    persistToolResultSidecars(result.persistedResults);
+    if (result.diagnostics) emitMicroCompactDiagnostics(node, result.diagnostics);
+    return result.messages;
+  }
+
+  function projectModelMessages(node: CanvasNode, messages: Message[]): Message[] {
+    return applyToolResultMicroCompactFor(node, applyToolResultBudgetFor(node, messages));
+  }
+
+  function emitMicroCompactDiagnostics(node: CanvasNode, diagnostics: ToolResultMicroCompactDiagnostics) {
+    events.emit(node.id, "microcompact", {
+      ...diagnostics,
+      at: clock.now(),
+    });
+  }
+
   // convertToLlm 接收的 state 已由统一投影初始化/同步；这里过滤 UI-only 后应用 tool result budget。
   function buildContext(nodeId: string, own: AgentMessage[]): Message[] {
     const node = runtime.get(nodeId)?.node;
     if (node && own.length === 0) return effectiveMessages(node) as Message[];
     const messages = own.filter(isLlmMessage);
-    return node ? applyToolResultBudgetFor(node, messages) : messages;
+    return node ? projectModelMessages(node, messages) : messages;
   }
 
   function effectiveMessages(node: CanvasNode): AgentMessage[] {
-    return applyToolResultBudgetFor(node, buildContextPlan(node, node.messages, clock.now())) as AgentMessage[];
+    return projectModelMessages(node, buildContextPlan(node, node.messages, clock.now())) as AgentMessage[];
   }
 
   function getNodeInit(nodeId: string): NodeInit | undefined {
@@ -654,7 +703,10 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     store.deleteMessagesFrom(node.id, seqFrom);
     node.messages = node.messages.slice(0, seqFrom);
     node.messageMeta = node.messageMeta.slice(0, seqFrom);
-    runtime.transition(node.id, () => ({ toolResultBudget: createToolResultBudgetState() }));
+    runtime.transition(node.id, () => ({
+      toolResultBudget: createToolResultBudgetState(),
+      toolResultMicroCompact: createToolResultMicroCompactState(),
+    }));
     if (handle) syncTranscript(handle, node);
   }
 
@@ -1102,7 +1154,12 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       node.messages = [];
       node.messageMeta = [];
     }
-    runtime.transition(nodeId, (r) => ({ generation: (r.generation ?? 0) + 1, liveSnapshot: undefined, toolResultBudget: createToolResultBudgetState() }));
+    runtime.transition(nodeId, (r) => ({
+      generation: (r.generation ?? 0) + 1,
+      liveSnapshot: undefined,
+      toolResultBudget: createToolResultBudgetState(),
+      toolResultMicroCompact: createToolResultMicroCompactState(),
+    }));
     approvals.cancelByNode(nodeId, "reset");
     policies.clearNodeSession(nodeId);
     engine.peek(nodeId)?.reset();
