@@ -5,7 +5,7 @@ import type { AgentTool, ReadonlyAgentTool } from "../../core/tool";
 import { textResult } from "../../core/tool";
 import {
   DEFAULT_MAX_ENTRIES,
-  DEFAULT_MAX_LINES,
+  MAX_MUTATION_DIFF_INPUT_BYTES,
   MAX_ENTRIES,
   MAX_LINES,
   MAX_OUTPUT_CHARS,
@@ -15,6 +15,8 @@ import {
   appendBounded,
   boundedInteger,
   canonicalApprovalTarget,
+  fileVersion,
+  readBoundedUtf8,
   relativeProjectPath,
   resolveExistingFile,
   resolveInside,
@@ -23,6 +25,12 @@ import {
   withFileMutationQueue,
 } from "./access";
 import { walkProjectFiles } from "./walker";
+import {
+  DEFAULT_READ_LIMIT,
+  DEFAULT_READ_MAX_BYTES,
+  DEFAULT_READ_MAX_LINE_LENGTH,
+  readTextWindow,
+} from "./readWindow";
 
 const DEFAULT_FIND_LIMIT = 500;
 const DEFAULT_GREP_LIMIT = 100;
@@ -45,16 +53,16 @@ function globRegex(pattern: string): RegExp {
   return new RegExp(source + "$");
 }
 
-function numberedLines(lines: string[], offset: number): string[] {
-  return lines.map((line, index) => `${String(offset + index).padStart(6, " ")} | ${line}`);
-}
-
 function textFromBuffer(buffer: Buffer): string {
   return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
 }
 
-function truncation(reason?: string) {
-  return { truncated: Boolean(reason), reason };
+function truncation(reason?: string, nextOffset?: number) {
+  return {
+    truncated: Boolean(reason),
+    reason,
+    ...(nextOffset === undefined ? {} : { nextOffset }),
+  };
 }
 
 export function createProjectFileTools(sourceRoots: string[]): ReadonlyAgentTool[] {
@@ -104,12 +112,12 @@ export function createProjectFileTools(sourceRoots: string[]): ReadonlyAgentTool
   const readFile: ReadonlyAgentTool<{ root?: string; path: string; offset?: number; limit?: number }, unknown> = {
     name: "project_read_file",
     label: "Read Project File",
-    description: "Read a bounded, numbered UTF-8 text range from a file inside the current Loom Project.",
+    description: `Read a numbered UTF-8 text range from a file inside the current Loom Project. Output is capped at ${DEFAULT_READ_LIMIT} lines, ${DEFAULT_READ_MAX_LINE_LENGTH} characters per line, or ${DEFAULT_READ_MAX_BYTES} bytes; use offset to continue large files.`,
     parameters: Type.Object({
       root: Type.Optional(Type.String({ description: "One configured Project source root. Defaults to the first." })),
       path: Type.String({ description: "Relative file path inside the selected source root." }),
       offset: Type.Optional(Type.Number({ description: "1-based first line to return." })),
-      limit: Type.Optional(Type.Number({ description: "Maximum lines to return." })),
+      limit: Type.Optional(Type.Number({ description: `Maximum lines to return, up to ${MAX_LINES}.` })),
     }),
     readOnly: true,
     execute: async ({ args, signal }) => {
@@ -119,27 +127,28 @@ export function createProjectFileTools(sourceRoots: string[]): ReadonlyAgentTool
       const stat = await fs.stat(file);
       if (!stat.isFile()) throw new Error("Path is not a file.");
       const offset = boundedInteger(args.offset, 1, Number.MAX_SAFE_INTEGER);
-      const limit = boundedInteger(args.limit, DEFAULT_MAX_LINES, MAX_LINES);
-      const raw = textFromBuffer(await fs.readFile(file));
-      abortIfNeeded(signal);
-      const allLines = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-      if (allLines.length > 1 && allLines.at(-1) === "") allLines.pop();
-      const selected = allLines.slice(offset - 1, offset - 1 + limit);
-      const lines: string[] = [];
-      let outputLimitReached = false;
-      for (const line of numberedLines(selected, offset)) {
-        if (!appendBounded(lines, line)) {
-          outputLimitReached = true;
-          break;
-        }
-      }
-      const reason = outputLimitReached ? "output" : offset - 1 + selected.length < allLines.length ? "lines" : undefined;
-      return textResult(lines.join("\n"), {
+      const limit = boundedInteger(args.limit, DEFAULT_READ_LIMIT, MAX_LINES);
+      const window = await readTextWindow(file, {
+        offset,
+        limit,
+        maxLineLength: DEFAULT_READ_MAX_LINE_LENGTH,
+        maxBytes: DEFAULT_READ_MAX_BYTES,
+        signal,
+      });
+      const lastLine = window.lastLine;
+      const hasMore = window.truncatedByBytes || (lastLine !== undefined && lastLine < window.totalLines);
+      const nextOffset = hasMore ? (lastLine ?? offset) + 1 : undefined;
+      const footer = hasMore
+        ? `[Showing lines ${offset}-${lastLine ?? offset - 1} of ${window.totalLines}${window.truncatedByBytes ? ` (${DEFAULT_READ_MAX_BYTES} byte limit)` : ""}. Use offset=${nextOffset} to continue.]`
+        : `[End of file - total ${window.totalLines} lines]`;
+      const reason = window.truncatedByBytes ? "bytes" : hasMore ? "lines" : undefined;
+      return textResult([window.lines.join("\n"), footer].filter(Boolean).join("\n\n"), {
         path: relativeProjectPath(root, file),
         offset,
-        returnedLines: lines.length,
-        totalLines: allLines.length,
-        truncation: truncation(reason),
+        version: fileVersion(stat),
+        returnedLines: window.lines.length,
+        totalLines: window.totalLines,
+        truncation: truncation(reason, nextOffset),
       });
     },
   };
@@ -265,6 +274,7 @@ interface WriteArgs {
   path: string;
   content: string;
   overwrite?: boolean;
+  expectedVersion?: string;
 }
 
 interface EditArgs {
@@ -273,6 +283,7 @@ interface EditArgs {
   oldText: string;
   newText: string;
   replaceAll?: boolean;
+  expectedVersion?: string;
 }
 
 function mutationPreviewSummary(args: WriteArgs | EditArgs, kind: "write" | "edit") {
@@ -281,6 +292,7 @@ function mutationPreviewSummary(args: WriteArgs | EditArgs, kind: "write" | "edi
     return {
       operation: writeArgs.overwrite ? "overwrite" : "create",
       path: writeArgs.path,
+      expectedVersion: writeArgs.expectedVersion,
       contentLength: writeArgs.content.length,
       contentBytes: Buffer.byteLength(writeArgs.content, "utf-8"),
     };
@@ -293,6 +305,7 @@ function mutationPreviewSummary(args: WriteArgs | EditArgs, kind: "write" | "edi
     newTextLength: editArgs.newText.length,
     oldTextBytes: Buffer.byteLength(editArgs.oldText, "utf-8"),
     newTextBytes: Buffer.byteLength(editArgs.newText, "utf-8"),
+    expectedVersion: editArgs.expectedVersion,
   };
 }
 
@@ -300,6 +313,30 @@ async function approvalTargetFor(sourceRoots: string[], rootArg: string | undefi
   const root = await selectProjectRoot(sourceRoots, rootArg);
   const target = await resolveMutationTarget(root, pathArg);
   return canonicalApprovalTarget(target);
+}
+
+function assertExpectedVersion(
+  target: { version?: string },
+  expectedVersion: string | undefined,
+  operation: "write" | "edit",
+): void {
+  if (expectedVersion === undefined || target.version === expectedVersion) return;
+  throw new Error(`Target file changed since it was read; read it again before ${operation}.`);
+}
+
+async function assertCurrentExpectedVersion(
+  targetPath: string,
+  expectedVersion: string | undefined,
+  operation: "write" | "edit",
+): Promise<void> {
+  if (expectedVersion === undefined) return;
+  try {
+    const stat = await fs.stat(targetPath);
+    assertExpectedVersion({ version: fileVersion(stat) }, expectedVersion, operation);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("changed since it was read")) throw error;
+    throw new Error(`Target file changed since it was read; read it again before ${operation}.`);
+  }
 }
 
 function countMatches(content: string, oldText: string): number {
@@ -336,6 +373,7 @@ export function createProjectMutationTools(sourceRoots: string[]): AgentTool[] {
       path: Type.String({ description: "Relative file path inside the selected source root." }),
       content: Type.String({ description: "UTF-8 text content to write." }),
       overwrite: Type.Optional(Type.Boolean({ description: "Required to replace an existing file." })),
+      expectedVersion: Type.Optional(Type.String({ description: "Version returned by project_read_file; rejects stale writes." })),
     }),
     readOnly: false,
     approval: {
@@ -355,18 +393,24 @@ export function createProjectMutationTools(sourceRoots: string[]): AgentTool[] {
         abortIfNeeded(signal);
         const current = await resolveMutationTarget(root, args.path);
         if (current.exists && args.overwrite !== true) throw new Error("Target file already exists; pass overwrite: true to replace it.");
-        const before = current.exists ? textFromBuffer(await fs.readFile(current.absolutePath)) : "";
+        assertExpectedVersion(current, args.expectedVersion, "write");
+        const before = current.exists ? await readBoundedUtf8(current.absolutePath, MAX_MUTATION_DIFF_INPUT_BYTES, signal) : "";
         abortIfNeeded(signal);
+        await assertCurrentExpectedVersion(current.absolutePath, args.expectedVersion, "write");
         await atomicReplaceUtf8(current.absolutePath, args.content, signal);
-        const diff = boundedMutationDiffDetails(before, args.content, current.relativePath);
+        const diff = before === null
+          ? { text: `[diff omitted: existing file exceeds ${MAX_MUTATION_DIFF_INPUT_BYTES} bytes or is unavailable]`, truncated: true }
+          : boundedMutationDiffDetails(before, args.content, current.relativePath);
         const operation = current.exists ? "overwrite" : "create";
         const verb = operation === "create" ? "created" : "overwritten";
+        const version = fileVersion(await fs.stat(current.absolutePath));
         return textResult(`Project file ${verb}: ${current.relativePath}`, {
           path: current.relativePath,
           operation,
+          version,
           bytes: Buffer.byteLength(args.content, "utf-8"),
           diff: diff.text,
-          truncation: truncation(diff.truncated ? "output" : undefined),
+          truncation: truncation(before === null ? "input" : diff.truncated ? "output" : undefined),
         });
       });
     },
@@ -382,6 +426,7 @@ export function createProjectMutationTools(sourceRoots: string[]): AgentTool[] {
       oldText: Type.String({ description: "Exact text to replace. Must match once unless replaceAll is true." }),
       newText: Type.String({ description: "Replacement text." }),
       replaceAll: Type.Optional(Type.Boolean({ description: "Replace all matches instead of requiring exactly one." })),
+      expectedVersion: Type.Optional(Type.String({ description: "Version returned by project_read_file; rejects stale edits." })),
     }),
     readOnly: false,
     approval: {
@@ -400,18 +445,28 @@ export function createProjectMutationTools(sourceRoots: string[]): AgentTool[] {
       return withFileMutationQueue(target.canonicalKey, async () => {
         abortIfNeeded(signal);
         const current = await resolveExistingFile(root, args.path);
+        assertExpectedVersion(current, args.expectedVersion, "edit");
         const before = textFromBuffer(await fs.readFile(current.absolutePath));
         const edited = replaceExact(before, args.oldText, args.newText, args.replaceAll);
         abortIfNeeded(signal);
+        await assertCurrentExpectedVersion(current.absolutePath, args.expectedVersion, "edit");
         await atomicReplaceUtf8(current.absolutePath, edited.content, signal);
-        const diff = boundedMutationDiffDetails(before, edited.content, current.relativePath);
+        const diff = Buffer.byteLength(before, "utf-8") >= MAX_MUTATION_DIFF_INPUT_BYTES || Buffer.byteLength(edited.content, "utf-8") >= MAX_MUTATION_DIFF_INPUT_BYTES
+          ? { text: `[diff omitted: file content exceeds ${MAX_MUTATION_DIFF_INPUT_BYTES} bytes]`, truncated: true }
+          : boundedMutationDiffDetails(before, edited.content, current.relativePath);
+        const version = fileVersion(await fs.stat(current.absolutePath));
         return textResult(`Project file edited: ${current.relativePath} (${edited.replacements} replacement${edited.replacements === 1 ? "" : "s"})`, {
           path: current.relativePath,
           operation: "edit",
+          version,
           replacements: edited.replacements,
           bytes: Buffer.byteLength(edited.content, "utf-8"),
           diff: diff.text,
-          truncation: truncation(diff.truncated ? "output" : undefined),
+          truncation: truncation(
+            Buffer.byteLength(before, "utf-8") >= MAX_MUTATION_DIFF_INPUT_BYTES || Buffer.byteLength(edited.content, "utf-8") >= MAX_MUTATION_DIFF_INPUT_BYTES
+              ? "input"
+              : diff.truncated ? "output" : undefined,
+          ),
         });
       });
     },

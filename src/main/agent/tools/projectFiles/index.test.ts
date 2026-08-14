@@ -64,6 +64,72 @@ describe("project coding tools", () => {
     expect(result.details).toMatchObject({ path: "src/index.ts", offset: 2, returnedLines: 1, truncation: { truncated: true, reason: "lines" } });
   });
 
+  it("caps long lines and returns an actionable continuation after the byte limit", async () => {
+    const root = projectRoot();
+    const read = tool(root, "project_read_file");
+    const longLine = "x".repeat(2_100);
+    const content = Array.from({ length: 220 }, (_, index) => `${index + 1}-${"y".repeat(300)}`).join("\n");
+    writeFileSync(join(root, "src", "large.txt"), `${longLine}\n${content}\n`, "utf-8");
+
+    const result = await read.execute({ toolCallId: "t-long", args: { path: "src/large.txt" } });
+    const text = result.content[0];
+
+    expect(text).toMatchObject({ type: "text" });
+    expect((text as { type: "text"; text: string }).text).toContain("line truncated to 2000 chars");
+    expect((text as { type: "text"; text: string }).text).toContain("Use offset=");
+    expect(result.details).toMatchObject({
+      path: "src/large.txt",
+      totalLines: 221,
+      truncation: { truncated: true, reason: "bytes" },
+    });
+  });
+
+  it("rejects an offset beyond the end of the file", async () => {
+    const root = projectRoot();
+    const read = tool(root, "project_read_file");
+
+    await expect(read.execute({ toolCallId: "t-offset", args: { path: "src/index.ts", offset: 99 } })).rejects.toThrow(
+      /offset 99 is out of range/i,
+    );
+  });
+
+  it("returns a file version and rejects stale writes and edits", async () => {
+    const root = projectRoot();
+    const read = tool(root, "project_read_file");
+    const write = mutationTool(root, "project_write_file");
+    const edit = mutationTool(root, "project_edit_file");
+    const readResult = await read.execute({ toolCallId: "t-version-read", args: { path: "src/index.ts" } });
+    const version = (readResult.details as { version: string }).version;
+    writeFileSync(join(root, "src", "index.ts"), "externally changed\n", "utf-8");
+
+    await expect(
+      write.execute({
+        toolCallId: "t-version-write",
+        args: { path: "src/index.ts", content: "replacement\n", overwrite: true, expectedVersion: version },
+      }),
+    ).rejects.toThrow(/changed since it was read/i);
+    await expect(
+      edit.execute({
+        toolCallId: "t-version-edit",
+        args: { path: "src/index.ts", oldText: "externally changed", newText: "edited", expectedVersion: version },
+      }),
+    ).rejects.toThrow(/changed since it was read/i);
+  });
+
+  it("omits the contextual diff when the existing file exceeds the diff input cap", async () => {
+    const root = projectRoot();
+    const write = mutationTool(root, "project_write_file");
+    writeFileSync(join(root, "src", "large-existing.txt"), `${"old\n".repeat(2_700_001)}`, "utf-8");
+
+    const result = await write.execute({
+      toolCallId: "t-large-write",
+      args: { path: "src/large-existing.txt", content: "new\n", overwrite: true },
+    });
+
+    expect(result.details).toMatchObject({ truncation: { truncated: true, reason: "input" } });
+    expect(JSON.stringify(result.details)).toContain("diff omitted");
+  });
+
   it("lists deterministically with entry types", async () => {
     const root = projectRoot();
     const list = tool(root, "project_list_files");

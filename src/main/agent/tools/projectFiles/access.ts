@@ -1,4 +1,4 @@
-import { constants, promises as fs } from "fs";
+import { constants, promises as fs, type Stats } from "fs";
 import { basename, dirname, join, relative, resolve, sep } from "path";
 import { randomUUID } from "crypto";
 
@@ -7,6 +7,8 @@ export const MAX_ENTRIES = 1000;
 export const DEFAULT_MAX_LINES = 400;
 export const MAX_LINES = 2000;
 export const MAX_OUTPUT_CHARS = 32_000;
+export const MAX_MUTATION_DIFF_INPUT_BYTES = 10 * 1024 * 1024;
+const MUTATION_DIFF_READ_CHUNK_BYTES = 64 * 1024;
 
 export interface ProjectRoot {
   configuredPath: string;
@@ -19,10 +21,15 @@ export interface ProjectFileTarget {
   relativePath: string;
   canonicalKey: string;
   exists: boolean;
+  version?: string;
 }
 
 export function abortIfNeeded(signal?: AbortSignal) {
   if (signal?.aborted) throw new Error("Operation aborted");
+}
+
+export function fileVersion(stat: Stats): string {
+  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
 }
 
 export function boundedInteger(value: unknown, fallback: number, max: number, minimum = 1): number {
@@ -62,6 +69,7 @@ export async function resolveExistingFile(root: ProjectRoot, inputPath: string):
     relativePath: relativeProjectPath(root, absolutePath),
     canonicalKey: `${root.realPath}\u0000${absolutePath}`,
     exists: true,
+    version: fileVersion(stat),
   };
 }
 
@@ -73,6 +81,7 @@ export async function resolveMutationTarget(root: ProjectRoot, inputPath: string
   if (!isInside(root.realPath, parentRealPath)) throw new Error("Path is outside this Project's source roots.");
 
   let exists = false;
+  let version: string | undefined;
   let absolutePath = join(parentRealPath, basename(lexical));
   try {
     const lstat = await fs.lstat(absolutePath);
@@ -83,6 +92,7 @@ export async function resolveMutationTarget(root: ProjectRoot, inputPath: string
     const stat = await fs.stat(realPath);
     if (!stat.isFile()) throw new Error("Mutation target must be a regular file.");
     absolutePath = realPath;
+    version = fileVersion(stat);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
@@ -93,6 +103,7 @@ export async function resolveMutationTarget(root: ProjectRoot, inputPath: string
     relativePath: relativeProjectPath(root, absolutePath),
     canonicalKey: `${root.realPath}\u0000${absolutePath}`,
     exists,
+    version,
   };
 }
 
@@ -111,6 +122,44 @@ export function canonicalApprovalTarget(target: Pick<ProjectFileTarget, "root" |
 export function boundedPreview(value: string, limit = 160): { length: number; preview: string; truncated: boolean } {
   const limited = value.length > limit ? value.slice(0, limit) : value;
   return { length: value.length, preview: limited, truncated: limited.length < value.length };
+}
+
+export async function readBoundedUtf8(
+  targetPath: string,
+  maxBytes = MAX_MUTATION_DIFF_INPUT_BYTES,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  abortIfNeeded(signal);
+  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  try {
+    handle = await fs.open(targetPath, "r");
+    const stat = await handle.stat();
+    abortIfNeeded(signal);
+    if (!stat.isFile() || stat.size >= maxBytes) return null;
+
+    const buffer = Buffer.allocUnsafe(stat.size + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      abortIfNeeded(signal);
+      const length = Math.min(buffer.length - total, MUTATION_DIFF_READ_CHUNK_BYTES);
+      const { bytesRead } = await handle.read(buffer, total, length, null);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    abortIfNeeded(signal);
+    if (total !== stat.size || buffer.subarray(0, total).includes(0)) return null;
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, total));
+    } catch {
+      return null;
+    }
+  } catch (error) {
+    abortIfNeeded(signal);
+    if (error instanceof Error && "code" in error) return null;
+    throw error;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
 }
 
 export function boundedMutationDiff(before: string, after: string, path: string, maxChars = MAX_OUTPUT_CHARS): string {
