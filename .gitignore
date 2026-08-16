@@ -10,4 +10,5 @@ dist
 .context/
 .superpowers/
 .worktrees/
+docs/
 *.bak
