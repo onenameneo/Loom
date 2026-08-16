@@ -14,9 +14,30 @@ export interface Budget {
   withoutAncestors: number;
   withAncestors: number;
   estimated: boolean;
+  model?: { providerId: string; modelId: string };
+  contextWindowTokens?: number;
+  reserveOutputTokens?: number;
+  safeInputBudget?: number;
+  projectedInputTokens?: number;
+  fixedContextTokens?: number;
+  nodeLocalTailBudgetTokens?: number;
+  attachmentBudgetTokens?: number;
+  overflowTokens?: number;
+  status?: ContextBudgetStatus;
+  source?: TokenAccountingSource;
 }
 
 export type TokenAccountingSource = "exact" | "mixed" | "estimated";
+
+/** Model metadata needed by the final-request budget planner. */
+export interface ContextModelMetadata {
+  providerId: string;
+  modelId: string;
+  contextWindowTokens: number;
+  maxOutputTokens: number;
+  available?: boolean;
+  diagnostic?: string;
+}
 
 export interface TranscriptTokenAccounting {
   tokens: number;
@@ -61,6 +82,58 @@ export interface FinalRequestBudgetAllocation {
     checkpointSummaryAllowance: TokenDiagnosticInput;
   };
 }
+
+export interface ContextBudgetInput {
+  model?: ContextModelMetadata;
+  /** Optional application cap; the model's max output is always the upper bound. */
+  reserveOutputTokens?: number;
+  safetyMarginTokens?: number;
+  systemTokens: TokenDiagnosticInput;
+  toolTokens: TokenDiagnosticInput;
+  frozenBranchTokens: TokenDiagnosticInput;
+  seedTokens: TokenDiagnosticInput;
+  dynamicContextTokens?: TokenDiagnosticInput;
+  pendingUserInputTokens: TokenDiagnosticInput;
+  checkpointSummaryTokens: TokenDiagnosticInput;
+  /** The model-facing transcript, including any synthetic checkpoint/seed messages. */
+  projectedMessages: AgentMessage[];
+}
+
+export type ContextBudgetStatus =
+  | "ok"
+  | "needs-compaction"
+  | "fixed-context-overflow"
+  | "model-unavailable";
+
+export interface ContextBudgetAllocation {
+  status: ContextBudgetStatus;
+  model?: ContextModelMetadata;
+  safeInputBudget: number;
+  reserveOutputTokens: number;
+  safetyMarginTokens: number;
+  projectedInputTokens: number;
+  fixedContextTokens: number;
+  nodeLocalTailBudget: number;
+  attachmentBudgetTokens: number;
+  overflowTokens: number;
+  source: TokenAccountingSource;
+  exact: boolean;
+  transcript: TranscriptTokenAccounting;
+  parts: {
+    system: TokenDiagnosticInput;
+    tools: TokenDiagnosticInput;
+    frozenBranch: TokenDiagnosticInput;
+    seed: TokenDiagnosticInput;
+    dynamicContext: TokenDiagnosticInput;
+    pendingUserInput: TokenDiagnosticInput;
+    checkpointSummary: TokenDiagnosticInput;
+  };
+}
+
+export const DEFAULT_CONTEXT_SAFETY_MARGIN_TOKENS = 2_048;
+export const DEFAULT_MAX_RESERVED_OUTPUT_TOKENS = 16_000;
+export const DEFAULT_CONTEXT_ATTACHMENT_BUDGET_TOKENS = 12_000;
+export const DEFAULT_CONTEXT_ATTACHMENT_SUMMARY_RESERVE_TOKENS = 2_048;
 
 export function estTokens(chars: number): number {
   return Math.round(chars / 2);
@@ -137,6 +210,106 @@ export function allocateFinalRequestBudget(input: FinalRequestBudgetInput): Fina
   };
 }
 
+/**
+ * Allocate the final model request, including fixed context and a model-local
+ * recent tail. Provider usage is treated as the authoritative transcript
+ * baseline when available; otherwise the complete request is explicitly
+ * estimated.
+ */
+export function allocateContextBudget(input: ContextBudgetInput): ContextBudgetAllocation {
+  const model = input.model;
+  const safetyMarginTokens = nonNegative(input.safetyMarginTokens ?? DEFAULT_CONTEXT_SAFETY_MARGIN_TOKENS);
+  const parts = {
+    system: normalizeDiagnostic(input.systemTokens),
+    tools: normalizeDiagnostic(input.toolTokens),
+    frozenBranch: normalizeDiagnostic(input.frozenBranchTokens),
+    seed: normalizeDiagnostic(input.seedTokens),
+    dynamicContext: normalizeDiagnostic(input.dynamicContextTokens ?? { tokens: 0, exact: true }),
+    pendingUserInput: normalizeDiagnostic(input.pendingUserInputTokens),
+    checkpointSummary: normalizeDiagnostic(input.checkpointSummaryTokens),
+  };
+  const fixedContextTokens = Object.values(parts).reduce((sum, part) => sum + part.tokens, 0);
+  const transcript = accountTranscriptTokens(input.projectedMessages);
+  const fixedTranscriptTokens =
+    parts.frozenBranch.tokens +
+    parts.seed.tokens +
+    parts.pendingUserInput.tokens +
+    parts.checkpointSummary.tokens;
+  const source = combineSources(
+    transcript.source,
+    Object.values(parts).some((part) => !part.exact) ? "estimated" : "exact",
+  );
+
+  if (!model || model.available === false || !validPositive(model.contextWindowTokens) || !validPositive(model.maxOutputTokens)) {
+    return {
+      status: "model-unavailable",
+      model,
+      safeInputBudget: 0,
+      reserveOutputTokens: 0,
+      safetyMarginTokens,
+      projectedInputTokens: fixedContextTokens + transcript.tokens,
+      fixedContextTokens,
+      nodeLocalTailBudget: 0,
+      attachmentBudgetTokens: 0,
+      overflowTokens: 0,
+      source,
+      exact: false,
+      transcript,
+      parts,
+    };
+  }
+
+  const reserveOutputTokens = Math.min(
+    model.maxOutputTokens,
+    nonNegative(input.reserveOutputTokens ?? DEFAULT_MAX_RESERVED_OUTPUT_TOKENS),
+  );
+  const safeInputBudget = Math.max(0, Math.round(model.contextWindowTokens) - reserveOutputTokens);
+  const overflowTokens = Math.max(0, fixedContextTokens - safeInputBudget);
+  const nodeLocalTailBudget = Math.max(0, safeInputBudget - fixedContextTokens);
+  // Attachments belong to the next checkpoint projection, not to the current
+  // source tail. Reserve summary space and derive a separate allowance from
+  // model capacity plus static context only.
+  const fixedContextWithoutCheckpoint =
+    parts.system.tokens +
+    parts.tools.tokens +
+    parts.frozenBranch.tokens +
+    parts.seed.tokens +
+    parts.dynamicContext.tokens +
+    parts.pendingUserInput.tokens;
+  const attachmentBudgetTokens = Math.min(
+    DEFAULT_CONTEXT_ATTACHMENT_BUDGET_TOKENS,
+    Math.max(0, safeInputBudget - fixedContextWithoutCheckpoint - DEFAULT_CONTEXT_ATTACHMENT_SUMMARY_RESERVE_TOKENS),
+  );
+  // A provider total may already include system/tools. Avoid double-counting
+  // those fixed parts when a valid usage baseline is available.
+  const estimatedLocalTranscriptTokens = Math.max(0, transcript.tokens - fixedTranscriptTokens);
+  const projectedInputTokens = transcript.providerTokens > 0
+    ? Math.max(fixedContextTokens, transcript.tokens)
+    : fixedContextTokens + estimatedLocalTranscriptTokens;
+  const status: ContextBudgetStatus = overflowTokens > 0
+    ? "fixed-context-overflow"
+    : projectedInputTokens >= Math.max(0, safeInputBudget - safetyMarginTokens)
+      ? "needs-compaction"
+      : "ok";
+
+  return {
+    status,
+    model,
+    safeInputBudget,
+    reserveOutputTokens,
+    safetyMarginTokens,
+    projectedInputTokens,
+    fixedContextTokens,
+    nodeLocalTailBudget,
+    attachmentBudgetTokens,
+    overflowTokens,
+    source,
+    exact: source === "exact",
+    transcript,
+    parts,
+  };
+}
+
 /** 本节点自身内容字符数（seed + 各消息文本）。 */
 export function ownChars(node: Pick<CanvasNodeModel, "seed" | "messages">): number {
   let c = node.seed ? node.seed.text.length : 0;
@@ -157,6 +330,16 @@ export function budget(node: Pick<CanvasNodeModel, "seed" | "messages">, ancesto
 
 function normalizeDiagnostic(input: TokenDiagnosticInput): TokenDiagnosticInput {
   return { tokens: nonNegative(input.tokens), exact: Boolean(input.exact) };
+}
+
+function combineSources(left: TokenAccountingSource, right: TokenAccountingSource): TokenAccountingSource {
+  if (left === "estimated" || right === "estimated") return "estimated";
+  if (left === "mixed" || right === "mixed") return "mixed";
+  return "exact";
+}
+
+function validPositive(value: number): boolean {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 function nonNegative(value: number): number {

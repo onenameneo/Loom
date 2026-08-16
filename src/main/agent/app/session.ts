@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { NodeLayout, NodeRecord, PersistedMessage } from "../../store/store";
@@ -5,8 +6,24 @@ import type { StoredModelSelection } from "../../modelConfig/modelRef";
 import { isThinkingLevel, type ThinkingLevel } from "../../modelConfig/thinkingLevels";
 import { saveNodeLayout, saveNodeLayouts } from "../../store/layoutPersistence";
 import { ancestorChain, descendants, type Seed } from "../core/graph";
-import { buildContextPlan, isLlmMessage, roleOf, textOf, thinkingOf, type FrozenNodeContext } from "../core/context";
-import { estTokens, estimateMessageTokensUnbounded, type Budget } from "../core/budget";
+import { buildContextPlan, checkpointAttachmentMessages, checkpointContextMessage, isLlmMessage, roleOf, seedMessage, textOf, thinkingOf, type FrozenNodeContext } from "../core/context";
+import {
+  DEFAULT_POST_COMPACTION_ATTACHMENT_BUDGET_TOKENS,
+  collectProjectFileAttachmentCandidates,
+  collectSkillAttachmentCandidates,
+  collectToolResultReferenceCandidates,
+  type LoomContextAttachmentCandidate,
+} from "../core/attachments";
+import {
+  accountTranscriptTokens,
+  allocateContextBudget,
+  estTokens,
+  estimateMessageTokensUnbounded,
+  type Budget,
+  type ContextBudgetAllocation,
+  type ContextModelMetadata,
+  type TokenDiagnosticInput,
+} from "../core/budget";
 import {
   applyToolResultBudget,
   createToolResultBudgetState,
@@ -111,12 +128,14 @@ export interface CanvasRuntimeDeps {
   command?: CommandPort;
   /** Electron app.getPath("userData"). Used for session-local tool result sidecars. */
   userDataDir?: string;
+  /** Resolves the final selected model and its context capabilities for a node. */
+  resolveContextModel?: (nodeId: string, selection?: StoredModelSelection) => Promise<ContextModelMetadata>;
   compaction?: {
     summarize: CompactionServiceDeps["summarize"];
-    thresholdTokens?: number;
     tailBudgetTokens?: number;
     manualTailBudgetTokens?: number;
     maxSummaryOutputTokens?: number;
+    attachmentBudgetTokens?: number;
   };
   toolResultMicroCompact?: {
     enabled?: boolean;
@@ -181,7 +200,6 @@ interface CanvasMessageDto {
 
 const NO_KEY_ERROR = "未配置 API key（去设置填写，或设置 ANTHROPIC_API_KEY）。";
 const DEFAULT_SYSTEM_PROMPT = "你是一个冷静、精确、克制的思考助手。回答直接，不啰嗦。";
-const DEFAULT_COMPACTION_THRESHOLD_TOKENS = 32_000;
 const DEFAULT_COMPACTION_TAIL_BUDGET_TOKENS = 12_000;
 const DEFAULT_MANUAL_COMPACTION_TAIL_BUDGET_TOKENS = 6_000;
 const TOOL_RESULT_BUDGET_OPT_OUT_TOOLS = new Set(["project_read_file", "skill_read"]);
@@ -355,22 +373,80 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return { ...effective, skills: [...byId.values()] };
   }
 
-  function budgetOf(nodeId: string): Budget {
+  function tokenDiagnostic(messages: AgentMessage[]): TokenDiagnosticInput {
+    if (messages.length === 0) return { tokens: 0, exact: true };
+    const accounting = accountTranscriptTokens(messages);
+    return { tokens: accounting.tokens, exact: accounting.exact };
+  }
+
+  async function contextBudgetOf(nodeId: string, pendingUserInput?: AgentMessage): Promise<ContextBudgetAllocation | undefined> {
     const node = loadNode(nodeId);
-    if (!node) return { withoutAncestors: 0, withAncestors: 0, estimated: true };
-    const projectedTokens = (messages: Message[]) => estTokens(messages.reduce((sum, msg) => sum + textOf(msg as AgentMessage).length, 0));
+    if (!node || !deps.resolveContextModel) return undefined;
+    const model = await deps.resolveContextModel(nodeId, node.model);
     const skillIndex = compileAvailableSkillsIndex(catalogFor(nodeId).skills);
     const systemPrompt = [node.systemPrompt || DEFAULT_SYSTEM_PROMPT, skillIndex].filter(Boolean).join("\n\n");
-    const systemTokens = estTokens(systemPrompt.length);
-    const toolTokens = estTokens(JSON.stringify(toolsFor(nodeId).map((tool) => ({
+    const tools = toolsFor(nodeId);
+    const toolText = JSON.stringify(tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
       parameters: tool.parameters,
-    }))).length);
-    const fixedTokens = systemTokens + toolTokens;
-    // Budget diagnostics intentionally estimate the checkpoint-projected transcript before lossy tool-result projections.
-    const projected = fixedTokens + projectedTokens(buildContextPlan(node, node.messages, clock.now()));
-    return { withoutAncestors: projected, withAncestors: projected, estimated: true };
+    })));
+    const checkpoint = latestValidCheckpoint(node);
+    const uncoveredCheckpointMessages = checkpoint
+      ? node.messages.slice(checkpoint.coverage.toSeq + 1)
+      : [];
+    const projectedMessages = buildContextPlan(node, node.messages, clock.now());
+    if (pendingUserInput) projectedMessages.push(pendingUserInput as Message);
+    return allocateContextBudget({
+      model,
+      systemTokens: { tokens: estTokens(systemPrompt.length), exact: false },
+      toolTokens: { tokens: estTokens(toolText.length), exact: false },
+      frozenBranchTokens: tokenDiagnostic(node.frozenContext?.messages ?? []),
+      seedTokens: node.seed ? tokenDiagnostic([seedMessage(node.seed, clock.now())]) : { tokens: 0, exact: true },
+      pendingUserInputTokens: pendingUserInput ? tokenDiagnostic([pendingUserInput]) : { tokens: 0, exact: true },
+      checkpointSummaryTokens: checkpoint
+        ? tokenDiagnostic([
+            checkpointContextMessage(checkpoint, clock.now()),
+            ...checkpointAttachmentMessages(checkpoint, uncoveredCheckpointMessages, clock.now()),
+          ])
+        : { tokens: 0, exact: true },
+      projectedMessages,
+    });
+  }
+
+  async function budgetOf(nodeId: string): Promise<Budget> {
+    const node = loadNode(nodeId);
+    if (!node) return { withoutAncestors: 0, withAncestors: 0, estimated: true };
+    const contextBudget = await contextBudgetOf(nodeId);
+    if (!contextBudget) {
+      const projectedTokens = (messages: Message[]) => estTokens(messages.reduce((sum, msg) => sum + textOf(msg as AgentMessage).length, 0));
+      const skillIndex = compileAvailableSkillsIndex(catalogFor(nodeId).skills);
+      const systemPrompt = [node.systemPrompt || DEFAULT_SYSTEM_PROMPT, skillIndex].filter(Boolean).join("\n\n");
+      const systemTokens = estTokens(systemPrompt.length);
+      const toolTokens = estTokens(JSON.stringify(toolsFor(nodeId).map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      }))).length);
+      const projected = systemTokens + toolTokens + projectedTokens(buildContextPlan(node, node.messages, clock.now()));
+      return { withoutAncestors: projected, withAncestors: projected, estimated: true };
+    }
+    return {
+      withoutAncestors: contextBudget.projectedInputTokens,
+      withAncestors: contextBudget.projectedInputTokens,
+      estimated: contextBudget.source !== "exact",
+      model: contextBudget.model ? { providerId: contextBudget.model.providerId, modelId: contextBudget.model.modelId } : undefined,
+      contextWindowTokens: contextBudget.model?.contextWindowTokens,
+      reserveOutputTokens: contextBudget.reserveOutputTokens,
+      safeInputBudget: contextBudget.safeInputBudget,
+      projectedInputTokens: contextBudget.projectedInputTokens,
+      fixedContextTokens: contextBudget.fixedContextTokens,
+      nodeLocalTailBudgetTokens: contextBudget.nodeLocalTailBudget,
+      attachmentBudgetTokens: contextBudget.attachmentBudgetTokens,
+      overflowTokens: contextBudget.overflowTokens,
+      status: contextBudget.status,
+      source: contextBudget.source,
+    };
   }
 
   function toolResultBudgetStateFor(nodeId: string): ToolResultBudgetState {
@@ -737,6 +813,21 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return node.messages.filter(isLlmMessage) as AgentMessage[];
   }
 
+  function attachmentCandidatesFor(node: CanvasNode, messages: AgentMessage[]): LoomContextAttachmentCandidate[] {
+    const candidates = [
+      ...collectProjectFileAttachmentCandidates(messages),
+      ...collectSkillAttachmentCandidates(effectiveSkillsFor(node.id).skills),
+    ];
+    if (!deps.userDataDir) return candidates;
+    return [
+      ...candidates,
+      ...collectToolResultReferenceCandidates(messages, (message) => {
+        const path = toolResultSidecarPathForMessage(deps.userDataDir!, node.sessionId, message as any);
+        return existsSync(path) ? path : undefined;
+      }),
+    ];
+  }
+
   function latestValidCheckpoint(node: CanvasNode) {
     for (let i = node.messages.length - 1; i >= 0; i--) {
       const msg = node.messages[i];
@@ -747,12 +838,6 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return undefined;
   }
 
-  function shouldCompact(node: CanvasNode): boolean {
-    if (!compaction) return false;
-    const tokens = compactableTail(node).reduce((sum, msg) => sum + estimateMessageTokensUnbounded(msg), 0);
-    return tokens >= (deps.compaction?.thresholdTokens ?? DEFAULT_COMPACTION_THRESHOLD_TOKENS);
-  }
-
   function hasValidCheckpoint(node: CanvasNode): boolean {
     return node.messages.some((msg) => isLoomContextCheckpoint(msg) && msg.invalidatedAt === undefined);
   }
@@ -760,25 +845,50 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   async function maybeCompactNode(
     node: CanvasNode,
     trigger: "threshold" | "manual" | "overflow",
-    options: { turnId?: string; signal?: AbortSignal; handle?: EngineHandle } = {},
+    options: { turnId?: string; signal?: AbortSignal; handle?: EngineHandle; pendingUserInput?: AgentMessage } = {},
   ): Promise<CompactNodeResult> {
-    if (!compaction || (trigger === "threshold" && !shouldCompact(node))) return { ok: false, reason: "not_needed" };
+    if (!compaction) return { ok: false, reason: "not_needed" };
+    const contextBudget = await contextBudgetOf(node.id, options.pendingUserInput);
+    if (contextBudget?.status === "model-unavailable") {
+      const error = contextBudget.model?.diagnostic || "Model context metadata is unavailable.";
+      events.emit(node.id, "compaction", { state: "failed", trigger, at: clock.now(), reason: "model-unavailable", error });
+      return { ok: false, reason: "unavailable", error };
+    }
+    if (contextBudget?.status === "fixed-context-overflow") {
+      const error = "Fixed context exceeds the selected model input budget.";
+      events.emit(node.id, "compaction", { state: "failed", trigger, at: clock.now(), reason: "fixed-context-overflow", error });
+      return { ok: false, reason: "fixed_context_overflow", error };
+    }
+    if (trigger === "threshold" && contextBudget?.status !== "needs-compaction") {
+      return { ok: false, reason: "not_needed" };
+    }
     const previousCheckpoint = latestValidCheckpoint(node);
     const sourceOffset = previousCheckpoint
       ? node.messages.findIndex((msg, index) => index > previousCheckpoint.coverage.toSeq && isLlmMessage(msg))
       : 0;
+    const compactableMessages = compactableTail(node);
     const result = await compaction.compactNode({
       nodeId: node.id,
       turnId: options.turnId,
       trigger,
-      messages: compactableTail(node),
+      messages: compactableMessages,
       sourceOffset: sourceOffset < 0 ? node.messages.length : sourceOffset,
       previousCheckpoint,
+      model: contextBudget?.model,
+      budget: contextBudget,
       tailBudgetTokens: trigger === "manual"
-        ? deps.compaction?.manualTailBudgetTokens ?? DEFAULT_MANUAL_COMPACTION_TAIL_BUDGET_TOKENS
-        : deps.compaction?.tailBudgetTokens ?? DEFAULT_COMPACTION_TAIL_BUDGET_TOKENS,
+        ? Math.min(
+            contextBudget?.nodeLocalTailBudget ?? Number.POSITIVE_INFINITY,
+            deps.compaction?.manualTailBudgetTokens ?? DEFAULT_MANUAL_COMPACTION_TAIL_BUDGET_TOKENS,
+          )
+        : contextBudget?.nodeLocalTailBudget ?? deps.compaction?.tailBudgetTokens ?? DEFAULT_COMPACTION_TAIL_BUDGET_TOKENS,
       signal: options.signal,
       maxSummaryOutputTokens: deps.compaction?.maxSummaryOutputTokens,
+      attachmentCandidates: attachmentCandidatesFor(node, compactableMessages),
+      attachmentBudgetTokens: Math.min(
+        contextBudget?.attachmentBudgetTokens ?? DEFAULT_POST_COMPACTION_ATTACHMENT_BUDGET_TOKENS,
+        deps.compaction?.attachmentBudgetTokens ?? DEFAULT_POST_COMPACTION_ATTACHMENT_BUDGET_TOKENS,
+      ),
     });
     if (!result.ok) return result;
     const { checkpoint } = result;
@@ -881,7 +991,6 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
         startLiveTurn(arg.nodeId, turn);
       },
       prepare: async (handle) => {
-        await maybeCompactNode(node, "threshold", { turnId: activeTurn?.turnId, signal: activeTurn?.signal, handle });
         runtime.transition(arg.nodeId, (r) => ({
           pendingSkillIds: [...new Set((arg.skillIds ?? []).map((id) => id.trim()).filter(Boolean))],
         }));
@@ -895,6 +1004,12 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
               ]
             : text;
         const userMessage: AgentMessage = { role: "user", content, timestamp: clock.now() };
+        await maybeCompactNode(node, "threshold", {
+          turnId: activeTurn?.turnId,
+          signal: activeTurn?.signal,
+          handle,
+          pendingUserInput: userMessage,
+        });
         store.appendMessages(arg.nodeId, [persisted(userMessage)]);
         node.messages.push(userMessage);
         node.messageMeta.push(undefined);
@@ -1121,7 +1236,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     for (const session of store.listSessions(projectId)) disposeSession(session.id);
   }
 
-  function budget(nodeId: string) {
+  async function budget(nodeId: string) {
     return budgetOf(nodeId);
   }
 

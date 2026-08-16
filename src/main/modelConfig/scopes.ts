@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { globalSettingsPath } from "./paths";
 import type { ModelDiagnostic, ModelRef, RegistryModel } from "./types";
 import type { ModelRegistry } from "./registry";
+import { migrateLegacyModelRef, parseStoredModelRef, type StoredModelSelection } from "./modelRef";
 
 type JsonObject = Record<string, unknown>;
 
@@ -181,4 +182,38 @@ export function resolveSelectedModel(input: {
     source: "fallback",
     diagnostic: { code: "no-available-model", message: "No structurally available model is configured." },
   };
+}
+
+/** Resolve persisted node selections and legacy model IDs using the same precedence as the engine. */
+export function resolveStoredModelSelection(input: {
+  registry: ModelRegistry;
+  scoped: LoadedScopedModelSettings;
+  explicit?: StoredModelSelection;
+}): ResolvedSelection {
+  const parsed = parseStoredModelRef(input.explicit);
+  if (parsed.kind === "invalid") {
+    return {
+      ref: { providerId: "", modelId: "" },
+      available: false,
+      source: "explicit",
+      diagnostic: parsed.diagnostic,
+    };
+  }
+  if (parsed.kind === "legacy") {
+    const migrated = migrateLegacyModelRef(parsed.legacyModel, input.registry);
+    if (migrated.kind === "unresolved") {
+      return {
+        ref: { providerId: "", modelId: migrated.legacyModel },
+        available: false,
+        source: "explicit",
+        diagnostic: migrated.diagnostic,
+      };
+    }
+    return resolveSelectedModel({ ...input, explicit: migrated.ref });
+  }
+  return resolveSelectedModel({
+    registry: input.registry,
+    scoped: input.scoped,
+    explicit: parsed.kind === "ref" ? parsed.ref : undefined,
+  });
 }

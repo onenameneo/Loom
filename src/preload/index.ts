@@ -91,7 +91,21 @@ const api = {
     setThinkingLevel: (nodeId: string, thinkingLevel: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("node:setThinkingLevel", { nodeId, thinkingLevel }),
     models: (): Promise<{ id: string; name: string }[]> => ipcRenderer.invoke("node:models"),
-    budget: (nodeId: string): Promise<{ withoutAncestors: number; withAncestors: number; estimated: boolean }> =>
+    budget: (nodeId: string): Promise<{
+      withoutAncestors: number;
+      withAncestors: number;
+      estimated: boolean;
+      model?: { providerId: string; modelId: string };
+      contextWindowTokens?: number;
+      reserveOutputTokens?: number;
+      safeInputBudget?: number;
+      projectedInputTokens?: number;
+      fixedContextTokens?: number;
+      nodeLocalTailBudgetTokens?: number;
+      overflowTokens?: number;
+      status?: "ok" | "needs-compaction" | "fixed-context-overflow" | "model-unavailable";
+      source?: "exact" | "mixed" | "estimated";
+    }> =>
       ipcRenderer.invoke("node:budget", nodeId),
     trace: (nodeId: string): Promise<any> => ipcRenderer.invoke("node:trace", nodeId),
     onTrace: (listener: (snapshot: any) => void): (() => void) => {

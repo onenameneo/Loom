@@ -15,7 +15,8 @@ import type { StoredModelSelection } from "./modelConfig/modelRef";
 import type { ThinkingLevel } from "./modelConfig/thinkingLevels";
 import { ModelRegistry } from "./modelConfig/registry";
 import { createRuntimeModelsFromRegistry } from "./modelConfig/runtimeModels";
-import { loadScopedModelSettings, resolveSelectedModel } from "./modelConfig/scopes";
+import { loadScopedModelSettings, resolveStoredModelSelection } from "./modelConfig/scopes";
+import type { ContextModelMetadata } from "./agent/core/budget";
 
 // ---------------------------------------------------------------------------
 // 画布引擎接线（主进程）：组装洋葱四圈 + 把 node:* IPC 绑定到 ② runtime。
@@ -36,11 +37,23 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   const clock = systemClock;
   const ids = createIds(clock);
   const summarizer = createRuntimeSummarizer({
-    resolveModel: () => ({ model: resolveModelConfig(store).model }),
-    streamSummary: async (_summaryModel, messages, options) => {
+    resolveModel: async (selection) => ({
+      providerId: selection?.providerId,
+      modelId: selection?.modelId,
+      model: selection?.modelId || resolveModelConfig(store).model,
+      contextWindowTokens: selection?.contextWindowTokens,
+      maxOutputTokens: selection?.maxOutputTokens,
+    }),
+    streamSummary: async (summaryModel, messages, options) => {
       const registry = await ModelRegistry.load();
       const scoped = loadScopedModelSettings({});
-      const selected = resolveSelectedModel({ registry, scoped });
+      const selected = resolveStoredModelSelection({
+        registry,
+        scoped,
+        explicit: summaryModel.providerId && summaryModel.modelId
+          ? { providerId: summaryModel.providerId, modelId: summaryModel.modelId }
+          : undefined,
+      });
       if (!selected.model || !selected.available) throw new Error(selected.diagnostic?.message || "Summary model is unavailable.");
       const models = await createRuntimeModelsFromRegistry(registry);
       const model = models.getModel(selected.ref.providerId, selected.ref.modelId);
@@ -62,6 +75,23 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     userDataDir: opts.userDataDir,
     compaction: {
       summarize: (input, options) => summarizer.summarize(input, options),
+    },
+    resolveContextModel: async (nodeId, selection) => {
+      const registry = await ModelRegistry.load();
+      const node = store.getNode(nodeId);
+      const projectRoot = node
+        ? store.listProjects().find((project) => project.id === node.projectId)?.sourceRoots[0]
+        : undefined;
+      const scoped = loadScopedModelSettings({ projectRoot });
+      const selected = resolveStoredModelSelection({ registry, scoped, explicit: selection });
+      return {
+        providerId: selected.ref.providerId,
+        modelId: selected.ref.modelId,
+        contextWindowTokens: selected.model?.capabilities.contextWindow ?? 0,
+        maxOutputTokens: selected.model?.capabilities.maxOutputTokens ?? 0,
+        available: selected.available,
+        diagnostic: selected.diagnostic?.message,
+      } satisfies ContextModelMetadata;
     },
     titleGenerator,
     // 注入 pi 引擎工厂：session 只认端口，pi 收敛在适配器。

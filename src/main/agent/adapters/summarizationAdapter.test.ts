@@ -9,6 +9,25 @@ function streamResult(result: unknown) {
 }
 
 describe("createRuntimeSummarizer", () => {
+  it("passes the active node model metadata to the summary resolver", async () => {
+    const resolveModel = vi.fn(() => ({ model: "gpt-summary" }));
+    const summarizer = createRuntimeSummarizer({
+      resolveModel,
+      streamSummary: vi.fn(async () => streamResult({ text: "summary" })),
+      maxAttempts: 1,
+    });
+
+    await summarizer.summarize({
+      systemPrompt: "Summarize.",
+      transcript: { range: { fromSeq: 0, toSeq: 0 }, items: [], toolActivity: [], truncated: false },
+    }, {
+      maxOutputTokens: 128,
+      model: { providerId: "local", modelId: "llama", contextWindowTokens: 8192, maxOutputTokens: 2048 },
+    });
+
+    expect(resolveModel).toHaveBeenCalledWith(expect.objectContaining({ providerId: "local", modelId: "llama" }));
+  });
+
   it("uses configured credentials, bounded output, abort signal, and returns exact usage when available", async () => {
     const signal = new AbortController().signal;
     const getApiKey = vi.fn(async () => "secret");

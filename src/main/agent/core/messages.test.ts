@@ -9,6 +9,7 @@ import {
   isLoomSplitTurnContext,
   serializeLoomDerivedMessage,
 } from "./messages";
+import type { LoomContextAttachment } from "./attachments";
 
 describe("Loom derived context messages", () => {
   it("round-trips versioned context checkpoints through serialization", () => {
@@ -31,6 +32,34 @@ describe("Loom derived context messages", () => {
 
     expect(isLoomContextCheckpoint(serialized)).toBe(true);
     expect(serialized).toMatchObject({ role: "loomContextCheckpoint", version: 1, nodeId: "n1" });
+  });
+
+  it("accepts optional attachments and remains compatible with unknown future kinds", () => {
+    const attachment: LoomContextAttachment = {
+      version: 1,
+      kind: "file-context",
+      id: "file:src/app.ts:2",
+      source: { identity: "file:src/app.ts:2", path: "src/app.ts", version: "v2" },
+      text: "const answer = 42;",
+      tokens: { tokens: 5, exact: false },
+    };
+    const checkpoint = createLoomContextCheckpoint({
+      id: "cp-attachments",
+      nodeId: "n1",
+      createdAt: 100,
+      reason: "manual",
+      summary: "summary",
+      coverage: { fromSeq: 0, toSeq: 2 },
+      retainedTail: { fromSeq: 3, toSeq: 3 },
+      diagnostics: {
+        before: { tokens: 10, exact: false },
+        after: { tokens: 8, exact: false },
+        attachments: { selectedCount: 1, omittedCount: 0, tokens: 5, source: "estimated" },
+      },
+      attachments: [attachment, { ...attachment, id: "future", kind: "future-kind" as never }],
+    });
+
+    expect(isLoomContextCheckpoint(serializeLoomDerivedMessage(checkpoint as AgentMessage))).toBe(true);
   });
 
   it("accepts split-turn context and immutable frozen branch summaries", () => {

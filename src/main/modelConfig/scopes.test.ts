@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ModelRegistry } from "./registry";
-import { loadScopedModelSettings, resolveSelectedModel } from "./scopes";
+import { loadScopedModelSettings, resolveSelectedModel, resolveStoredModelSelection } from "./scopes";
 
 const tempDirs: string[] = [];
 
@@ -113,5 +113,27 @@ describe("model configuration scopes", () => {
     expect(selected.ref).toEqual({ providerId: "missing", modelId: "gone" });
     expect(selected.available).toBe(false);
     expect(selected.diagnostic?.code).toBe("unknown-model");
+  });
+
+  it("resolves legacy stored selections before applying normal scope precedence", async () => {
+    const home = await tempRoot("loom-home-");
+    process.env.LOOM_PROVIDER_KEY = "secret";
+    writeJson(join(home, ".loom", "agent", "models.json"), {
+      providers: {
+        local: {
+          baseUrl: "http://localhost:11434/v1",
+          apiKey: "local",
+          models: { llama: { api: "openai-completions", contextWindow: 8192, maxTokens: 2048 } },
+        },
+      },
+    });
+    const registry = await ModelRegistry.load({ homeDir: home });
+    const scoped = loadScopedModelSettings({ homeDir: home });
+
+    const selected = resolveStoredModelSelection({ registry, scoped, explicit: "llama" });
+
+    expect(selected.ref).toEqual({ providerId: "local", modelId: "llama" });
+    expect(selected.model?.capabilities.contextWindow).toBe(8192);
+    expect(selected.model?.capabilities.maxOutputTokens).toBe(2048);
   });
 });

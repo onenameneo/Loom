@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import type { LoomSkillEvent } from "../skills/types";
+import type { LoomContextAttachment } from "./attachments";
 
 // ---------------------------------------------------------------------------
 // ① 领域核心 · Loom 业务消息（"材料"）。
@@ -33,6 +34,21 @@ export interface LoomTokenDiagnostic {
 export interface LoomBudgetDiagnostics {
   before: LoomTokenDiagnostic;
   after: LoomTokenDiagnostic;
+  model?: { providerId: string; modelId: string };
+  contextWindowTokens?: number;
+  reserveOutputTokens?: number;
+  projectedInputTokens?: number;
+  fixedContextTokens?: number;
+  nodeLocalTailBudgetTokens?: number;
+  attachmentBudgetTokens?: number;
+  overflowTokens?: number;
+  accountingSource?: "exact" | "mixed" | "estimated";
+  attachments?: {
+    selectedCount: number;
+    omittedCount: number;
+    tokens: number;
+    source: "exact" | "mixed" | "estimated";
+  };
 }
 
 export interface LoomUsageDiagnostic {
@@ -54,6 +70,7 @@ export interface LoomContextCheckpointMessage {
   retainedTail: LoomSourceRange;
   diagnostics: LoomBudgetDiagnostics;
   summaryUsage?: LoomUsageDiagnostic;
+  attachments?: LoomContextAttachment[];
   invalidatedAt?: number;
 }
 
@@ -138,6 +155,7 @@ export function isLoomContextCheckpoint(msg: AgentMessage | unknown): msg is Loo
     isRange(value.retainedTail) &&
     isBudgetDiagnostics(value.diagnostics) &&
     (value.summaryUsage === undefined || isUsageDiagnostic(value.summaryUsage)) &&
+    (value.attachments === undefined || (Array.isArray(value.attachments) && value.attachments.every(isAttachment))) &&
     (value.invalidatedAt === undefined || isFiniteNumber(value.invalidatedAt))
   );
 }
@@ -207,7 +225,27 @@ function isTokenDiagnostic(value: unknown): value is LoomTokenDiagnostic {
 
 function isBudgetDiagnostics(value: unknown): value is LoomBudgetDiagnostics {
   const diagnostics = asRecord(value);
-  return Boolean(diagnostics && isTokenDiagnostic(diagnostics.before) && isTokenDiagnostic(diagnostics.after));
+  const attachments = asRecord(diagnostics?.attachments);
+  return Boolean(
+    diagnostics && isTokenDiagnostic(diagnostics.before) && isTokenDiagnostic(diagnostics.after) &&
+    (diagnostics.attachments === undefined || Boolean(
+      attachments && isFiniteNumber(attachments.selectedCount) && attachments.selectedCount >= 0 &&
+      isFiniteNumber(attachments.omittedCount) && attachments.omittedCount >= 0 &&
+      isFiniteNumber(attachments.tokens) && attachments.tokens >= 0 &&
+      (attachments.source === "exact" || attachments.source === "mixed" || attachments.source === "estimated"),
+    )),
+  );
+}
+
+function isAttachment(value: unknown): value is LoomContextAttachment {
+  const attachment = asRecord(value);
+  const source = asRecord(attachment?.source);
+  const tokens = asRecord(attachment?.tokens);
+  return Boolean(
+    attachment && attachment.version === 1 && isNonEmptyString(attachment.id) && typeof attachment.kind === "string" &&
+    typeof attachment.text === "string" && source && isNonEmptyString(source.identity) && tokens &&
+    isFiniteNumber(tokens.tokens) && tokens.tokens >= 0 && typeof tokens.exact === "boolean",
+  );
 }
 
 function isUsageDiagnostic(value: unknown): value is LoomUsageDiagnostic {

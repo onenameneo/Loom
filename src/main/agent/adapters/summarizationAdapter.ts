@@ -1,15 +1,19 @@
 import type { Message } from "@earendil-works/pi-ai";
 import type { CheckpointSummaryInput } from "../core/compaction";
+import type { ContextModelMetadata } from "../core/budget";
 import type { CompactionSummaryResult } from "../app/compactionService";
 
 export interface RuntimeSummaryModel {
   providerId?: string;
+  modelId?: string;
   model: unknown;
   apiKey?: () => Promise<string> | string;
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
 }
 
 export interface RuntimeSummarizerDeps {
-  resolveModel(): RuntimeSummaryModel;
+  resolveModel?(selection?: ContextModelMetadata): RuntimeSummaryModel | Promise<RuntimeSummaryModel>;
   streamSummary(
     model: RuntimeSummaryModel,
     messages: Message[],
@@ -19,7 +23,7 @@ export interface RuntimeSummarizerDeps {
 }
 
 export interface RuntimeSummarizer {
-  summarize(input: CheckpointSummaryInput, options: { signal?: AbortSignal; maxOutputTokens: number }): Promise<CompactionSummaryResult>;
+  summarize(input: CheckpointSummaryInput, options: { signal?: AbortSignal; maxOutputTokens: number; model?: ContextModelMetadata }): Promise<CompactionSummaryResult>;
 }
 
 export function createRuntimeSummarizer(deps: RuntimeSummarizerDeps): RuntimeSummarizer {
@@ -30,7 +34,8 @@ export function createRuntimeSummarizer(deps: RuntimeSummarizerDeps): RuntimeSum
       let lastError: unknown;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          const model = deps.resolveModel();
+          if (!deps.resolveModel) throw new Error("Summary model resolver is unavailable.");
+          const model = await deps.resolveModel(options.model);
           const apiKey = model.apiKey ? await model.apiKey() : undefined;
           const stream = await deps.streamSummary(model, summaryMessages(input), {
             maxOutputTokens: options.maxOutputTokens,

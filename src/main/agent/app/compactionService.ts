@@ -1,6 +1,14 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { IdPort, ClockPort, EventSinkPort, StorePort } from "../ports";
-import { estimateMessageTokensUnbounded, estTokens } from "../core/budget";
+import {
+  DEFAULT_POST_COMPACTION_ATTACHMENT_BUDGET_TOKENS,
+  DEFAULT_POST_COMPACTION_ATTACHMENT_ITEM_TOKENS,
+  planContextAttachments,
+  syntheticAttachmentTokenDiagnostic,
+  type LoomContextAttachmentCandidate,
+  type AttachmentPlan,
+} from "../core/attachments";
+import { estimateMessageTokensUnbounded, estTokens, type ContextBudgetAllocation, type ContextModelMetadata } from "../core/budget";
 import {
   buildCheckpointSummaryInput,
   planTurnSafeCut,
@@ -22,7 +30,7 @@ export interface CompactionSummaryResult {
 export interface CompactionServiceDeps {
   summarize(
     input: CheckpointSummaryInput,
-    options: { signal?: AbortSignal; maxOutputTokens: number },
+    options: { signal?: AbortSignal; maxOutputTokens: number; model?: ContextModelMetadata },
   ): Promise<CompactionSummaryResult>;
   store: Pick<StorePort, "appendMessages">;
   clock: ClockPort;
@@ -51,6 +59,10 @@ export interface PlanNodeCompactionInput {
   /** Original node transcript offset for a checkpoint-uncovered tail. */
   sourceOffset?: number;
   previousCheckpoint?: LoomContextCheckpointMessage;
+  model?: ContextModelMetadata;
+  budget?: ContextBudgetAllocation;
+  attachmentCandidates?: LoomContextAttachmentCandidate[];
+  attachmentBudgetTokens?: number;
 }
 
 export interface CompactNodeInput extends PlanNodeCompactionInput {
@@ -60,7 +72,7 @@ export interface CompactNodeInput extends PlanNodeCompactionInput {
 
 export type CompactNodeResult =
   | { ok: true; checkpoint: LoomContextCheckpointMessage }
-  | { ok: false; reason: "not_needed" | "aborted" | "empty_summary" | "failed"; error?: string };
+  | { ok: false; reason: "not_needed" | "aborted" | "empty_summary" | "failed" | "unavailable" | "fixed_context_overflow"; error?: string };
 
 export interface CompactionService {
   planNodeCompaction(input: PlanNodeCompactionInput): TurnSafeCutPlan;
@@ -79,6 +91,7 @@ export interface CompactionLifecycleEventPayload {
   coverage?: { fromSeq: number; toSeq: number };
   retainedTail?: { fromSeq: number; toSeq: number };
   diagnostics?: LoomContextCheckpointMessage["diagnostics"];
+  attachments?: LoomContextCheckpointMessage["diagnostics"]["attachments"];
   summaryUsage?: LoomUsageDiagnostic;
   reason?: string;
   error?: string;
@@ -121,6 +134,12 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
         tokenCounter: input.tokenCounter,
       });
       if (plan.kind === "none") return { ok: false, reason: "not_needed" };
+      if (input.budget?.status === "model-unavailable") {
+        return { ok: false, reason: "unavailable", error: input.model?.diagnostic || "Model context metadata is unavailable." };
+      }
+      if (input.budget?.status === "fixed-context-overflow") {
+        return { ok: false, reason: "fixed_context_overflow", error: "Fixed context exceeds the selected model input budget." };
+      }
       const spanId = emitPlan(input, plan, true);
       try {
         const summaryInput = buildCheckpointSummaryInput({
@@ -131,6 +150,7 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
         const result = await deps.summarize(summaryInput, {
           signal: input.signal,
           maxOutputTokens: input.maxSummaryOutputTokens ?? 2_048,
+          model: input.model,
         });
         if (input.signal?.aborted) {
           emitTerminal(input, spanId, "aborted", { reason: "signal-aborted" });
@@ -141,8 +161,15 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
           emitTerminal(input, spanId, "failed", { reason: "empty-summary" });
           return { ok: false, reason: "empty_summary" };
         }
+        const attachmentPlan = planAttachments(input);
+        const attachmentDiagnostics = {
+          selectedCount: attachmentPlan.diagnostics.selectedCount,
+          omittedCount: attachmentPlan.diagnostics.omittedCount,
+          tokens: attachmentPlan.diagnostics.tokens,
+          source: attachmentPlan.diagnostics.source,
+        } as const;
         const beforeTokens = input.messages.reduce((sum, msg) => sum + estimateMessageTokensUnbounded(msg), 0);
-        const afterTokens = plan.retainedTokenCount + estTokens(summary.length);
+        const afterTokens = plan.retainedTokenCount + estTokens(summary.length) + attachmentPlan.diagnostics.tokens;
         const checkpoint = createLoomContextCheckpoint({
           id: deps.ids.message(),
           nodeId: input.nodeId,
@@ -157,8 +184,21 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
           diagnostics: {
             before: { tokens: beforeTokens, exact: false },
             after: { tokens: afterTokens, exact: false },
+            ...(input.budget ? {
+              ...(input.budget.model ? { model: { providerId: input.budget.model.providerId, modelId: input.budget.model.modelId } } : {}),
+              contextWindowTokens: input.budget.model?.contextWindowTokens,
+              reserveOutputTokens: input.budget.reserveOutputTokens,
+              projectedInputTokens: input.budget.projectedInputTokens,
+              fixedContextTokens: input.budget.fixedContextTokens,
+              nodeLocalTailBudgetTokens: input.budget.nodeLocalTailBudget,
+              attachmentBudgetTokens: input.budget.attachmentBudgetTokens,
+              overflowTokens: input.budget.overflowTokens,
+              accountingSource: input.budget.source,
+            } : {}),
+            attachments: attachmentDiagnostics,
           },
           summaryUsage: result.usage,
+          attachments: attachmentPlan.attachments,
         });
         deps.store.appendMessages(input.nodeId, [{ id: checkpoint.id, seq: 0, role: checkpoint.role, content: checkpoint as unknown as AgentMessage }]);
         deps.syncEngine(input.nodeId);
@@ -167,6 +207,7 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
           coverage: checkpoint.coverage,
           retainedTail: checkpoint.retainedTail,
           diagnostics: checkpoint.diagnostics,
+          attachments: attachmentDiagnostics,
           summaryUsage: checkpoint.summaryUsage,
         });
         return { ok: true, checkpoint };
@@ -193,6 +234,24 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
         status: state === "succeeded" ? "ok" : state === "failed" ? "error" : "aborted",
         attributes: payload as unknown as Record<string, unknown>,
       });
+    }
+  }
+
+  function planAttachments(input: CompactNodeInput): AttachmentPlan {
+    try {
+      return planContextAttachments(input.attachmentCandidates ?? [], {
+        maxTokens: Math.min(
+          Math.max(0, input.attachmentBudgetTokens ?? input.budget?.attachmentBudgetTokens ?? DEFAULT_POST_COMPACTION_ATTACHMENT_BUDGET_TOKENS),
+          DEFAULT_POST_COMPACTION_ATTACHMENT_BUDGET_TOKENS,
+        ),
+        maxItemTokens: DEFAULT_POST_COMPACTION_ATTACHMENT_ITEM_TOKENS,
+        tokenCounter: syntheticAttachmentTokenDiagnostic,
+      });
+    } catch {
+      return {
+        attachments: [],
+        diagnostics: { selectedCount: 0, omittedCount: input.attachmentCandidates?.length ?? 0, tokens: 0, source: "estimated", omissions: [] },
+      };
     }
   }
 }

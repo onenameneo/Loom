@@ -12,10 +12,10 @@ import type { Message } from "@earendil-works/pi-ai";
 import type { AgentTool } from "../core/tool";
 import type { EngineCacheEntry, EngineFactory, EngineHandle, EventSinkPort, HookDispatcher, NodeInit, TracePort } from "../ports";
 import { adaptAgentToolsToPi } from "./piTools";
-import { migrateLegacyModelRef, parseStoredModelRef, type StoredModelSelection } from "../../modelConfig/modelRef";
+import type { StoredModelSelection } from "../../modelConfig/modelRef";
 import { ModelRegistry } from "../../modelConfig/registry";
 import { createRuntimeModelsFromRegistry } from "../../modelConfig/runtimeModels";
-import { loadScopedModelSettings, resolveSelectedModel } from "../../modelConfig/scopes";
+import { loadScopedModelSettings, resolveStoredModelSelection } from "../../modelConfig/scopes";
 import { globalSettingsPath, modelsJsonPath } from "../../modelConfig/paths";
 import { attributeModelError } from "../../modelConfig/errors";
 import type { RegistryProvider } from "../../modelConfig/types";
@@ -150,10 +150,7 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
   // known 模型当接线模板；未知（自定义 endpoint）以其为壳改 id/baseUrl。
   async function buildModel(ctx: Awaited<ReturnType<typeof loadRegistryContext>>, selection?: StoredModelSelection) {
     const cfg = resolveModel();
-    const parsed = parseStoredModelRef(selection);
-    const migrated = parsed.kind === "legacy" ? migrateLegacyModelRef(parsed.legacyModel, ctx.registry) : undefined;
-    const explicit = parsed.kind === "ref" ? parsed.ref : migrated?.kind === "ref" ? migrated.ref : undefined;
-    const selected = resolveSelectedModel({ registry: ctx.registry, scoped: ctx.scoped, explicit });
+    const selected = resolveStoredModelSelection({ registry: ctx.registry, scoped: ctx.scoped, explicit: selection });
     if (!selected.model || !selected.available) {
       const label = selected.ref.providerId && selected.ref.modelId ? `${selected.ref.providerId}/${selected.ref.modelId}` : cfg.model;
       throw attributeModelError(new Error(selected.diagnostic?.message || `模型不可用：${label}`), selected.ref);

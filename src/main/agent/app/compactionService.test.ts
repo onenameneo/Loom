@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { createCompactionService } from "./compactionService";
 import { createLoomContextCheckpoint } from "../core/messages";
+import { syntheticAttachmentTokenDiagnostic, type LoomContextAttachmentCandidate } from "../core/attachments";
 
 const user = (text: string): AgentMessage => ({ role: "user", content: text, timestamp: 0 }) as AgentMessage;
 const assistant = (text: string): AgentMessage => ({ role: "assistant", content: text, timestamp: 0 }) as unknown as AgentMessage;
@@ -82,6 +83,64 @@ describe("CompactionService", () => {
     expect(checkpoint?.diagnostics.after.tokens).not.toBe(3);
     expect(appendMessages).toHaveBeenCalledWith("n1", [expect.objectContaining({ id: "cp-1", role: "loomContextCheckpoint" })]);
     expect(syncEngine).toHaveBeenCalledWith("n1");
+  });
+
+  it("plans and persists bounded attachments only after summary succeeds", async () => {
+    const appendMessages = vi.fn();
+    const candidate: LoomContextAttachmentCandidate = {
+      version: 1, kind: "file-context", id: "file:src/app.ts", source: { identity: "file:src/app.ts", path: "src/app.ts" },
+      text: "file context", tokens: { tokens: 2, exact: false }, priority: 1,
+    };
+    const service = createCompactionService({
+      summarize: vi.fn(async () => ({ summary: "summary" })), store: { appendMessages }, clock: { now: () => 20 }, ids: { message: () => "cp-attach" },
+      syncEngine: vi.fn(), trace: { beginSpan: vi.fn(), endSpan: vi.fn() }, events: { emit: vi.fn() },
+    });
+
+    const result = await service.compactNode({
+      nodeId: "n1", trigger: "threshold", messages: [user("u1"), assistant("a1"), user("u2"), assistant("a2")],
+      tailBudgetTokens: 4, tokenCounter: () => 2, attachmentCandidates: [candidate], attachmentBudgetTokens: 64,
+    });
+
+    expect(result).toMatchObject({ ok: true, checkpoint: { attachments: [expect.objectContaining({ id: candidate.id })] } });
+    expect(result.ok && result.checkpoint.diagnostics.attachments).toEqual({ selectedCount: 1, omittedCount: 0, tokens: syntheticAttachmentTokenDiagnostic(candidate).tokens, source: "mixed" });
+    expect(appendMessages).toHaveBeenCalledWith("n1", [expect.objectContaining({ content: expect.objectContaining({ attachments: expect.any(Array) }) })]);
+  });
+
+  it("keeps the checkpoint best-effort when attachment candidates exhaust the budget or are malformed", async () => {
+    const appendMessages = vi.fn();
+    const service = createCompactionService({
+      summarize: vi.fn(async () => ({ summary: "summary" })), store: { appendMessages }, clock: { now: () => 20 }, ids: { message: () => "cp-best-effort" },
+      syncEngine: vi.fn(), trace: { beginSpan: vi.fn(), endSpan: vi.fn() }, events: { emit: vi.fn() },
+    });
+    const result = await service.compactNode({
+      nodeId: "n1", trigger: "overflow", messages: [user("u1"), assistant("a1"), user("u2"), assistant("a2")], tailBudgetTokens: 4, tokenCounter: () => 2,
+      attachmentBudgetTokens: 1,
+      attachmentCandidates: [
+        { version: 1, kind: "file-context", id: "too-big", source: { identity: "too-big" }, text: "large", tokens: { tokens: 2, exact: false }, priority: 1 },
+        { version: 1, kind: "file-context", id: "bad", source: undefined, text: "bad", tokens: { tokens: 1, exact: false }, priority: 2 } as any,
+      ],
+    });
+
+    expect(result).toMatchObject({ ok: true, checkpoint: { attachments: [], diagnostics: { attachments: { selectedCount: 0, omittedCount: 2, tokens: 0 } } } });
+    expect(appendMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the dedicated attachment allowance instead of the node-local tail budget", async () => {
+    const candidate: LoomContextAttachmentCandidate = {
+      version: 1, kind: "file-context", id: "file:src/app.ts", source: { identity: "file:src/app.ts" }, text: "file", tokens: { tokens: 2, exact: false }, priority: 1,
+    };
+    const service = createCompactionService({
+      summarize: vi.fn(async () => ({ summary: "summary" })), store: { appendMessages: vi.fn() }, clock: { now: () => 20 }, ids: { message: () => "cp-independent-budget" },
+      syncEngine: vi.fn(), trace: { beginSpan: vi.fn(), endSpan: vi.fn() }, events: { emit: vi.fn() },
+    });
+
+    const result = await service.compactNode({
+      nodeId: "n1", trigger: "threshold", messages: [user("u1"), assistant("a1"), user("u2"), assistant("a2")], tailBudgetTokens: 4, tokenCounter: () => 2,
+      budget: { nodeLocalTailBudget: 0, attachmentBudgetTokens: 64 } as any,
+      attachmentCandidates: [candidate],
+    });
+
+    expect(result).toMatchObject({ ok: true, checkpoint: { attachments: [expect.objectContaining({ id: candidate.id })] } });
   });
 
   it("does not persist a checkpoint when summarization fails or returns an empty summary", async () => {

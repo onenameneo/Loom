@@ -2,6 +2,15 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Message, UserMessage } from "@earendil-works/pi-ai";
 import type { CanvasNodeModel, Seed } from "./graph";
 import {
+  DEFAULT_POST_COMPACTION_ATTACHMENT_BUDGET_TOKENS,
+  DEFAULT_POST_COMPACTION_ATTACHMENT_ITEM_TOKENS,
+  attachmentMessages,
+  filterAttachmentsCoveredByMessages,
+  isSupportedAttachmentKind,
+  planContextAttachments,
+  syntheticAttachmentTokenDiagnostic,
+} from "./attachments";
+import {
   isLoomContextCheckpoint,
   type LoomContextCheckpointMessage,
 } from "./messages";
@@ -73,6 +82,19 @@ export function checkpointContextMessage(checkpoint: LoomContextCheckpointMessag
   );
 }
 
+export function checkpointAttachmentMessages(checkpoint: LoomContextCheckpointMessage, uncoveredMessages: AgentMessage[] = [], now = 0): Message[] {
+  if (!checkpoint.attachments || checkpoint.attachments.length === 0) return [];
+  const candidates = filterAttachmentsCoveredByMessages(checkpoint.attachments, uncoveredMessages)
+    .filter((attachment) => isSupportedAttachmentKind(attachment.kind))
+    .map((attachment, index) => ({ ...attachment, priority: index }));
+  const plan = planContextAttachments(candidates, {
+    maxTokens: DEFAULT_POST_COMPACTION_ATTACHMENT_BUDGET_TOKENS,
+    maxItemTokens: DEFAULT_POST_COMPACTION_ATTACHMENT_ITEM_TOKENS,
+    tokenCounter: syntheticAttachmentTokenDiagnostic,
+  });
+  return attachmentMessages(plan.attachments, now);
+}
+
 /**
  * 装配某节点发往 LLM 的上下文计划：
  *   [ frozenContext ? 冻结快照 : ∅ ] + [ seed ? seed 消息 : ∅ ] + checkpoint 投影
@@ -106,9 +128,11 @@ export function buildContextPlan(
 function projectOwnMessages(ownMessages: AgentMessage[], now: number): Message[] {
   const checkpoint = newestValidCheckpoint(ownMessages);
   if (!checkpoint) return ownMessages.filter(isLlmMessage);
+  const uncovered = ownMessages.filter((msg, index): msg is Message => index > checkpoint.coverage.toSeq && isLlmMessage(msg));
   return [
     checkpointContextMessage(checkpoint, now),
-    ...ownMessages.filter((msg, index): msg is Message => index > checkpoint.coverage.toSeq && isLlmMessage(msg)),
+    ...checkpointAttachmentMessages(checkpoint, uncovered, now),
+    ...uncovered,
   ];
 }
 

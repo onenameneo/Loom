@@ -135,4 +135,62 @@ describe("buildContextPlan", () => {
     ]);
     expect(textOf(plan[0] as any)).not.toContain("old summary");
   });
+
+  it("projects checkpoint summary before attachments and uncovered source messages", () => {
+    const checkpoint = createLoomContextCheckpoint({
+      id: "cp-1", nodeId: "n1", createdAt: 1, reason: "threshold", summary: "old summary",
+      coverage: { fromSeq: 0, toSeq: 0 }, retainedTail: { fromSeq: 1, toSeq: 2 },
+      diagnostics: { before: { tokens: 10, exact: false }, after: { tokens: 5, exact: false } },
+      attachments: [{
+        version: 1, kind: "file-context", id: "file:src/app.ts",
+        source: { identity: "file:src/app.ts", path: "src/app.ts" }, text: "file context",
+        tokens: { tokens: 2, exact: false },
+      }],
+    });
+    const toolCall = { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "search", args: {} }], timestamp: 0 } as any;
+    const toolResult = { role: "toolResult", toolCallId: "call-1", toolName: "search", content: "result", timestamp: 0 } as any;
+    const plan = buildContextPlan({}, [checkpoint as any, toolCall, toolResult, user("next")] as any, 7);
+
+    expect(plan.map((message) => textOf(message as any))).toEqual([
+      expect.stringContaining("old summary"),
+      expect.stringContaining("file context"),
+      "",
+      "result",
+      "next",
+    ]);
+    expect(plan[1]?.role).toBe("user");
+    expect(plan[2]?.role).toBe("assistant");
+    expect(plan[3]?.role).toBe("toolResult");
+  });
+
+  it("accepts legacy checkpoints without attachments and ignores unknown attachment kinds", () => {
+    const checkpoint = createLoomContextCheckpoint({
+      id: "cp-legacy", nodeId: "n1", createdAt: 1, reason: "manual", summary: "legacy",
+      coverage: { fromSeq: 0, toSeq: 0 }, retainedTail: { fromSeq: 1, toSeq: 1 },
+      diagnostics: { before: { tokens: 2, exact: false }, after: { tokens: 1, exact: false } },
+      attachments: [{
+        version: 1, kind: "future-kind", id: "future", source: { identity: "future" }, text: "ignore", tokens: { tokens: 1, exact: false },
+      } as any],
+    });
+    expect(buildContextPlan({}, [checkpoint as any, user("tail")] as any).map((message) => textOf(message as any))).toEqual([
+      expect.stringContaining("legacy"), "tail",
+    ]);
+  });
+
+  it("does not restore an oversized persisted attachment", () => {
+    const checkpoint = createLoomContextCheckpoint({
+      id: "cp-large", nodeId: "n1", createdAt: 1, reason: "manual", summary: "summary",
+      coverage: { fromSeq: 0, toSeq: 0 }, retainedTail: { fromSeq: 1, toSeq: 1 },
+      diagnostics: { before: { tokens: 2, exact: false }, after: { tokens: 1, exact: false } },
+      attachments: [{
+        version: 1, kind: "file-context", id: "large", source: { identity: "large" }, text: "x".repeat(20_000),
+        tokens: { tokens: 1, exact: true },
+      }],
+    });
+
+    const plan = buildContextPlan({}, [checkpoint as any, user("tail")] as any);
+    expect(plan.map((message) => textOf(message as any))).toEqual([
+      expect.stringContaining("summary"), "tail",
+    ]);
+  });
 });

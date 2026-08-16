@@ -149,6 +149,13 @@ function createHandle(messages: AgentMessage[], prompt: EngineHandle["prompt"]):
 
 const user = (text: string): AgentMessage => ({ role: "user", content: text, timestamp: 0 }) as AgentMessage;
 const assistant = (text: string): AgentMessage => ({ role: "assistant", content: text, timestamp: 0 }) as unknown as AgentMessage;
+const contextModel = async () => ({
+  providerId: "local",
+  modelId: "test-model",
+  contextWindowTokens: 4_000,
+  maxOutputTokens: 500,
+  available: true,
+});
 const toolResult = (toolCallId: string, toolName: string, text: string): AgentMessage =>
   ({
     role: "toolResult",
@@ -241,7 +248,7 @@ describe("createAgentSession turn runner integration", () => {
     expect(eventLog.items.some((item) => item.type === "microcompact")).toBe(false);
   });
 
-  it("keeps raw budget estimates free of microCompact side effects", () => {
+  it("keeps raw budget estimates free of microCompact side effects", async () => {
     const userDataDir = mkdtempSync(join(tmpdir(), "loom-budget-microcompact-user-data-"));
     const store = new MemoryStore([
       assistant("done"),
@@ -261,7 +268,7 @@ describe("createAgentSession turn runner integration", () => {
     });
 
     try {
-      expect(session.budget("n1").estimated).toBe(true);
+      expect((await session.budget("n1")).estimated).toBe(true);
       expect(eventLog.items.some((item) => item.type === "microcompact")).toBe(false);
       expect(existsSync(join(userDataDir, "sessions", "sess", "tool-results", "tc-old.txt"))).toBe(false);
     } finally {
@@ -844,6 +851,7 @@ describe("createAgentSession turn runner integration", () => {
       coverage: { fromSeq: 0, toSeq: 3 },
       retainedTail: { fromSeq: 4, toSeq: 4 },
       diagnostics: { before: { tokens: 100, exact: true }, after: { tokens: 40, exact: true } },
+      attachments: [{ version: 1, kind: "file-context", id: "file:src/app.ts", source: { identity: "file:src/app.ts", path: "src/app.ts" }, text: "old", tokens: { tokens: 1, exact: false } }],
     }) as unknown as AgentMessage;
     const store = new MemoryStore([user("first"), checkpoint, user("edit me"), assistant("old answer")]);
     const engineMessages: AgentMessage[] = [];
@@ -862,7 +870,7 @@ describe("createAgentSession turn runner integration", () => {
 
     const messages = store.getNode("n1")!.messages;
     expect(messages[0]?.content).toMatchObject({ role: "user", content: "first" });
-    expect(messages[1]?.content).toMatchObject({ role: "loomContextCheckpoint", invalidatedAt: 99 });
+    expect(messages[1]?.content).toMatchObject({ role: "loomContextCheckpoint", invalidatedAt: 99, attachments: [{ id: "file:src/app.ts" }] });
   });
 
   it("invalidates retained checkpoints that cover a regenerate truncation", async () => {
@@ -937,8 +945,8 @@ describe("createAgentSession turn runner integration", () => {
       ids: { message: () => "cp-threshold" },
       clock: { now: () => 200 },
       getApiKey: () => "key",
+      resolveContextModel: contextModel,
       compaction: {
-        thresholdTokens: 5_000,
         tailBudgetTokens: 2,
         summarize: vi.fn(async () => ({ summary: "## Goal\nthreshold summary" })),
       },
@@ -954,6 +962,80 @@ describe("createAgentSession turn runner integration", () => {
     expect(session.list("sess")[0]!.messages.at(-1)).toMatchObject({ role: "checkpoint", text: "## Goal\nthreshold summary" });
   });
 
+  it("drives automatic compaction from the resolved model window instead of the legacy threshold", async () => {
+    const store = new MemoryStore([user("old question " + "x".repeat(8_000)), assistant("old answer " + "x".repeat(8_000))]);
+    const engineMessages = store.listMessages("n1").map((message) => message.content);
+    const summarize = vi.fn(async (_input: unknown, options: { model?: unknown }) => {
+      expect(options.model).toMatchObject({ providerId: "local", modelId: "tiny" });
+      return { summary: "## Goal\nmodel-aware summary" };
+    });
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "cp-model-aware" },
+      clock: { now: () => 201 },
+      getApiKey: () => "key",
+      resolveContextModel: vi.fn(async () => ({
+        providerId: "local",
+        modelId: "tiny",
+        contextWindowTokens: 5_000,
+        maxOutputTokens: 500,
+        available: true,
+      })),
+      compaction: {
+        summarize,
+      },
+      createEngine: () => createEngine(createHandle(engineMessages, vi.fn(async (message) => {
+        engineMessages.push(message, assistant("new answer"));
+      }))),
+    });
+
+    await expect(session.send({ nodeId: "n1", text: "fresh prompt" })).resolves.toEqual({ ok: true });
+
+    expect(summarize).toHaveBeenCalled();
+    expect(store.listMessages("n1").map((message) => (message.content as any).role)).toContain("loomContextCheckpoint");
+    const checkpoint = store.listMessages("n1").find((message) => (message.content as any).role === "loomContextCheckpoint")?.content as any;
+    expect(checkpoint.diagnostics).toMatchObject({
+      model: { providerId: "local", modelId: "tiny" },
+      contextWindowTokens: 5_000,
+      reserveOutputTokens: 500,
+      accountingSource: "estimated",
+    });
+    await expect(session.budget("n1")).resolves.toMatchObject({
+      model: { providerId: "local", modelId: "tiny" },
+      contextWindowTokens: 5_000,
+      safeInputBudget: 4_500,
+    });
+  });
+
+  it("reports unavailable model context metadata without appending a checkpoint", async () => {
+    const store = new MemoryStore([user("old question " + "x".repeat(8_000)), assistant("old answer " + "x".repeat(8_000))]);
+    const eventLog = events();
+    const summarize = vi.fn(async () => ({ summary: "should not run" }));
+    const engineMessages = store.listMessages("n1").map((message) => message.content);
+    const session = createAgentSession({
+      store,
+      events: eventLog.sink,
+      ids: { message: () => "cp-unavailable" },
+      clock: { now: () => 202 },
+      getApiKey: () => "key",
+      resolveContextModel: async () => ({ providerId: "local", modelId: "unknown", contextWindowTokens: 0, maxOutputTokens: 0, available: false, diagnostic: "missing contextWindow" }),
+      compaction: { summarize },
+      createEngine: () => createEngine(createHandle(engineMessages, vi.fn(async (message) => {
+        engineMessages.push(message, assistant("new answer"));
+      }))),
+    });
+
+    await expect(session.send({ nodeId: "n1", text: "fresh prompt" })).resolves.toEqual({ ok: true });
+
+    expect(summarize).not.toHaveBeenCalled();
+    expect(eventLog.items).toContainEqual(expect.objectContaining({
+      type: "compaction",
+      payload: expect.objectContaining({ state: "failed", reason: "model-unavailable" }),
+    }));
+    expect(store.listMessages("n1").map((message) => (message.content as any).role)).not.toContain("loomContextCheckpoint");
+  });
+
   it("does not append a checkpoint when automatic threshold summarization fails", async () => {
     const store = new MemoryStore([user("old question"), assistant("old answer")]);
     const engineMessages = store.listMessages("n1").map((message) => message.content);
@@ -963,8 +1045,8 @@ describe("createAgentSession turn runner integration", () => {
       ids: { message: () => "cp-threshold" },
       clock: { now: () => 202 },
       getApiKey: () => "key",
+      resolveContextModel: contextModel,
       compaction: {
-        thresholdTokens: 5_000,
         tailBudgetTokens: 2,
         summarize: vi.fn(async () => {
           throw new Error("summary failed");
@@ -989,8 +1071,8 @@ describe("createAgentSession turn runner integration", () => {
       ids: { message: () => "cp-preflight" },
       clock: { now: () => 201 },
       getApiKey: () => "key",
+      resolveContextModel: contextModel,
       compaction: {
-        thresholdTokens: 10_000,
         tailBudgetTokens: 2,
         summarize: vi.fn(async () => ({ summary: "## Goal\npreflight summary" })),
       },
@@ -1020,7 +1102,6 @@ describe("createAgentSession turn runner integration", () => {
       clock: { now: () => 250 },
       getApiKey: () => "key",
       compaction: {
-        thresholdTokens: 10_000,
         tailBudgetTokens: 2,
         summarize: vi.fn(async () => ({ summary: "## Goal\nmanual summary" })),
       },
@@ -1032,6 +1113,40 @@ describe("createAgentSession turn runner integration", () => {
     expect(session.list("sess")[0]!.messages.at(-1)).toMatchObject({ role: "checkpoint", text: "## Goal\nmanual summary" });
   });
 
+  it("attaches paired project file context to the persisted manual checkpoint", async () => {
+    const sourceRoot = mkdtempSync(join(tmpdir(), "loom-attachment-source-root-"));
+    const call = {
+      role: "assistant", content: "", toolCalls: [{ id: "read-1", name: "project_read_file", args: { path: "src/app.ts" } }], timestamp: 0,
+    } as any;
+    const result = {
+      role: "toolResult", toolCallId: "read-1", toolName: "project_read_file", content: [{ type: "text", text: "const answer = 42;\n" + "x".repeat(20_000) }],
+      details: { path: "./src/app.ts", version: "v1", returnedLines: 1, totalLines: 1 }, timestamp: 0,
+    } as any;
+    const store = new MemoryStore([user("read file"), call, result, user("question"), assistant("answer")]);
+    store.projects[0].sourceRoots = [sourceRoot];
+    try {
+      const session = createAgentSession({
+        store,
+        events: events().sink,
+        ids: { message: () => "cp-file-attachment" },
+        clock: { now: () => 250 },
+        getApiKey: () => "key",
+        compaction: { tailBudgetTokens: 2, summarize: vi.fn(async () => ({ summary: "summary" })) },
+        createEngine: () => createEngine(createHandle([], vi.fn())),
+      });
+
+      const compactResult = await (session as any).compact("n1");
+      expect(compactResult).toEqual({ ok: true, node: expect.anything() });
+      const checkpoint = store.listMessages("n1").at(-1)?.content as any;
+      expect(checkpoint.role).toBe("loomContextCheckpoint");
+      expect(checkpoint.attachments).toHaveLength(1);
+      expect(checkpoint.attachments[0]).toMatchObject({ kind: "file-context" });
+      expect(checkpoint.attachments[0].source).toMatchObject({ path: "src/app.ts", version: "v1", toolCallId: "read-1" });
+    } finally {
+      rmSync(sourceRoot, { recursive: true, force: true });
+    }
+  });
+
   it("reports projected send budget after checkpoint projection instead of raw retained history", async () => {
     const store = new MemoryStore([user("old question " + "x".repeat(30_000)), assistant("old answer " + "x".repeat(30_000)), user("fresh tail")]);
     const session = createAgentSession({
@@ -1041,19 +1156,18 @@ describe("createAgentSession turn runner integration", () => {
       clock: { now: () => 250 },
       getApiKey: () => "key",
       compaction: {
-        thresholdTokens: 10_000,
         tailBudgetTokens: 20,
         summarize: vi.fn(async () => ({ summary: "## Goal\nshort summary" })),
       },
       createEngine: () => createEngine(createHandle([], vi.fn())),
     });
 
-    expect(session.budget("n1").withoutAncestors).toBeGreaterThan(20_000);
+    expect((await session.budget("n1")).withoutAncestors).toBeGreaterThan(20_000);
     await expect((session as any).compact("n1")).resolves.toMatchObject({ ok: true, node: { id: "n1" } });
-    expect(session.budget("n1").withoutAncestors).toBeLessThan(1_000);
+    expect((await session.budget("n1")).withoutAncestors).toBeLessThan(1_000);
   });
 
-  it("includes system prompt and skill index in the visible send budget", () => {
+  it("includes system prompt and skill index in the visible send budget", async () => {
     const root = mkdtempSync(join(tmpdir(), "loom-session-budget-skills-"));
     const skillRoot = join(root, "long-skill");
     mkdirSync(skillRoot, { recursive: true });
@@ -1070,7 +1184,7 @@ describe("createAgentSession turn runner integration", () => {
     });
 
     try {
-      expect(session.budget("n1").withoutAncestors).toBeGreaterThan(1_000);
+      expect((await session.budget("n1")).withoutAncestors).toBeGreaterThan(1_000);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -1085,7 +1199,6 @@ describe("createAgentSession turn runner integration", () => {
       clock: { now: () => 251 },
       getApiKey: () => "key",
       compaction: {
-        thresholdTokens: 100_000,
         tailBudgetTokens: 2,
         summarize: vi.fn(async () => ({ summary: "## Goal\nmanual low summary" })),
       },
@@ -1112,7 +1225,6 @@ describe("createAgentSession turn runner integration", () => {
       clock: { now: () => 252 },
       getApiKey: () => "key",
       compaction: {
-        thresholdTokens: 100_000,
         summarize: vi.fn(async () => ({ summary: "## Goal\nmanual budget summary" })),
       },
       createEngine: () => createEngine(createHandle([], vi.fn())),
@@ -1134,7 +1246,6 @@ describe("createAgentSession turn runner integration", () => {
       clock: { now: () => 251 },
       getApiKey: () => "key",
       compaction: {
-        thresholdTokens: 10_000,
         tailBudgetTokens: 2,
         summarize: vi.fn(() => gate.promise),
       },
@@ -1158,7 +1269,6 @@ describe("createAgentSession turn runner integration", () => {
       clock: { now: () => 252 },
       getApiKey: () => "key",
       compaction: {
-        thresholdTokens: 10_000,
         tailBudgetTokens: 2,
         summarize: vi.fn(async () => {
           throw new Error("summary model unavailable");
@@ -1193,7 +1303,6 @@ describe("createAgentSession turn runner integration", () => {
       clock: { now: () => 260 },
       getApiKey: () => "key",
       compaction: {
-        thresholdTokens: 10_000,
         tailBudgetTokens: 2,
         summarize: vi.fn(async () => ({ summary: "## Goal\noverflow summary" })),
       },
@@ -1222,7 +1331,6 @@ describe("createAgentSession turn runner integration", () => {
       clock: { now: () => 261 },
       getApiKey: () => "key",
       compaction: {
-        thresholdTokens: 10_000,
         tailBudgetTokens: 2,
         summarize: vi.fn(async () => ({ summary: "## Goal\noverflow summary" })),
       },

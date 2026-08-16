@@ -39,5 +39,13 @@ src/
 ```
 架构原则：API key / 工具执行 / 文件访问都在主进程，renderer 纯视图。见 BLUEPRINT.md。
 
+## 上下文与 compact
+
+Loom 保留完整的原始 transcript，并以 append-only context checkpoint 投影模型上下文。手动 `/compact`、自动 threshold compact 和 context overflow recovery 共用同一套 turn-safe planner 与结构化 summary；summary 使用 `Goal`、`Constraints & Preferences`、`Progress`、`Key Decisions`、`Next Steps`、`Critical Context` 栏目。
+
+自动 compact 使用当前节点最终选中的模型配置计算安全输入预算：`contextWindow - reserved output`，再扣除 system prompt、tools/skills、冻结分支、seed、checkpoint 和当前输入，剩余部分才是 node-local recent tail。provider usage 可用时优先采用，否则明确标记为估算值。模型缺少有效上下文窗口元数据时，自动 compact 会返回有界诊断而不会假装请求安全。
+
+原始消息不会因 compact 被删除；session memory、跨 session recall 和长期事实提取暂不属于当前 compact 流程。
+
 ## 路线图
 P0 骨架（当前）→ P1 无限画布（分支上下文引擎）→ P2 观察哨 → P3 能力层（工具/记忆）。

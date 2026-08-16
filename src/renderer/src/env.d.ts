@@ -83,6 +83,16 @@ export interface NodeBudget {
   withoutAncestors: number;
   withAncestors: number;
   estimated: boolean;
+  model?: { providerId: string; modelId: string };
+  contextWindowTokens?: number;
+  reserveOutputTokens?: number;
+  safeInputBudget?: number;
+  projectedInputTokens?: number;
+  fixedContextTokens?: number;
+  nodeLocalTailBudgetTokens?: number;
+  overflowTokens?: number;
+  status?: "ok" | "needs-compaction" | "fixed-context-overflow" | "model-unavailable";
+  source?: "exact" | "mixed" | "estimated";
 }
 export interface CanvasEvent {
   nodeId: string;
