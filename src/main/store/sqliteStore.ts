@@ -17,7 +17,10 @@ import {
   type SettingsPatch,
   type Store,
   type Project,
+  type AgentMetricRecord,
+  type AgentMetricTotals,
 } from "./store";
+import { mergeLlmUsage } from "../agent/core/usage";
 import { DEFAULT_SESSION_TITLE, type DefaultTitleState } from "../../common/titleDefaults";
 import { parseStoredModelRef, type StoredModelSelection } from "../modelConfig/modelRef";
 import { isThinkingLevel, type ThinkingLevel } from "../modelConfig/thinkingLevels";
@@ -64,6 +67,26 @@ type MessageRow = {
   role: string;
   content: string;
   meta: string | null;
+};
+
+type AgentMetricRow = {
+  id: string;
+  node_id: string;
+  session_id: string;
+  turn_id: string | null;
+  request_id: string | null;
+  tool_call_id: string | null;
+  kind: AgentMetricRecord["kind"];
+  provider_id: string | null;
+  model_id: string | null;
+  name: string | null;
+  started_at: number | null;
+  ended_at: number | null;
+  duration_ms: number | null;
+  ttft_ms: number | null;
+  status: AgentMetricRecord["status"];
+  usage: string | null;
+  created_at: number;
 };
 
 function id(prefix: string): string {
@@ -534,6 +557,78 @@ export class SqliteStore implements Store {
       content: decode(row.content, { role: row.role, content: "", timestamp: Date.now() } as PersistedMessage["content"]),
       meta: decode(row.meta, undefined),
     }));
+  }
+
+  appendMetric(metric: AgentMetricRecord): void {
+    this.db.prepare(`
+      INSERT OR REPLACE INTO agent_metrics(
+        id, node_id, session_id, turn_id, request_id, tool_call_id, kind,
+        provider_id, model_id, name, started_at, ended_at, duration_ms, ttft_ms,
+        status, usage, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      metric.id,
+      metric.nodeId,
+      metric.sessionId,
+      metric.turnId ?? null,
+      metric.requestId ?? null,
+      metric.toolCallId ?? null,
+      metric.kind,
+      metric.providerId ?? null,
+      metric.modelId ?? null,
+      metric.name ?? null,
+      metric.startedAt ?? null,
+      metric.endedAt ?? null,
+      metric.durationMs ?? null,
+      metric.ttftMs ?? null,
+      metric.status,
+      metric.usage === undefined ? null : encode(metric.usage),
+      metric.createdAt,
+    );
+  }
+
+  listMetrics(scope: { nodeId?: string; sessionId?: string }): AgentMetricRecord[] {
+    const clauses: string[] = [];
+    const params: string[] = [];
+    if (scope.nodeId) { clauses.push("node_id = ?"); params.push(scope.nodeId); }
+    if (scope.sessionId) { clauses.push("session_id = ?"); params.push(scope.sessionId); }
+    const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM agent_metrics${where} ORDER BY created_at, id`).all(...params) as AgentMetricRow[];
+    return rows.map((row) => ({
+      id: row.id,
+      nodeId: row.node_id,
+      sessionId: row.session_id,
+      ...(row.turn_id ? { turnId: row.turn_id } : {}),
+      ...(row.request_id ? { requestId: row.request_id } : {}),
+      ...(row.tool_call_id ? { toolCallId: row.tool_call_id } : {}),
+      kind: row.kind,
+      ...(row.provider_id ? { providerId: row.provider_id } : {}),
+      ...(row.model_id ? { modelId: row.model_id } : {}),
+      ...(row.name ? { name: row.name } : {}),
+      ...(row.started_at !== null ? { startedAt: row.started_at } : {}),
+      ...(row.ended_at !== null ? { endedAt: row.ended_at } : {}),
+      ...(row.duration_ms !== null ? { durationMs: row.duration_ms } : {}),
+      ...(row.ttft_ms !== null ? { ttftMs: row.ttft_ms } : {}),
+      status: row.status,
+      ...(row.usage ? { usage: decode<AgentMetricRecord["usage"]>(row.usage, undefined) } : {}),
+      createdAt: row.created_at,
+    }));
+  }
+
+  getMetricTotals(scope: { nodeId?: string; sessionId?: string }): AgentMetricTotals {
+    const metrics = this.listMetrics(scope);
+    const llmDurationMs = metrics.filter((metric) => metric.kind === "llm").reduce((sum, metric) => sum + (metric.durationMs ?? 0), 0);
+    const outputTokens = metrics.filter((metric) => metric.kind === "llm").reduce((sum, metric) => sum + (metric.usage?.output ?? 0), 0);
+    return {
+      turns: metrics.filter((metric) => metric.kind === "turn").length,
+      llmRequests: metrics.filter((metric) => metric.kind === "llm").length,
+      toolCalls: metrics.filter((metric) => metric.kind === "tool").length,
+      compactions: metrics.filter((metric) => metric.kind === "compaction").length,
+      durationMs: metrics.reduce((sum, metric) => sum + (metric.durationMs ?? 0), 0),
+      ttftMs: metrics.reduce((sum, metric) => sum + (metric.ttftMs ?? 0), 0),
+      outputTokensPerSecond: llmDurationMs > 0 ? outputTokens / (llmDurationMs / 1000) : 0,
+      usage: mergeLlmUsage(metrics.map((metric) => metric.usage)),
+    };
   }
 
   isApprovalPolicyAllowed(toolName: string, target: string): boolean {

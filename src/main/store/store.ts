@@ -3,6 +3,7 @@ import type { FrozenNodeContext } from "../agent/core/context";
 import type { DefaultTitleState } from "../../common/titleDefaults";
 import type { StoredModelSelection } from "../modelConfig/modelRef";
 import type { ThinkingLevel } from "../modelConfig/thinkingLevels";
+import type { LlmUsage } from "../agent/core/usage";
 import {
   isApprovalPolicy,
   isApprovalsReviewer,
@@ -134,6 +135,39 @@ export interface PersistedMessage {
   meta?: unknown;
 }
 
+export type AgentMetricKind = "turn" | "llm" | "tool" | "compaction";
+
+export interface AgentMetricRecord {
+  id: string;
+  nodeId: string;
+  sessionId: string;
+  turnId?: string;
+  requestId?: string;
+  toolCallId?: string;
+  kind: AgentMetricKind;
+  providerId?: string;
+  modelId?: string;
+  name?: string;
+  startedAt?: number;
+  endedAt?: number;
+  durationMs?: number;
+  ttftMs?: number;
+  status: "ok" | "error" | "aborted";
+  usage?: LlmUsage;
+  createdAt: number;
+}
+
+export interface AgentMetricTotals {
+  turns: number;
+  llmRequests: number;
+  toolCalls: number;
+  compactions: number;
+  durationMs: number;
+  ttftMs: number;
+  outputTokensPerSecond: number;
+  usage?: LlmUsage;
+}
+
 export const MIN_NODE_WIDTH = 288;
 export const MIN_NODE_HEIGHT = 220;
 
@@ -222,6 +256,9 @@ export interface Store {
   replaceMessageContent?(nodeId: string, seq: number, content: AgentMessage): void;
   deleteMessagesFrom(nodeId: string, seq: number): void;
   listMessages(nodeId: string): PersistedMessage[];
+  appendMetric?(metric: AgentMetricRecord): void;
+  listMetrics?(scope: { nodeId?: string; sessionId?: string }): AgentMetricRecord[];
+  getMetricTotals?(scope: { nodeId?: string; sessionId?: string }): AgentMetricTotals;
 
   isApprovalPolicyAllowed?(toolName: string, target: string): boolean;
   grantApprovalPolicy?(toolName: string, target: string): void;

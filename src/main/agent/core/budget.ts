@@ -1,6 +1,7 @@
 import type { CanvasNodeModel } from "./graph";
 import { textOf } from "./context";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { usageFromMessage } from "./usage";
 
 // ---------------------------------------------------------------------------
 // ① 领域核心 · token 预算规则（纯 TS，零基础设施依赖）。
@@ -152,9 +153,8 @@ export function estimateMessageTokensUnbounded(msg: AgentMessage): number {
 }
 
 export function validUsageTokens(msg: AgentMessage): number | undefined {
-  const usage = (msg as any)?.usage;
-  const total = usage?.totalTokens ?? usage?.inputTokens ?? usage?.promptTokens;
-  return typeof total === "number" && Number.isFinite(total) && total >= 0 ? total : undefined;
+  const usage = usageFromMessage(msg);
+  return usage?.totalTokens;
 }
 
 export function accountTranscriptTokens(messages: AgentMessage[]): TranscriptTokenAccounting {

@@ -108,6 +108,7 @@ const api = {
     }> =>
       ipcRenderer.invoke("node:budget", nodeId),
     trace: (nodeId: string): Promise<any> => ipcRenderer.invoke("node:trace", nodeId),
+    metrics: (nodeId: string): Promise<any> => ipcRenderer.invoke("node:metrics", nodeId),
     onTrace: (listener: (snapshot: any) => void): (() => void) => {
       const handler = (_event: Electron.IpcRendererEvent, snapshot: any) => listener(snapshot);
       ipcRenderer.on("node:trace:update", handler);

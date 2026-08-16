@@ -22,7 +22,7 @@ describe("database migrations", () => {
       (column) => column.name,
     );
 
-    expect(version).toBe(7);
+    expect(version).toBe(8);
     expect(projectColumns).toEqual(expect.arrayContaining(["id", "name", "order", "meta"]));
     expect(columns).toEqual(
       expect.arrayContaining(["project_id", "session_id", "layout_x", "layout_y", "layout_width", "layout_height"]),
@@ -104,7 +104,7 @@ describe("database migrations", () => {
 
     migrate(db);
 
-    expect(Number(db.pragma("user_version", { simple: true }))).toBe(7);
+    expect(Number(db.pragma("user_version", { simple: true }))).toBe(8);
     expect(db.prepare("SELECT COUNT(*) AS count FROM projects").get()).toEqual({ count: 0 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 0 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM nodes").get()).toEqual({ count: 0 });
@@ -136,7 +136,7 @@ describe("database migrations", () => {
 
     migrate(db);
 
-    expect(Number(db.pragma("user_version", { simple: true }))).toBe(7);
+    expect(Number(db.pragma("user_version", { simple: true }))).toBe(8);
     expect(db.prepare("SELECT id FROM projects").all()).toEqual([{ id: "existing" }]);
   });
 });

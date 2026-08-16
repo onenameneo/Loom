@@ -18,7 +18,17 @@ export interface NodeMsg {
   thinking?: string;
   images?: { data: string; mimeType: string }[];
   seq: number;
-  usage?: { totalTokens?: number };
+  usage?: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    reasoning?: number;
+    totalTokens?: number;
+    exact?: boolean;
+    source?: "provider" | "estimated";
+    cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; total?: number };
+  };
   meta?: unknown;
   checkpoint?: {
     id: string;
@@ -510,6 +520,10 @@ declare global {
         models: () => Promise<ModelListItem[]>;
         budget: (nodeId: string) => Promise<NodeBudget>;
         trace: (nodeId: string) => Promise<import("./workbench/traceState").TraceSnapshotDto>;
+        metrics: (nodeId: string) => Promise<{
+          records: Array<{ kind: "turn" | "llm" | "tool" | "compaction"; durationMs?: number; ttftMs?: number; usage?: NodeMsg["usage"] }>;
+          totals?: { turns: number; llmRequests: number; toolCalls: number; compactions: number; durationMs: number; ttftMs: number; outputTokensPerSecond: number; usage?: NodeMsg["usage"] };
+        }>;
         onTrace: (listener: (event: import("./workbench/traceState").TraceEventDto) => void) => () => void;
         liveTurns: () => Promise<LiveTurnSnapshot[]>;
         onLiveTurn: (listener: (event: LiveTurnEvent) => void) => () => void;

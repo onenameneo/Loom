@@ -2,6 +2,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import type { CheckpointSummaryInput } from "../core/compaction";
 import type { ContextModelMetadata } from "../core/budget";
 import type { CompactionSummaryResult } from "../app/compactionService";
+import { normalizeLlmUsage } from "../core/usage";
 
 export interface RuntimeSummaryModel {
   providerId?: string;
@@ -85,15 +86,15 @@ function parseSummaryResult(result: unknown, streamedText = ""): CompactionSumma
   if (value?.stopReason === "error") throw new Error("Summary model returned an error without a message.");
   const summary = textFromResult(value) || streamedText;
   if (!summary.trim()) throw new Error(`Summary model returned empty text (${summaryResultShape(value)}).`);
-  const usage = value?.usage;
+  const usage = normalizeLlmUsage(value?.usage, { source: "provider", exact: true });
   return {
     summary,
     usage: usage
       ? {
-          inputTokens: numberOrUndefined(usage.inputTokens),
-          outputTokens: numberOrUndefined(usage.outputTokens),
-          totalTokens: numberOrUndefined(usage.totalTokens),
-          exact: true,
+          inputTokens: usage.input,
+          outputTokens: usage.output,
+          totalTokens: usage.totalTokens,
+          exact: usage.exact,
         }
       : undefined,
   };
@@ -128,8 +129,4 @@ function textFromResult(value: any): string {
       .join("");
   }
   return "";
-}
-
-function numberOrUndefined(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }

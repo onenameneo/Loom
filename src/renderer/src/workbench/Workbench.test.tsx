@@ -428,6 +428,35 @@ describe("Workbench", () => {
     expect(Array.from(toolEvent.children).some((child) => child.classList.contains("trace-disclosure"))).toBe(true);
   });
 
+  it("formats the usage summary with compact token units", async () => {
+    (window as any).api = {
+      canvas: {
+        trace: vi.fn(async () => ({ nodeId: "node-1", revision: 1, records: [] })),
+        metrics: vi.fn(async () => ({
+          records: [],
+          totals: {
+            turns: 3,
+            llmRequests: 14,
+            toolCalls: 29,
+            compactions: 0,
+            durationMs: 118_100,
+            ttftMs: 14_900,
+            outputTokensPerSecond: 90,
+            usage: { input: 36_178, output: 5_041, totalTokens: 353_155, cost: { total: 0.0073 } },
+          },
+        })),
+        onTrace: vi.fn(() => () => {}),
+      },
+    };
+    localStorage.setItem("loom:workbench:tabs", '["trace"]');
+    render(<Workbench nodeId="node-1" />);
+
+    expect(await screen.findByText("353.16K")).toBeTruthy();
+    expect(screen.getByText("36.18K")).toBeTruthy();
+    expect(screen.getByText("5.04K")).toBeTruthy();
+    expect(screen.getByText("118.1s")).toBeTruthy();
+  });
+
   it("renders compaction span with bounded diagnostics", async () => {
     (window as any).api = {
       canvas: {
@@ -457,7 +486,7 @@ describe("Workbench", () => {
     expect(await screen.findByText("Compaction succeeded")).toBeTruthy();
     expect(screen.getByText(/threshold · retain-tail/)).toBeTruthy();
     expect(screen.getByText("coverage 0..4")).toBeTruthy();
-    expect(screen.getByText("estimated before: 1200 tokens")).toBeTruthy();
+    expect(screen.getByText("estimated before: 1.20K tokens")).toBeTruthy();
     expect(screen.getByText("exact after: 320 tokens")).toBeTruthy();
     expect(screen.getByText("estimated summary: 90 tokens")).toBeTruthy();
     expect((await screen.findAllByRole("heading", { level: 3 })).map((heading) => heading.textContent)).toEqual([

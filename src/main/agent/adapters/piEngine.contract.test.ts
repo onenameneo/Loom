@@ -13,11 +13,11 @@ describe("piEngine hook contract", () => {
     expect(src).not.toMatch(/approvalGate|ApprovalBroker|approval policy|createApproval/i);
   });
 
-  it("ends the pending llm_call span on each completed assistant message", () => {
+  it("ends the active LLM telemetry request on each completed assistant message", () => {
     const src = readFileSync(join(process.cwd(), "src/main/agent/adapters/piEngine.ts"), "utf-8");
 
     expect(src).toContain('case "message_end"');
-    expect(src).toContain('trace?.endSpan(nodeId, pendingLlmSpanId, {');
+    expect(src).toContain('type: "llm_end"');
     expect(src).not.toContain("[...(agent.state.messages as AgentMessage[])].reverse()");
   });
 
@@ -41,7 +41,7 @@ describe("piEngine hook contract", () => {
   it("adds the completed assistant response to the llm_call end attributes", () => {
     const src = readFileSync(join(process.cwd(), "src/main/agent/adapters/piEngine.ts"), "utf-8");
 
-    expect(src).toContain("const response = summarizeAssistantResponse(event.message)");
-    expect(src).toContain("...(response ? { response } : {})");
+    expect(src).toContain("const response = summarizeAssistantResponse(message)");
+    expect(src).toContain("...(response ? { attributes: { response } } : {})");
   });
 });

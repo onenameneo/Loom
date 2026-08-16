@@ -5,7 +5,7 @@ import { join } from "path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { FrozenNodeContext } from "../core/context";
 import { createAgentSession } from "./session";
-import type { EngineFactory, EngineHandle, EventSinkPort, LlmEnginePort, NodeInit, TracePort } from "../ports";
+import type { EngineFactory, EngineHandle, EventSinkPort, LlmEnginePort, NodeInit } from "../ports";
 import type { AgentTool } from "../core/tool";
 import { createLoomContextCheckpoint } from "../core/messages";
 import type { NodeLayout, NodeRecord, PersistedMessage, SessionRecord, Settings, Store, Project } from "../../store/store";
@@ -1723,7 +1723,7 @@ describe("createAgentSession turn runner integration", () => {
 
   it("records request, tool, and response trace entries during a turn", async () => {
     const store = new MemoryStore();
-    let trace: TracePort | undefined;
+    let telemetry: { emit: (event: any) => void } | undefined;
     const messages: AgentMessage[] = [];
     const session = createAgentSession({
       store,
@@ -1732,13 +1732,14 @@ describe("createAgentSession turn runner integration", () => {
       clock: { now: () => 1 },
       getApiKey: () => "key",
       createEngine: (hooks) => {
-        trace = hooks.trace;
+          telemetry = hooks.telemetry;
         return createEngine(createHandle(messages, vi.fn(async () => {
-          // 模拟 pi 真实事件顺序：llm_call begin → tool begin/end → llm_call end
-          const llmId = trace?.beginSpan({ nodeId: "n1", kind: "llm_call", name: "p/m", attributes: { model: { provider: "p", id: "m" } } });
-          const toolId = trace?.beginSpan({ nodeId: "n1", kind: "tool", name: "calc", parentSpanId: llmId, attributes: { arguments: { expr: "1+1" } } });
-          if (toolId) trace?.endSpan("n1", toolId, { status: "ok", attributes: { result: "2" } });
-          if (llmId) trace?.endSpan("n1", llmId, { status: "ok", attributes: { usage: { totalTokens: 10 } } });
+          // 模拟统一 telemetry：llm start → tool start/end → llm end
+          const turnId = hooks.getCurrentTurnId?.("n1");
+          telemetry?.emit({ type: "llm_start", nodeId: "n1", turnId, requestId: "req", providerId: "p", modelId: "m", at: 1 });
+          telemetry?.emit({ type: "tool_start", nodeId: "n1", turnId, toolCallId: "call", toolName: "calc", parentRequestId: "req", at: 1, attributes: { arguments: { expr: "1+1" } } });
+          telemetry?.emit({ type: "tool_end", nodeId: "n1", turnId, toolCallId: "call", toolName: "calc", status: "ok", at: 1, attributes: { result: "2" } });
+          telemetry?.emit({ type: "llm_end", nodeId: "n1", turnId, requestId: "req", providerId: "p", modelId: "m", status: "ok", at: 1, usage: { input: 4, output: 6, cacheRead: 0, cacheWrite: 0, totalTokens: 10, exact: true, source: "provider" } });
           messages.push(assistant("done"));
         })));
       },

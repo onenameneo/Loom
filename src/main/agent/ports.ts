@@ -5,6 +5,7 @@ import type { StoredModelSelection } from "../modelConfig/modelRef";
 import type { ThinkingLevel } from "../modelConfig/thinkingLevels";
 import type { ApprovalPolicy, ApprovalsReviewer, PermissionReason, SandboxMode } from "./core/permissions";
 import type { PermissionContext } from "./core/permissions";
+import type { LlmUsage } from "./core/usage";
 
 // ---------------------------------------------------------------------------
 // ③ 端口（契约）：由内圈（②应用编排）声明、外圈（④适配器）实现。
@@ -117,16 +118,103 @@ export interface EngineFactory {
   listModels(): Promise<Array<{ id: string; name: string; providerId?: string; modelId?: string; available?: boolean; availability?: string; capabilities?: unknown }>>;
 }
 
-/** trace 观测端口：② 声明、④ 适配器调用（pi 事件 → span）、session 实现（解析 turnId → 仓库）。 */
-export interface TracePort {
-  beginSpan(input: {
-    nodeId: string;
-    kind: "llm_call" | "tool";
-    name: string;
-    parentSpanId?: string;
-    attributes?: Record<string, unknown>;
-  }): string | undefined;
-  endSpan(nodeId: string, spanId: string, input: { status: "ok" | "error" | "aborted"; attributes?: Record<string, unknown> }): void;
+export type TelemetryStatus = "ok" | "error" | "aborted";
+
+export type AgentTelemetryEvent =
+  | {
+      type: "turn_start";
+      nodeId: string;
+      turnId: string;
+      operation: TurnOperationKind;
+      at: number;
+    }
+  | {
+      type: "turn_end";
+      nodeId: string;
+      turnId: string;
+      operation: TurnOperationKind;
+      status: TelemetryStatus;
+      at: number;
+      durationMs?: number;
+      error?: string;
+    }
+  | {
+      type: "llm_start";
+      nodeId: string;
+      turnId?: string;
+      requestId: string;
+      providerId: string;
+      modelId: string;
+      at: number;
+      attributes?: Record<string, unknown>;
+    }
+  | {
+      type: "llm_first_token";
+      nodeId: string;
+      turnId?: string;
+      requestId: string;
+      at: number;
+      ttftMs?: number;
+    }
+  | {
+      type: "llm_end";
+      nodeId: string;
+      turnId?: string;
+      requestId: string;
+      providerId: string;
+      modelId: string;
+      status: TelemetryStatus;
+      at: number;
+      durationMs?: number;
+      ttftMs?: number;
+      usage?: LlmUsage;
+      attributes?: Record<string, unknown>;
+    }
+  | {
+      type: "tool_start";
+      nodeId: string;
+      turnId?: string;
+      toolCallId: string;
+      toolName: string;
+      at: number;
+      parentRequestId?: string;
+      attributes?: Record<string, unknown>;
+    }
+  | {
+      type: "tool_end";
+      nodeId: string;
+      turnId?: string;
+      toolCallId: string;
+      toolName: string;
+      status: TelemetryStatus;
+      at: number;
+      durationMs?: number;
+      usage?: LlmUsage;
+      attributes?: Record<string, unknown>;
+    }
+  | {
+      type: "compaction_start";
+      nodeId: string;
+      turnId?: string;
+      compactionId: string;
+      at: number;
+      attributes?: Record<string, unknown>;
+    }
+  | {
+      type: "compaction_end";
+      nodeId: string;
+      turnId?: string;
+      compactionId: string;
+      status: TelemetryStatus;
+      at: number;
+      durationMs?: number;
+      usage?: LlmUsage;
+      attributes?: Record<string, unknown>;
+    };
+
+/** Single normalized observation boundary for trace, metrics, timing and persistence projections. */
+export interface AgentTelemetryPort {
+  emit(event: AgentTelemetryEvent): void;
 }
 
 export interface CommandExecutionRequest {
@@ -277,6 +365,8 @@ export interface AgentHook {
   onContextTransform?(messages: AgentMessage[]): AgentMessage[] | Promise<AgentMessage[]>;
   /** 观测 pi 事件（只读广播，用于工具时间线等 UI）。 */
   onEvent?(nodeId: string, event: AgentEvent): void;
+  /** 观测 Loom 归一化 telemetry；与 raw Pi event 分离。 */
+  onTelemetry?(event: AgentTelemetryEvent): void;
 }
 
 /** 引擎适配器（④）调用的分发面——由 ② 注册表实现。 */
@@ -285,4 +375,5 @@ export interface HookDispatcher {
   toolResult(ctx: HookToolResultContext): Promise<ResultOverride | undefined>;
   contextTransform(messages: AgentMessage[]): Promise<AgentMessage[]>;
   event(nodeId: string, event: AgentEvent): void;
+  telemetry(event: AgentTelemetryEvent): void;
 }

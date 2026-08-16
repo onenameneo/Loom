@@ -111,7 +111,6 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
         },
         dispatcher: hooks.dispatcher,
         getCurrentTurnId: hooks.getCurrentTurnId,
-        trace: hooks.trace,
       }),
   });
   runtime.onTrace((event) => sendToWindow(getWin, "node:trace:update", event));
@@ -140,6 +139,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   ipcMain.handle("node:delete", (_e, nodeId: string) => runtime.deleteNode(nodeId));
   ipcMain.handle("node:budget", (_e, nodeId: string) => runtime.budget(nodeId));
   ipcMain.handle("node:trace", (_e, nodeId: string) => runtime.trace(nodeId));
+  ipcMain.handle("node:metrics", (_e, nodeId: string) => runtime.metrics(nodeId));
   ipcMain.handle("node:models", () => runtime.models());
   ipcMain.handle("node:setModel", (_e, arg: { nodeId: string; model: StoredModelSelection }) => runtime.setModel(arg));
   ipcMain.handle("node:setThinkingLevel", (_e, arg: { nodeId: string; thinkingLevel: ThinkingLevel }) => runtime.setThinkingLevel(arg));

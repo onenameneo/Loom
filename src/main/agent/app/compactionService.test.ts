@@ -17,7 +17,7 @@ describe("CompactionService", () => {
       clock: { now: () => 10 },
       ids: { message: () => "cp-1" },
       syncEngine: vi.fn(),
-      trace: { beginSpan: (input) => { traces.push({ op: 'begin', ...input }); return 'span-'+traces.length; }, endSpan: (_nodeId, _turnId, spanId, input) => traces.push({ op: 'end', spanId, ...input }) },
+      telemetry: { emit: (event) => traces.push(event) },
       events: { emit: (nodeId, type, payload) => events.push({ nodeId, type, payload }) },
     });
 
@@ -53,7 +53,7 @@ describe("CompactionService", () => {
       clock: { now: () => 20 },
       ids: { message: () => "cp-1" },
       syncEngine,
-      trace: { beginSpan: vi.fn(), endSpan: vi.fn() },
+      telemetry: { emit: vi.fn() },
       events: { emit: vi.fn() },
     });
 
@@ -93,7 +93,7 @@ describe("CompactionService", () => {
     };
     const service = createCompactionService({
       summarize: vi.fn(async () => ({ summary: "summary" })), store: { appendMessages }, clock: { now: () => 20 }, ids: { message: () => "cp-attach" },
-      syncEngine: vi.fn(), trace: { beginSpan: vi.fn(), endSpan: vi.fn() }, events: { emit: vi.fn() },
+      syncEngine: vi.fn(), telemetry: { emit: vi.fn() }, events: { emit: vi.fn() },
     });
 
     const result = await service.compactNode({
@@ -110,7 +110,7 @@ describe("CompactionService", () => {
     const appendMessages = vi.fn();
     const service = createCompactionService({
       summarize: vi.fn(async () => ({ summary: "summary" })), store: { appendMessages }, clock: { now: () => 20 }, ids: { message: () => "cp-best-effort" },
-      syncEngine: vi.fn(), trace: { beginSpan: vi.fn(), endSpan: vi.fn() }, events: { emit: vi.fn() },
+      syncEngine: vi.fn(), telemetry: { emit: vi.fn() }, events: { emit: vi.fn() },
     });
     const result = await service.compactNode({
       nodeId: "n1", trigger: "overflow", messages: [user("u1"), assistant("a1"), user("u2"), assistant("a2")], tailBudgetTokens: 4, tokenCounter: () => 2,
@@ -131,7 +131,7 @@ describe("CompactionService", () => {
     };
     const service = createCompactionService({
       summarize: vi.fn(async () => ({ summary: "summary" })), store: { appendMessages: vi.fn() }, clock: { now: () => 20 }, ids: { message: () => "cp-independent-budget" },
-      syncEngine: vi.fn(), trace: { beginSpan: vi.fn(), endSpan: vi.fn() }, events: { emit: vi.fn() },
+      syncEngine: vi.fn(), telemetry: { emit: vi.fn() }, events: { emit: vi.fn() },
     });
 
     const result = await service.compactNode({
@@ -151,7 +151,7 @@ describe("CompactionService", () => {
       clock: { now: () => 20 },
       ids: { message: () => "cp-1" },
       syncEngine: vi.fn(),
-      trace: { beginSpan: vi.fn(), endSpan: vi.fn() },
+      telemetry: { emit: vi.fn() },
       events: { emit: vi.fn() },
     });
 
@@ -177,7 +177,7 @@ describe("CompactionService", () => {
       clock: { now: () => 20 },
       ids: { message: () => "cp-1" },
       syncEngine: vi.fn(),
-      trace: { beginSpan: vi.fn(), endSpan: vi.fn() },
+      telemetry: { emit: vi.fn() },
       events: { emit: vi.fn() },
     });
 
@@ -201,7 +201,7 @@ describe("CompactionService", () => {
     });
     const service = createCompactionService({
       summarize, store: { appendMessages: vi.fn() }, clock: { now: () => 20 }, ids: { message: () => "cp-new" },
-      syncEngine: vi.fn(), trace: { beginSpan: vi.fn(), endSpan: vi.fn() }, events: { emit: vi.fn() },
+      syncEngine: vi.fn(), telemetry: { emit: vi.fn() }, events: { emit: vi.fn() },
     });
     const result = await service.compactNode({
       nodeId: "n1", trigger: "threshold", previousCheckpoint: previous, sourceOffset: 10,

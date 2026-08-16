@@ -78,8 +78,12 @@ type UsageFacts = {
   input?: number;
   output?: number;
   total?: number;
-  cached?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
   reasoning?: number;
+  cost?: number;
+  exact?: boolean;
+  source?: "provider" | "estimated";
 };
 
 function numberField(value: any, keys: string[]) {
@@ -93,22 +97,40 @@ function numberField(value: any, keys: string[]) {
 function usageFacts(usage: any): UsageFacts | undefined {
   if (!usage || typeof usage !== "object") return undefined;
   return {
-    input: numberField(usage, ["inputTokens", "promptTokens", "prompt_tokens", "input_tokens"]),
-    output: numberField(usage, ["outputTokens", "completionTokens", "completion_tokens", "output_tokens"]),
+    input: numberField(usage, ["input", "inputTokens", "promptTokens", "prompt_tokens", "input_tokens"]),
+    output: numberField(usage, ["output", "outputTokens", "completionTokens", "completion_tokens", "output_tokens"]),
     total: numberField(usage, ["totalTokens", "total_tokens"]),
-    cached: numberField(usage, ["cachedTokens", "cacheTokens", "cached_tokens", "promptCacheHitTokens", "prompt_cache_hit_tokens"]),
-    reasoning: numberField(usage, ["reasoningTokens", "reasoning_tokens"]),
+    cacheRead: numberField(usage, ["cacheRead", "cachedTokens", "cacheTokens", "cached_tokens", "promptCacheHitTokens", "prompt_cache_hit_tokens"]),
+    cacheWrite: numberField(usage, ["cacheWrite", "cacheWriteTokens"]),
+    reasoning: numberField(usage, ["reasoning", "reasoningTokens", "reasoning_tokens"]),
+    cost: numberField(usage?.cost, ["total"]),
+    exact: usage.exact === true,
+    source: usage.source === "provider" || usage.source === "estimated" ? usage.source : undefined,
   };
+}
+
+function formatTokenCount(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  const absolute = Math.abs(value);
+  if (absolute >= 1_000_000) return `${(Math.round((value / 1_000_000 + Number.EPSILON) * 100) / 100).toFixed(2)}M`;
+  if (absolute >= 1_000) return `${(Math.round((value / 1_000 + Number.EPSILON) * 100) / 100).toFixed(2)}K`;
+  return Math.round(value).toLocaleString();
+}
+
+function tokenValue(value: number | undefined) {
+  return `${formatTokenCount(value)} tokens`;
 }
 
 function usageSummary(usage: UsageFacts | undefined) {
   if (!usage) return undefined;
   const parts = [
-    typeof usage.input === "number" ? `in ${usage.input}` : undefined,
-    typeof usage.output === "number" ? `out ${usage.output}` : undefined,
-    typeof usage.total === "number" ? `total ${usage.total}` : undefined,
+    typeof usage.input === "number" ? `in ${formatTokenCount(usage.input)}` : undefined,
+    typeof usage.output === "number" ? `out ${formatTokenCount(usage.output)}` : undefined,
+    typeof usage.cacheRead === "number" ? `cache ${formatTokenCount(usage.cacheRead)}` : undefined,
+    typeof usage.total === "number" ? `total ${formatTokenCount(usage.total)}` : undefined,
+    typeof usage.cost === "number" ? `$${usage.cost.toFixed(4)}` : undefined,
   ].filter(Boolean);
-  return parts.length > 0 ? `${parts.join(" · ")} tokens` : undefined;
+  return parts.length > 0 ? `${parts.join(" · ")}${usage.source ? ` · ${usage.source}` : ""} tokens` : undefined;
 }
 
 function Json({ value }: { value: unknown }) {
@@ -266,11 +288,14 @@ function LlmSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) 
     {usage && <TraceDisclosure id={disclosureId(turnId, span, "response-usage")} label="Response usage" summary={usageSummary(usage)}>
       <div className="trace-detail-body">
         <dl className="trace-facts">
-          {typeof usage.input === "number" && <><dt>Input</dt><dd>{usage.input} tokens</dd></>}
-          {typeof usage.output === "number" && <><dt>Output</dt><dd>{usage.output} tokens</dd></>}
-          {typeof usage.total === "number" && <><dt>Total</dt><dd>{usage.total} tokens</dd></>}
-          {typeof usage.cached === "number" && <><dt>Cached</dt><dd>{usage.cached} tokens</dd></>}
-          {typeof usage.reasoning === "number" && <><dt>Reasoning</dt><dd>{usage.reasoning} tokens</dd></>}
+          {typeof usage.input === "number" && <><dt>Input</dt><dd>{tokenValue(usage.input)}</dd></>}
+          {typeof usage.output === "number" && <><dt>Output</dt><dd>{tokenValue(usage.output)}</dd></>}
+          {typeof usage.total === "number" && <><dt>Total</dt><dd>{tokenValue(usage.total)}</dd></>}
+          {typeof usage.cacheRead === "number" && <><dt>Cache read</dt><dd>{tokenValue(usage.cacheRead)}</dd></>}
+          {typeof usage.cacheWrite === "number" && <><dt>Cache write</dt><dd>{tokenValue(usage.cacheWrite)}</dd></>}
+          {typeof usage.reasoning === "number" && <><dt>Reasoning</dt><dd>{tokenValue(usage.reasoning)}</dd></>}
+          {typeof usage.cost === "number" && <><dt>Cost</dt><dd>${usage.cost.toFixed(4)}</dd></>}
+          {usage.source && <><dt>Accounting</dt><dd>{usage.source}</dd></>}
         </dl>
       </div>
     </TraceDisclosure>}
@@ -320,7 +345,7 @@ function spanText(range: { fromSeq?: number; toSeq?: number } | undefined) {
 
 function tokenDiagnosticText(label: string, value: { tokens?: number; exact?: boolean } | undefined) {
   if (!value || typeof value.tokens !== "number") return null;
-  return `${value.exact ? "exact" : "estimated"} ${label}: ${value.tokens} tokens`;
+  return `${value.exact ? "exact" : "estimated"} ${label}: ${tokenValue(value.tokens)}`;
 }
 
 function CompactionSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) {
@@ -331,7 +356,7 @@ function CompactionSpanView({ span, turnId }: { span: TraceSpanNode; turnId: str
   const before = tokenDiagnosticText("before", payload.diagnostics?.before);
   const after = tokenDiagnosticText("after", payload.diagnostics?.after);
   const summaryUsage = typeof payload.summaryUsage?.totalTokens === "number"
-    ? `${payload.summaryUsage.exact ? "exact" : "estimated"} summary: ${payload.summaryUsage.totalTokens} tokens`
+    ? `${payload.summaryUsage.exact ? "exact" : "estimated"} summary: ${tokenValue(payload.summaryUsage.totalTokens)}`
     : null;
   return <section className="trace-section trace-compaction-section trace-timeline-event">
     <div className="trace-section-heading">
@@ -343,7 +368,7 @@ function CompactionSpanView({ span, turnId }: { span: TraceSpanNode; turnId: str
       {retainedTail && <><dt>Retained</dt><dd>{retainedTail}</dd></>}
       {typeof payload.compactThroughSeq === "number" && <><dt>Through</dt><dd>{payload.compactThroughSeq}</dd></>}
       {typeof payload.retainedFromSeq === "number" && <><dt>Tail from</dt><dd>{payload.retainedFromSeq}</dd></>}
-      {typeof payload.retainedTokenCount === "number" && <><dt>Tail tokens</dt><dd>{payload.retainedTokenCount}</dd></>}
+      {typeof payload.retainedTokenCount === "number" && <><dt>Tail tokens</dt><dd>{tokenValue(payload.retainedTokenCount)}</dd></>}
       {payload.checkpointId && <><dt>Checkpoint</dt><dd>{payload.checkpointId}</dd></>}
       {before && <><dt>Before</dt><dd>{before}</dd></>}
       {after && <><dt>After</dt><dd>{after}</dd></>}
@@ -386,6 +411,7 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [trace, setTrace] = useState<TraceClientState | null>(null);
+  const [metrics, setMetrics] = useState<{ turns: number; llmRequests: number; toolCalls: number; compactions: number; durationMs: number; ttftMs: number; outputTokensPerSecond: number; usage?: any } | null>(null);
   const [hasNewActivity, setHasNewActivity] = useState(false);
   const addRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -415,16 +441,23 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
   useEffect(() => {
     if (!nodeId || !tabs.length || !window.api) {
       setTrace(null);
+      setMetrics(null);
       setHasNewActivity(false);
       return;
     }
     let dead = false;
     setTrace(null);
+    setMetrics(null);
     // 先订阅再取快照：订阅累积优先，初始快照只在更新于订阅时应用。
     const off = window.api.canvas.onTrace((event) => {
       if (event?.nodeId !== nodeId || dead) return;
       if (readingHistoryRef.current) setHasNewActivity(true);
       setTrace((current) => applyTraceEvent(current, event, nodeId));
+      if (event.type === "turn_end" && typeof window.api.canvas.metrics === "function") {
+        window.api.canvas.metrics(nodeId).then((result) => {
+          if (!dead) setMetrics(result?.totals ?? null);
+        });
+      }
     });
     window.api.canvas.trace(nodeId).then((snapshot) => {
       if (dead) return;
@@ -433,6 +466,11 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
         return current && current.revision >= state.revision ? current : state;
       });
     });
+    if (typeof window.api.canvas.metrics === "function") {
+      window.api.canvas.metrics(nodeId).then((result) => {
+        if (!dead) setMetrics(result?.totals ?? null);
+      });
+    }
     return () => { dead = true; off(); };
   }, [nodeId, tabs]);
   if (!tabs.length) return <div className="workbench-empty"><div className="workbench-choices" role="menu" aria-label="打开工作台页面"><button role="menuitem" onClick={() => open()}><Activity size={18} /><span>Trace</span><kbd>⌘R</kbd></button></div></div>;
@@ -461,6 +499,31 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
       if (atNewest) setHasNewActivity(false);
     }}>
       {hasNewActivity && <button className="trace-new-activity" onClick={() => { inspectorRef.current?.scrollTo({ top: 0, behavior: "smooth" }); readingHistoryRef.current = false; setHasNewActivity(false); }}>有新的 Trace 活动</button>}
+      {metrics && <section className="trace-section trace-metrics-summary" aria-label="Usage summary">
+        <div className="trace-section-heading"><div><h3>Usage summary</h3><p>当前节点的历史累计</p></div><span className="trace-metrics-summary__scope">LIFETIME</span></div>
+        <div className="trace-metrics-summary__hero">
+          <div className="trace-metric-card trace-metric-card--primary"><span>Total tokens</span><strong>{formatTokenCount(usageFacts(metrics.usage)?.total)}</strong></div>
+          {typeof metrics.usage?.cost?.total === "number" && <div className="trace-metric-card"><span>Cost</span><strong>${metrics.usage.cost.total.toFixed(4)}</strong></div>}
+        </div>
+        <div className="trace-metrics-summary__grid" aria-label="运行指标">
+          <div className="trace-metric-card"><span>Turns</span><strong>{metrics.turns}</strong></div>
+          <div className="trace-metric-card"><span>LLM calls</span><strong>{metrics.llmRequests}</strong></div>
+          <div className="trace-metric-card"><span>Tools</span><strong>{metrics.toolCalls}</strong></div>
+          <div className="trace-metric-card"><span>Duration</span><strong>{(metrics.durationMs / 1000).toFixed(1)}s</strong></div>
+          <div className="trace-metric-card"><span>TTFT</span><strong>{(metrics.ttftMs / 1000).toFixed(1)}s</strong></div>
+          <div className="trace-metric-card"><span>Output rate</span><strong>{metrics.outputTokensPerSecond.toFixed(1)} <small>tok/s</small></strong></div>
+        </div>
+        {(() => {
+          const usage = usageFacts(metrics.usage);
+          if (!usage) return null;
+          return <div className="trace-metrics-summary__tokens" aria-label="Token breakdown">
+            {typeof usage.input === "number" && <div><span>Input</span><strong>{formatTokenCount(usage.input)}</strong></div>}
+            {typeof usage.output === "number" && <div><span>Output</span><strong>{formatTokenCount(usage.output)}</strong></div>}
+            {typeof usage.cacheRead === "number" && <div><span>Cache read</span><strong>{formatTokenCount(usage.cacheRead)}</strong></div>}
+            {typeof usage.cacheWrite === "number" && <div><span>Cache write</span><strong>{formatTokenCount(usage.cacheWrite)}</strong></div>}
+          </div>;
+        })()}
+      </section>}
       {!nodeId ? <p>选择一个节点以查看 trace。</p> : !trace?.order.length ? <p>此节点运行后，实际模型请求、响应和工具调用会出现在这里。</p> : [...trace.order].reverse().map((turnId) => {
         const record = trace.recordsByTurnId[turnId];
         return record ? <TraceRecordView key={record.turnId} record={record} /> : null;

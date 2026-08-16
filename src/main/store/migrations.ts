@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const DB_SCHEMA_VERSION = 7;
+export const DB_SCHEMA_VERSION = 8;
 
 const CANONICAL_TABLES = [
   "settings",
@@ -8,6 +8,7 @@ const CANONICAL_TABLES = [
   "sessions",
   "nodes",
   "messages",
+  "agent_metrics",
   "approval_policies",
 ] as const;
 
@@ -102,10 +103,32 @@ function createCanonicalSchema(db: Database.Database): void {
       PRIMARY KEY(tool_name, target)
     );
 
+    CREATE TABLE IF NOT EXISTS agent_metrics(
+      id TEXT PRIMARY KEY,
+      node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      turn_id TEXT,
+      request_id TEXT,
+      tool_call_id TEXT,
+      kind TEXT NOT NULL,
+      provider_id TEXT,
+      model_id TEXT,
+      name TEXT,
+      started_at INTEGER,
+      ended_at INTEGER,
+      duration_ms INTEGER,
+      ttft_ms INTEGER,
+      status TEXT NOT NULL,
+      usage TEXT,
+      created_at INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, "order");
     CREATE INDEX IF NOT EXISTS idx_nodes_project_session ON nodes(project_id, session_id);
     CREATE INDEX IF NOT EXISTS idx_nodes_session ON nodes(session_id);
     CREATE INDEX IF NOT EXISTS idx_msg_node ON messages(node_id, seq);
+    CREATE INDEX IF NOT EXISTS idx_agent_metrics_node ON agent_metrics(node_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_metrics_session ON agent_metrics(session_id, created_at);
     PRAGMA user_version = ${DB_SCHEMA_VERSION};
   `);
 }

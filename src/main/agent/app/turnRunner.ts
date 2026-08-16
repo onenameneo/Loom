@@ -1,5 +1,4 @@
-import type { EngineHandle, EventSinkPort, TurnLifecycleEvent, TurnOperationKind, TurnResult, TurnRunContext } from "../ports";
-import type { TraceRepository } from "./traceRepository";
+import type { AgentTelemetryPort, EngineHandle, EventSinkPort, TurnLifecycleEvent, TurnOperationKind, TurnResult, TurnRunContext } from "../ports";
 import type { NodeRuntimeStore } from "./nodeRuntime";
 
 export interface TurnRunner {
@@ -20,6 +19,7 @@ export interface ActiveTurn {
   generation: number;
   state: "running" | "awaiting_approval";
   abortController: AbortController;
+  startedAt: number;
   abortHandle?: Pick<EngineHandle, "abort">;
   aborted: boolean;
   invalidated: boolean;
@@ -38,7 +38,8 @@ function boundedError(err: unknown): string {
  * per-node 状态（activeTurn / generation）存于 NodeRuntime 记录；generation bump 的
  * stale+abort 副作用由 `NodeRuntime.transition` 统一承担。本模块只表达状态机规则。
  */
-export function createTurnRunner(deps: { events: EventSinkPort; traces?: TraceRepository; runtime: NodeRuntimeStore }): TurnRunner {
+export function createTurnRunner(deps: { events: EventSinkPort; telemetry?: AgentTelemetryPort; runtime: NodeRuntimeStore; now?: () => number }): TurnRunner {
+  const now = deps.now ?? Date.now;
   function isStale(active: ActiveTurn): boolean {
     const rec = deps.runtime.get(active.nodeId);
     return !rec || rec.disposed || rec.generation !== active.generation;
@@ -55,9 +56,16 @@ export function createTurnRunner(deps: { events: EventSinkPort; traces?: TraceRe
       ...extra,
     } satisfies TurnLifecycleEvent);
     if (state === "completed" || state === "aborted" || state === "failed") {
-      deps.traces?.finishTurn(active.nodeId, active.turnId, terminalStatus[state]);
-    } else {
-      deps.traces?.updateTurn(active.nodeId, active.turnId, { state, ...(state === "awaiting_approval" && extra?.approval ? { approval: extra.approval } : {}) });
+      deps.telemetry?.emit({
+        type: "turn_end",
+        nodeId: active.nodeId,
+        turnId: active.turnId,
+        operation: active.operation,
+        status: terminalStatus[state],
+        at: now(),
+        durationMs: Math.max(0, now() - active.startedAt),
+        ...(extra?.error ? { error: extra.error } : {}),
+      });
     }
   }
 
@@ -98,12 +106,13 @@ export function createTurnRunner(deps: { events: EventSinkPort; traces?: TraceRe
       generation,
       state: "running",
       abortController: new AbortController(),
+      startedAt: now(),
       aborted: false,
       invalidated: false,
       settled: false,
     };
     deps.runtime.transition(nodeId, () => ({ activeTurn: active, generation }));
-    deps.traces?.startTurn({ nodeId, turnId: active.turnId, operation });
+    deps.telemetry?.emit({ type: "turn_start", nodeId, turnId: active.turnId, operation, at: active.startedAt });
     emit(active, "running");
     return { ok: true as const, turn: contextFor(active) };
   }

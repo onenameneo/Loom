@@ -14,6 +14,8 @@ import {
   type Store,
   type StoreData,
   type Project,
+  type AgentMetricRecord,
+  type AgentMetricTotals,
 } from "./store";
 import { DEFAULT_SESSION_TITLE, type DefaultTitleState } from "../../common/titleDefaults";
 import type { StoredModelSelection } from "../modelConfig/modelRef";
@@ -234,6 +236,13 @@ export class JsonStore implements Store {
   deleteMessagesFrom(_nodeId: string, _seq: number): void {}
   listMessages(_nodeId: string): PersistedMessage[] {
     return [];
+  }
+  appendMetric(_metric: AgentMetricRecord): void {}
+  listMetrics(_scope: { nodeId?: string; sessionId?: string }): AgentMetricRecord[] {
+    return [];
+  }
+  getMetricTotals(_scope: { nodeId?: string; sessionId?: string }): AgentMetricTotals {
+    return { turns: 0, llmRequests: 0, toolCalls: 0, compactions: 0, durationMs: 0, ttftMs: 0, outputTokensPerSecond: 0 };
   }
 }
 

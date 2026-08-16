@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Message } from "@earendil-works/pi-ai";
 import type { AgentTool } from "../core/tool";
-import type { EngineCacheEntry, EngineFactory, EngineHandle, EventSinkPort, HookDispatcher, NodeInit, TracePort } from "../ports";
+import type { EngineCacheEntry, EngineFactory, EngineHandle, EventSinkPort, HookDispatcher, NodeInit } from "../ports";
 import { adaptAgentToolsToPi } from "./piTools";
 import type { StoredModelSelection } from "../../modelConfig/modelRef";
 import { ModelRegistry } from "../../modelConfig/registry";
@@ -19,6 +19,7 @@ import { loadScopedModelSettings, resolveStoredModelSelection } from "../../mode
 import { globalSettingsPath, modelsJsonPath } from "../../modelConfig/paths";
 import { attributeModelError } from "../../modelConfig/errors";
 import type { RegistryProvider } from "../../modelConfig/types";
+import { normalizeLlmUsage } from "../core/usage";
 
 // ---------------------------------------------------------------------------
 // ④ 适配器 · pi 引擎：pi（pi-agent-core / pi-ai）的全部使用收敛于此，实现 EngineFactory。
@@ -117,12 +118,10 @@ export interface PiEngineDeps {
   dispatcher: HookDispatcher;
   /** 当前节点活跃 outer turn id；仅用于把工具调用与应用 turn 相关联。 */
   getCurrentTurnId?: (nodeId: string) => string | undefined;
-  /** trace 观测端口：pi 事件 → span（llm_call / tool）。 */
-  trace?: TracePort;
 }
 
 export function createPiEngine(deps: PiEngineDeps): EngineFactory {
-  const { events, resolveModel, buildContext, getNodeInit, getTools, getProjectRoot, dispatcher, getCurrentTurnId, trace } = deps;
+  const { events, resolveModel, buildContext, getNodeInit, getTools, getProjectRoot, dispatcher, getCurrentTurnId } = deps;
 
   function fileStamp(filePath: string | undefined) {
     if (!filePath || !existsSync(filePath)) return `${filePath ?? ""}:missing`;
@@ -205,9 +204,37 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
     const init = getNodeInit(nodeId);
     const [{ Agent }, modelContext] = await Promise.all([import("@earendil-works/pi-agent-core"), loadRegistryContext(nodeId)]);
     const model = await buildModel(modelContext, init?.model);
-    // span 槽位：llm_call 的 parent（下一个 tool 用）+ tool 按 toolCallId 配对。
-    let pendingLlmSpanId: string | undefined;
-    const toolSpanByCallId = new Map<string, string>();
+    let requestSeq = 0;
+    let activeLlmRequestId: string | undefined;
+    let latestLlmRequestId: string | undefined;
+    const llmStartedAt = new Map<string, number>();
+    const llmFirstTokenAt = new Map<string, number>();
+    const toolStartedAt = new Map<string, number>();
+    const endedLlmRequests = new Set<string>();
+    const now = () => Date.now();
+    const endLlm = (requestId: string, message: unknown, status: "ok" | "error" | "aborted") => {
+      if (endedLlmRequests.has(requestId)) return;
+      endedLlmRequests.add(requestId);
+      const startedAt = llmStartedAt.get(requestId);
+      const firstTokenAt = llmFirstTokenAt.get(requestId);
+      const usage = normalizeLlmUsage((message as { usage?: unknown } | undefined)?.usage, { source: "provider", exact: true });
+      const response = summarizeAssistantResponse(message);
+      dispatcher.telemetry({
+        type: "llm_end",
+        nodeId,
+        turnId: getCurrentTurnId?.(nodeId),
+        requestId,
+        providerId: String((message as { provider?: unknown } | undefined)?.provider ?? ""),
+        modelId: String((message as { model?: unknown } | undefined)?.model ?? ""),
+        status,
+        at: now(),
+        ...(startedAt !== undefined ? { durationMs: Math.max(0, now() - startedAt) } : {}),
+        ...(firstTokenAt !== undefined && startedAt !== undefined ? { ttftMs: Math.max(0, firstTokenAt - startedAt) } : {}),
+        ...(usage ? { usage } : {}),
+        ...(response ? { attributes: { response } } : {}),
+      });
+      if (activeLlmRequestId === requestId) activeLlmRequestId = undefined;
+    };
     const agent = new Agent({
       initialState: {
         systemPrompt: init?.systemPrompt || SYSTEM_PROMPT,
@@ -218,33 +245,32 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
       },
       streamFn: (requestModel, context, options) => {
         const ref = { providerId: String(requestModel.provider), modelId: String(requestModel.id) };
-        let llmSpanId: string | undefined;
-        try {
-          // llm_call span 进入：request payload（模型/系统提示/消息摘要/工具清单）作 attributes。
-          llmSpanId = trace?.beginSpan({
-            nodeId,
-            kind: "llm_call",
-            name: `${ref.providerId}/${ref.modelId}`,
-            attributes: {
-              model: { provider: ref.providerId, id: ref.modelId },
-              systemPrompt: init?.systemPrompt || SYSTEM_PROMPT,
-              messages: summarizeMessages(context.messages),
-              messageCount: context.messages.length,
-              tools: getTools(nodeId).map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })),
-              options,
-            },
-          });
-        } catch (error) {
-          // trace 是观测面：捕获失败绝不能让模型调用链丢失/中断。
-          console.warn(`[trace] llm_call begin failed for ${nodeId}:`, error);
-        }
-        // 保留到 message_end 结束；下一次 streamFn 覆盖。工具 span 以此为 parent。
-        pendingLlmSpanId = llmSpanId;
+        const requestId = `${nodeId}:llm:${++requestSeq}`;
+        const startedAt = now();
+        activeLlmRequestId = requestId;
+        latestLlmRequestId = requestId;
+        llmStartedAt.set(requestId, startedAt);
+        dispatcher.telemetry({
+          type: "llm_start",
+          nodeId,
+          turnId: getCurrentTurnId?.(nodeId),
+          requestId,
+          providerId: ref.providerId,
+          modelId: ref.modelId,
+          at: startedAt,
+          attributes: {
+            model: { provider: ref.providerId, id: ref.modelId },
+            systemPrompt: init?.systemPrompt || SYSTEM_PROMPT,
+            messages: summarizeMessages(context.messages),
+            messageCount: context.messages.length,
+            tools: getTools(nodeId).map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })),
+            options,
+          },
+        });
         try {
           return attributedStream(modelContext.models.streamSimple(requestModel, context, options), ref);
         } catch (error) {
-          if (llmSpanId) trace?.endSpan(nodeId, llmSpanId, { status: "error" });
-          pendingLlmSpanId = undefined;
+          endLlm(requestId, { provider: ref.providerId, model: ref.modelId }, "error");
           throw attributeModelError(error, ref);
         }
       },
@@ -255,19 +281,18 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
       //   空注册表下：transformContext 恒等、before/after 返回 undefined → 行为中性。
       transformContext: (messages: AgentMessage[]) => dispatcher.contextTransform(messages),
       beforeToolCall: async ({ toolCall, args }: BeforeToolCallContext) => {
-        let spanId: string | undefined;
-        try {
-          spanId = trace?.beginSpan({
-            nodeId,
-            kind: "tool",
-            name: toolCall.name,
-            parentSpanId: pendingLlmSpanId,
-            attributes: { arguments: args, id: toolCall.id },
-          });
-        } catch (error) {
-          console.warn(`[trace] tool begin failed for ${nodeId}:`, error);
-        }
-        if (spanId) toolSpanByCallId.set(toolCall.id, spanId);
+        const startedAt = now();
+        toolStartedAt.set(toolCall.id, startedAt);
+        dispatcher.telemetry({
+          type: "tool_start",
+          nodeId,
+          turnId: getCurrentTurnId?.(nodeId),
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          parentRequestId: latestLlmRequestId,
+          at: startedAt,
+          attributes: { arguments: args, id: toolCall.id },
+        });
         const d = await dispatcher.toolCall({
           nodeId,
           turnId: getCurrentTurnId?.(nodeId),
@@ -275,21 +300,38 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
           toolCallId: toolCall.id,
           args,
         });
-        return d ? { block: true, reason: d.reason } : undefined;
+        if (d) {
+          toolStartedAt.delete(toolCall.id);
+          dispatcher.telemetry({
+            type: "tool_end",
+            nodeId,
+            turnId: getCurrentTurnId?.(nodeId),
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            status: "error",
+            at: now(),
+            durationMs: Math.max(0, now() - startedAt),
+            attributes: { reason: d.reason, blocked: true },
+          });
+          return { block: true, reason: d.reason };
+        }
+        return undefined;
       },
       afterToolCall: ({ toolCall, args, result, isError }: AfterToolCallContext) => {
-        const spanId = toolSpanByCallId.get(toolCall.id);
-        toolSpanByCallId.delete(toolCall.id);
-        if (spanId) {
-          try {
-            trace?.endSpan(nodeId, spanId, {
-              status: isError ? "error" : "ok",
-              attributes: { arguments: args, result: result.content, details: result.details, isError, usage: result.usage },
-            });
-          } catch (error) {
-            console.warn(`[trace] tool end failed for ${nodeId}:`, error);
-          }
-        }
+        const startedAt = toolStartedAt.get(toolCall.id);
+        toolStartedAt.delete(toolCall.id);
+        dispatcher.telemetry({
+          type: "tool_end",
+          nodeId,
+          turnId: getCurrentTurnId?.(nodeId),
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          status: isError ? "error" : "ok",
+          at: now(),
+          ...(startedAt !== undefined ? { durationMs: Math.max(0, now() - startedAt) } : {}),
+          ...(normalizeLlmUsage(result.usage, { source: "provider", exact: true }) ? { usage: normalizeLlmUsage(result.usage, { source: "provider", exact: true }) } : {}),
+          attributes: { arguments: args, result: result.content, details: result.details, isError },
+        });
         return dispatcher.toolResult({
           nodeId,
           toolName: toolCall.name,
@@ -312,6 +354,14 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
           if (event.message?.role === "assistant") events.emit(nodeId, "assistant_start");
           break;
         case "message_update":
+          if (activeLlmRequestId && !endedLlmRequests.has(activeLlmRequestId) && (event.assistantMessageEvent?.type === "text_delta" || event.assistantMessageEvent?.type === "thinking_delta" || event.assistantMessageEvent?.type === "toolcall_delta")) {
+            const firstTokenAt = now();
+            if (!llmFirstTokenAt.has(activeLlmRequestId)) {
+              llmFirstTokenAt.set(activeLlmRequestId, firstTokenAt);
+              const startedAt = llmStartedAt.get(activeLlmRequestId);
+              dispatcher.telemetry({ type: "llm_first_token", nodeId, turnId: getCurrentTurnId?.(nodeId), requestId: activeLlmRequestId, at: firstTokenAt, ...(startedAt !== undefined ? { ttftMs: Math.max(0, firstTokenAt - startedAt) } : {}) });
+            }
+          }
           if (event.assistantMessageEvent?.type === "text_delta")
             events.emit(nodeId, "delta", event.assistantMessageEvent.delta);
           if (event.assistantMessageEvent?.type === "thinking_delta")
@@ -319,27 +369,17 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
           break;
         case "message_end":
           if (event.message?.role === "assistant") {
-            // llm_call span 结束（streamFn 已 begin）；不清理 pendingLlmSpanId，
-            // 让紧随的工具调用以它作 parent；下次 streamFn 会覆盖。
-            if (pendingLlmSpanId) {
-              const usage = (event.message as unknown as { usage?: unknown })?.usage;
-              const response = summarizeAssistantResponse(event.message);
-              try {
-                trace?.endSpan(nodeId, pendingLlmSpanId, {
-                  status: "ok",
-                  attributes: { ...(usage ? { usage } : {}), ...(response ? { response } : {}) },
-                });
-              } catch (error) {
-                console.warn(`[trace] llm_call end failed for ${nodeId}:`, error);
-              }
+            if (activeLlmRequestId) {
+              const stopReason = String((event.message as any).stopReason ?? "stop");
+              endLlm(activeLlmRequestId, event.message, stopReason === "aborted" ? "aborted" : stopReason === "error" ? "error" : "ok");
             }
           }
           break;
         case "agent_end":
           events.emit(nodeId, "done");
-          // 未结束的 span 由 finishTurn 兜底标 aborted；清空槽位。
-          pendingLlmSpanId = undefined;
-          toolSpanByCallId.clear();
+          if (activeLlmRequestId) endLlm(activeLlmRequestId, { provider: "", model: "" }, "aborted");
+          activeLlmRequestId = undefined;
+          toolStartedAt.clear();
           break;
       }
       // Hook 观测面：把每个 pi 事件广播给已注册 hook（H1 工具时间线等）。

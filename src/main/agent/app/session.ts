@@ -58,6 +58,9 @@ import {
   UNTITLED_SESSION_TITLE,
 } from "../../../common/titleDefaults";
 import { createTraceRepository } from "./traceRepository";
+import { createTraceTelemetryHook } from "../hooks/events/traceTelemetry";
+import { createMetricsTelemetryHook } from "../hooks/events/metricsTelemetry";
+import { normalizeLlmUsage, type LlmUsage } from "../core/usage";
 import { createCompactionService, type CompactNodeResult, type CompactionServiceDeps } from "./compactionService";
 import { createApprovalGate } from "../hooks/tools/approvalGate";
 import {
@@ -90,7 +93,7 @@ import type {
   LlmEnginePort,
   NodeInit,
   StorePort,
-  TracePort,
+  AgentTelemetryPort,
   TurnLifecycleEvent,
 } from "../ports";
 
@@ -154,8 +157,8 @@ export interface CanvasRuntimeDeps {
     events: EventSinkPort;
     dispatcher: HookDispatcher;
     getCurrentTurnId: (nodeId: string) => string | undefined;
-    /** trace 观测端口：pi 事件 → span（llm_call/tool），session 解析 turnId 后写入仓库。 */
-    trace: TracePort;
+    /** unified telemetry port: pi/turn/compaction lifecycle → projections. */
+    telemetry: AgentTelemetryPort;
   }) => EngineFactory;
 }
 
@@ -165,7 +168,7 @@ interface CanvasMessageDto {
   thinking?: string;
   images?: { data: string; mimeType: string }[];
   seq: number;
-  usage?: { totalTokens?: number };
+  usage?: LlmUsage;
   meta?: unknown;
   checkpoint?: {
     id: string;
@@ -267,11 +270,19 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   // ---- 图缓存 & 映射 --------------------------------------------------------
 
   function persisted(msg: AgentMessage): PersistedMessage {
-    return { id: ids.message(), seq: 0, role: roleOf(msg), content: msg };
+    const usage = normalizeLlmUsage((msg as any)?.usage);
+    return {
+      id: ids.message(),
+      seq: 0,
+      role: roleOf(msg),
+      content: msg,
+      ...(usage ? { meta: { usage } } : {}),
+    };
   }
 
   function persistedWithId(msg: AgentMessage, id: string): PersistedMessage {
-    return { id, seq: 0, role: roleOf(msg), content: msg };
+    const usage = normalizeLlmUsage((msg as any)?.usage);
+    return { id, seq: 0, role: roleOf(msg), content: msg, ...(usage ? { meta: { usage } } : {}) };
   }
 
   function toCanvasNode(record: NodeRecord): CanvasNode {
@@ -555,7 +566,14 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   const hookRegistry = createHookRegistry();
   hookRegistry.use(createToolLifecycleHook(events));
   const traces = createTraceRepository({ now: clock.now });
-  const turns = createTurnRunner({ events, traces, runtime });
+  hookRegistry.use(createTraceTelemetryHook(traces));
+  hookRegistry.use(createMetricsTelemetryHook({
+    store,
+    getSessionId: (nodeId) => runtime.get(nodeId)?.node?.sessionId,
+    now: clock.now,
+  }));
+  const telemetry: AgentTelemetryPort = { emit: (event) => hookRegistry.telemetry(event) };
+  const turns = createTurnRunner({ events, telemetry, runtime, now: clock.now });
   let queries!: ReturnType<typeof createNodeQueryEngine>;
   const approvals = createApprovalBroker({ events, clock });
   const policies = createApprovalPolicyStore({
@@ -581,30 +599,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     dispatcher: hookRegistry,
     getCurrentTurnId: (nodeId) => queries.state(nodeId)?.turnId,
     // trace 观测端口：解析当前活跃 turnId，写入 span 仓库。观测是观测面，失败仅告警。
-    trace: {
-      beginSpan: ({ nodeId, kind, name, parentSpanId, attributes }) => {
-        const turnId = queries.state(nodeId)?.turnId;
-        if (!turnId) {
-          console.warn(`[trace] beginSpan skip ${name} for ${nodeId}: no active turn`);
-          return undefined;
-        }
-        try {
-          return traces.beginSpan({ nodeId, turnId, kind, name, parentSpanId, attributes });
-        } catch (error) {
-          console.warn(`[trace] beginSpan failed for ${nodeId}/${name}:`, error);
-          return undefined;
-        }
-      },
-      endSpan: (nodeId, spanId, input) => {
-        const turnId = queries.state(nodeId)?.turnId;
-        if (!turnId) return;
-        try {
-          traces.endSpan(nodeId, turnId, spanId, input);
-        } catch (error) {
-          console.warn(`[trace] endSpan failed for ${nodeId}/${spanId}:`, error);
-        }
-      },
-    },
+    telemetry,
   });
   // 引擎缓存持有于 NodeRuntime 记录：ensure/peek/drop/invalidateAll 只读 runtime。
   const engine: LlmEnginePort = {
@@ -637,10 +632,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
           const handle = engine.peek(nodeId);
           if (node && handle) syncTranscript(handle, node);
         },
-        trace: {
-          beginSpan: (input) => traces.beginSpan(input),
-          endSpan: (nodeId, turnId, spanId, input) => traces.endSpan(nodeId, turnId, spanId, input),
-        },
+        telemetry,
         events,
       })
     : undefined;
@@ -744,7 +736,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
         ];
       }
       if (role !== "user" && role !== "assistant") return [];
-      const usage = (m as any)?.usage;
+      const usage = normalizeLlmUsage((m as any)?.usage);
       const thinking = role === "assistant" ? thinkingOf(m) : "";
       return [{ role, text: textOf(m), thinking: thinking || undefined, images: imagesOf(m), seq, usage, meta: n.messageMeta[seq] }];
     }),
@@ -797,13 +789,32 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     }
   }
 
-  function appendDelta(node: CanvasNode, handle: EngineHandle, from: number) {
+  function appendDelta(node: CanvasNode, handle: EngineHandle, from: number, turnId?: string) {
     const nextMessages: AgentMessage[] = handle?.messages ?? [];
     const delta = nextMessages.slice(from);
     if (delta.length > 0) {
-      store.appendMessages(node.id, delta.map(persisted));
+      const llmMetric = turnId
+        ? [...(store.listMetrics?.({ nodeId: node.id }) ?? [])].reverse().find((metric) => metric.kind === "llm" && metric.turnId === turnId)
+        : undefined;
+      const persistedDelta = delta.map((message) => {
+        const item = persisted(message);
+        if (roleOf(message) !== "assistant" || !llmMetric) return item;
+        return {
+          ...item,
+          meta: {
+            ...(item.meta && typeof item.meta === "object" ? item.meta as Record<string, unknown> : {}),
+            ...(llmMetric.durationMs !== undefined ? { durationMs: llmMetric.durationMs } : {}),
+            ...(llmMetric.ttftMs !== undefined ? { ttftMs: llmMetric.ttftMs } : {}),
+            ...(llmMetric.providerId ? { providerId: llmMetric.providerId } : {}),
+            ...(llmMetric.modelId ? { modelId: llmMetric.modelId } : {}),
+            status: llmMetric.status,
+            turnId,
+          },
+        };
+      });
+      store.appendMessages(node.id, persistedDelta);
       node.messages.push(...delta);
-      node.messageMeta.push(...delta.map(() => undefined));
+      node.messageMeta.push(...persistedDelta.map((message) => message.meta));
     }
   }
 
@@ -909,14 +920,16 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     if (node.messages.length > fromSeq) truncateTranscript(node, fromSeq, existingHandle);
     const compactionResult = await maybeCompactNode(node, "overflow", { handle: existingHandle });
     if (!compactionResult.ok && !hasValidCheckpoint(node)) return { ok: false as const, reason: "overflow" as const };
+    let activeTurn: { turnId: string; signal: AbortSignal } | undefined;
     const retry = await queries.run({
       nodeId: node.id,
       operation: "send",
+      onTurnStarted: (turn) => { activeTurn = { turnId: turn.turnId, signal: turn.signal }; },
       prepare: async (handle) => {
         syncTranscript(handle, node);
         return { kind: "continue", from: effectiveMessages(node).length };
       },
-      finalize: (handle, from) => appendDelta(node, handle, from),
+        finalize: (handle, from) => appendDelta(node, handle, from, activeTurn?.turnId),
     });
     if (!retry.result.ok) {
       if (retry.result.reason === "failed" && isContextOverflow(retry.error)) {
@@ -1010,9 +1023,10 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
           handle,
           pendingUserInput: userMessage,
         });
-        store.appendMessages(arg.nodeId, [persisted(userMessage)]);
+        const persistedUser = persisted(userMessage);
+        store.appendMessages(arg.nodeId, [persistedUser]);
         node.messages.push(userMessage);
-        node.messageMeta.push(undefined);
+        node.messageMeta.push(persistedUser.meta);
         promptFromSeq = node.messages.length;
         return { kind: "prompt", message: userMessage, from: effectiveMessages(node).length };
       },
@@ -1101,7 +1115,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
         await maybeCompactNode(node, "threshold", { turnId: activeTurn?.turnId, signal: activeTurn?.signal, handle });
         return { kind: "continue", from: effectiveMessages(node).length };
       },
-      finalize: (handle, from) => appendDelta(node, handle, from),
+      finalize: (handle, from) => appendDelta(node, handle, from, activeTurn?.turnId),
     });
     const { result } = query;
     clearLiveTurn(nodeId);
@@ -1139,7 +1153,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
         const userMessage: AgentMessage = { role: "user", content: text, timestamp: clock.now() };
         return { kind: "prompt", message: userMessage, from: effectiveMessages(node).length };
       },
-      finalize: (handle, from) => appendDelta(node, handle, from),
+      finalize: (handle, from) => appendDelta(node, handle, from, activeTurn?.turnId),
     });
     const { result } = query;
     clearLiveTurn(arg.nodeId);
@@ -1358,6 +1372,10 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     registerHook: (hook: AgentHook) => hookRegistry.use(hook),
     trace: (nodeId: string) => traces.snapshot(nodeId),
     onTrace: (listener: Parameters<typeof traces.subscribe>[0]) => traces.subscribe(listener),
+    metrics: (nodeId: string) => ({
+      records: store.listMetrics?.({ nodeId }) ?? [],
+      totals: store.getMetricTotals?.({ nodeId }),
+    }),
   };
 }
 

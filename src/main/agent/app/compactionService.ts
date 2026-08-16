@@ -1,5 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { IdPort, ClockPort, EventSinkPort, StorePort } from "../ports";
+import type { AgentTelemetryPort, IdPort, ClockPort, EventSinkPort, StorePort } from "../ports";
 import {
   DEFAULT_POST_COMPACTION_ATTACHMENT_BUDGET_TOKENS,
   DEFAULT_POST_COMPACTION_ATTACHMENT_ITEM_TOKENS,
@@ -21,6 +21,7 @@ import {
   type LoomContextCheckpointMessage,
   type LoomUsageDiagnostic,
 } from "../core/messages";
+import { normalizeLlmUsage } from "../core/usage";
 
 export interface CompactionSummaryResult {
   summary: string;
@@ -36,16 +37,7 @@ export interface CompactionServiceDeps {
   clock: ClockPort;
   ids: IdPort;
   syncEngine(nodeId: string): void;
-  trace: {
-    beginSpan(input: {
-      nodeId: string;
-      turnId: string;
-      kind: "compaction";
-      name: string;
-      attributes?: Record<string, unknown>;
-    }): string | undefined;
-    endSpan(nodeId: string, turnId: string, spanId: string, input: { status: "ok" | "error" | "aborted"; attributes?: Record<string, unknown> }): void;
-  };
+  telemetry: AgentTelemetryPort;
   events: EventSinkPort;
 }
 
@@ -98,6 +90,8 @@ export interface CompactionLifecycleEventPayload {
 }
 
 export function createCompactionService(deps: CompactionServiceDeps): CompactionService {
+  const compactionStartedAt = new Map<string, number>();
+
   function emitPlan(input: PlanNodeCompactionInput, plan: TurnSafeCutPlan, beginSpan: boolean): string | undefined {
     const payload: CompactionLifecycleEventPayload = {
       state: "planned",
@@ -109,14 +103,18 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
       retainedTokenCount: plan.retainedTokenCount,
     };
     deps.events.emit(input.nodeId, "compaction", payload);
-    if (!beginSpan || !input.turnId) return undefined;
-    return deps.trace.beginSpan({
+    if (!beginSpan) return undefined;
+    const compactionId = deps.ids.message();
+    compactionStartedAt.set(compactionId, payload.at);
+    deps.telemetry.emit({
+      type: "compaction_start",
       nodeId: input.nodeId,
       turnId: input.turnId,
-      kind: "compaction",
-      name: `compact:${input.trigger}`,
+      compactionId,
+      at: payload.at,
       attributes: payload as unknown as Record<string, unknown>,
     });
+    return compactionId;
   }
 
   return {
@@ -229,12 +227,20 @@ export function createCompactionService(deps: CompactionServiceDeps): Compaction
   ) {
     const payload: CompactionLifecycleEventPayload = { state, trigger: input.trigger, at: deps.clock.now(), ...extra };
     deps.events.emit(input.nodeId, "compaction", payload);
-    if (input.turnId && spanId) {
-      deps.trace.endSpan(input.nodeId, input.turnId, spanId, {
-        status: state === "succeeded" ? "ok" : state === "failed" ? "error" : "aborted",
-        attributes: payload as unknown as Record<string, unknown>,
-      });
-    }
+    const compactionId = spanId ?? deps.ids.message();
+    const startedAt = compactionStartedAt.get(compactionId);
+    compactionStartedAt.delete(compactionId);
+    deps.telemetry.emit({
+      type: "compaction_end",
+      nodeId: input.nodeId,
+      turnId: input.turnId,
+      compactionId,
+      status: state === "succeeded" ? "ok" : state === "failed" ? "error" : "aborted",
+      at: payload.at,
+      ...(startedAt !== undefined ? { durationMs: Math.max(0, payload.at - startedAt) } : {}),
+      ...(payload.summaryUsage ? { usage: normalizeLlmUsage(payload.summaryUsage, { source: payload.summaryUsage.exact ? "provider" : "estimated", exact: payload.summaryUsage.exact }) } : {}),
+      attributes: payload as unknown as Record<string, unknown>,
+    });
   }
 
   function planAttachments(input: CompactNodeInput): AttachmentPlan {

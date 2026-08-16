@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTurnRunner } from "./turnRunner";
-import { createTraceRepository } from "./traceRepository";
 import { createNodeRuntimeStore, type NodeRuntimeStore } from "./nodeRuntime";
 import type { CanvasNode } from "./session";
 import type { EngineHandle, EventSinkPort } from "../ports";
@@ -79,17 +78,15 @@ describe("createTurnRunner", () => {
   });
 
   it("records approval transitions as approval trace entries", () => {
-    const traces = createTraceRepository({ now: () => 1 });
     const runtime = makeRuntime(["n1"]);
-    const runner = createTurnRunner({ events: eventSink().sink, traces, runtime });
+    const { sink, events } = eventSink();
+    const runner = createTurnRunner({ events: sink, runtime, now: () => 1 });
     const acquired = runner.acquire("n1", "send");
     if (!acquired.ok) throw new Error("expected turn");
 
     acquired.turn.setAwaitingApproval({ requestId: "approval-1", toolName: "shell", toolCallId: "call-1" });
 
-    expect(traces.snapshot("n1").records[0]?.spans[0].attributes).toMatchObject({
-      approval: { requestId: "approval-1", toolName: "shell" },
-    });
+    expect(events.at(-1)?.payload).toMatchObject({ state: "awaiting_approval", approval: { requestId: "approval-1", toolName: "shell" } });
   });
 });
 

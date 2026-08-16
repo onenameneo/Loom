@@ -108,6 +108,20 @@ describe("createHookRegistry · event（广播 + 异常隔离）", () => {
   });
 });
 
+describe("createHookRegistry · telemetry（广播 + 异常隔离）", () => {
+  it("broadcasts correlated events and isolates consumer errors", () => {
+    const r = createHookRegistry();
+    const good = vi.fn();
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const event = { type: "llm_end", nodeId: "n1", turnId: "t1", requestId: "r1", providerId: "p", modelId: "m", status: "ok", at: 2 } as const;
+    r.use({ name: "boom", onTelemetry: () => { throw new Error("x"); } });
+    r.use({ name: "ok", onTelemetry: good });
+    expect(() => r.telemetry(event)).not.toThrow();
+    expect(good).toHaveBeenCalledWith(event);
+    spy.mockRestore();
+  });
+});
+
 describe("createHookRegistry · 空注册表行为保真", () => {
   it("contextTransform 返回同一引用/同序同内容", async () => {
     const r = createHookRegistry();

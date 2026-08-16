@@ -1,5 +1,6 @@
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
+  AgentTelemetryEvent,
   AgentHook,
   HookDispatcher,
   HookToolCallContext,
@@ -79,6 +80,17 @@ export function createHookRegistry(): HookRegistry {
           h.onEvent(nodeId, event);
         } catch (err) {
           console.error(`[hook:${h.name}] onEvent failed`, err);
+        }
+      }
+    },
+
+    telemetry(event: AgentTelemetryEvent) {
+      for (const h of hooks) {
+        if (!h.onTelemetry) continue;
+        try {
+          h.onTelemetry(event);
+        } catch (err) {
+          console.error(`[hook:${h.name}] onTelemetry failed`, err);
         }
       }
     },
