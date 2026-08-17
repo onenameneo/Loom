@@ -102,10 +102,10 @@ describe("Message branching", () => {
     fireEvent.click(screen.getByRole("button", { name: "分支" }));
 
     expect(screen.getByRole("dialog", { name: "从这里创建聊天分支" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "在新聊天中继续" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "在画布中创建分支" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "在当前窗口开启分支" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "在画布中开启分支" })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "在画布中创建分支" }));
+    fireEvent.click(screen.getByRole("button", { name: "在画布中开启分支" }));
     expect(onBranch).toHaveBeenCalledWith("canvas-node", 3);
   });
 
@@ -115,7 +115,7 @@ describe("Message branching", () => {
     render(<Message role="assistant" text="Answer" sourceSeq={1} onBranch={onBranch} />);
 
     fireEvent.click(screen.getByRole("button", { name: "分支" }));
-    const option = screen.getByRole("button", { name: "在画布中创建分支" });
+    const option = screen.getByRole("button", { name: "在画布中开启分支" });
     fireEvent.click(option);
     fireEvent.click(option);
     expect(onBranch).toHaveBeenCalledOnce();

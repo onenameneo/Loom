@@ -140,27 +140,27 @@ export function MessageBranchDialog({
             <button
               className="branch-dialog-option"
               type="button"
-              aria-label="在新聊天中继续"
+              aria-label="在当前窗口开启分支"
               disabled={busy}
               onClick={() => void choose("new-session")}
             >
               <MessageSquarePlus size={17} aria-hidden="true" />
               <span>
-                <strong>在新聊天中继续</strong>
-                <small>创建独立会话，复制当前消息之前的上下文</small>
+                <strong>在当前窗口开启分支</strong>
+                <small>在当前聊天窗口从此消息创建分支</small>
               </span>
             </button>
             <button
               className="branch-dialog-option"
               type="button"
-              aria-label="在画布中创建分支"
+              aria-label="在画布中开启分支"
               disabled={busy}
               onClick={() => void choose("canvas-node")}
             >
               <GitBranch size={17} aria-hidden="true" />
               <span>
-                <strong>在画布中创建分支</strong>
-                <small>在当前会话生成子节点，冻结当前消息上下文</small>
+                <strong>在画布中开启分支</strong>
+                <small>在画布中的新窗口从此消息创建分支</small>
               </span>
             </button>
           </div>
