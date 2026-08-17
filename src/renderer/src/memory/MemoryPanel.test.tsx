@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import MemoryPanel from "./MemoryPanel";
 
@@ -11,6 +12,7 @@ afterEach(() => {
 describe("MemoryPanel", () => {
   it("lists lifecycle metadata and refreshes from typed memory IPC", async () => {
     const onEvent = vi.fn(() => vi.fn());
+    const remember = vi.fn(async () => undefined);
     const list = vi.fn(async () => ({
       records: [{
         id: "mem_1",
@@ -33,8 +35,9 @@ describe("MemoryPanel", () => {
         approve: vi.fn(async () => undefined),
         reject: vi.fn(async () => undefined),
         forget: vi.fn(async () => undefined),
+        autodreamStatus: vi.fn(async () => ({ status: "idle", gate: { eligible: false, reason: "sessions" }, newSessions: 0 })),
         autodreamRun: vi.fn(async () => undefined),
-        remember: vi.fn(async () => undefined),
+        remember,
       },
     };
     render(<MemoryPanel project={{ id: "project-1", name: "Loom", createdAt: 1, updatedAt: 1, pinned: false, order: 0 }} />);
@@ -42,5 +45,18 @@ describe("MemoryPanel", () => {
     expect(screen.getAllByText("candidate").length).toBeGreaterThan(0);
     expect(onEvent).toHaveBeenCalled();
     expect(list).toHaveBeenCalledWith({ projectId: "project-1", includeArchived: true });
+
+    await userEvent.click(screen.getByRole("button", { name: /Use Chinese/ }));
+    expect(screen.getByRole("dialog", { name: "记忆详情" })).toBeTruthy();
+    expect(screen.getByText("Use Chinese by default.")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "关闭详情" }));
+    expect(screen.queryByRole("dialog", { name: "记忆详情" })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "新增记忆" }));
+    expect(screen.getByRole("dialog", { name: "新增记忆" })).toBeTruthy();
+    await userEvent.type(screen.getByRole("textbox", { name: /记忆内容/ }), "默认使用中文回答。");
+    await userEvent.click(screen.getByRole("button", { name: "添加记忆" }));
+    expect(remember).toHaveBeenCalledWith(expect.objectContaining({ type: "user", content: "默认使用中文回答。" }));
+    expect(screen.queryByRole("dialog", { name: "新增记忆" })).toBeNull();
   });
 });

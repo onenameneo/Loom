@@ -79,7 +79,7 @@ describe("isDarwinRenderer", () => {
 });
 
 describe("SettingsPanel model registry", () => {
-  it("renders model configuration with connected providers and configured default models only", () => {
+  it("renders model configuration with connected providers and configured default models only", async () => {
     window.api = {
       platform: "darwin",
       settings: {
@@ -190,6 +190,8 @@ describe("SettingsPanel model registry", () => {
     expect(screen.getAllByText(/Claude Sonnet 4.5/).length).toBeGreaterThan(0);
     expect(screen.queryByText("Google")).toBeNull();
     expect(screen.queryByRole("button", { name: "打开 models.json" })).toBeNull();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox", { name: "默认模型" }));
     expect(screen.getByRole("option", { name: /Claude Sonnet 4.5/ })).toBeTruthy();
     expect(screen.queryByRole("option", { name: /Claude Haiku 4.5/ })).toBeNull();
     expect(screen.queryByLabelText(/API Key/i)).toBeNull();
@@ -302,8 +304,9 @@ describe("SettingsPanel model registry", () => {
 
     await user.click(screen.getByRole("button", { name: "添加模型" }));
     expect(screen.getByRole("combobox", { name: "Provider" })).toBeTruthy();
+    await user.click(screen.getByRole("combobox", { name: "Provider" }));
     expect(screen.getByRole("option", { name: /Google/ })).toBeTruthy();
-    await user.selectOptions(screen.getByLabelText("Provider"), "anthropic");
+    await user.click(screen.getByRole("option", { name: /Anthropic/ }));
     expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
     const sonnet = screen.getByRole("checkbox", { name: /Claude Sonnet 4.5/ }) as HTMLInputElement;
     const haiku = screen.getByRole("checkbox", { name: /Claude Haiku 4.5/ }) as HTMLInputElement;
@@ -557,9 +560,10 @@ describe("SettingsPanel model registry", () => {
     await user.click(screen.getByRole("button", { name: "添加模型" }));
 
     expect(screen.getByRole("dialog", { name: "添加模型配置" })).toBeTruthy();
+    await user.click(screen.getByRole("combobox", { name: "Provider" }));
     expect(screen.getByRole("option", { name: "Anthropic · anthropic" })).toBeTruthy();
     expect(screen.getByRole("option", { name: "OpenAI · openai" })).toBeTruthy();
-    await user.selectOptions(screen.getByLabelText("Provider"), "openai");
+    await user.click(screen.getByRole("option", { name: "OpenAI · openai" }));
     expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
     expect(screen.getByText("GPT 5.2")).toBeTruthy();
     await user.type(screen.getByLabelText("API key"), "$OPENAI_API_KEY");

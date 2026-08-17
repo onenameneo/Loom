@@ -37,6 +37,7 @@ describe("memory runtime gates", () => {
     const settings = { enabled: true, backgroundExtraction: false, autoDream: true, rootDir: undefined };
     const runtime = createMemoryRuntime({ homeDir: home, settings: () => settings });
     await runtime.store.writeOperationalState({ version: 1, newSessions: AUTODREAM_MIN_SESSIONS });
+    await expect(runtime.autoDreamStatus()).resolves.toMatchObject({ gate: { eligible: true, reason: "ready" } });
     const result = await runtime.maybeRunAutoDream();
     expect(result?.status).toBe("completed");
   });

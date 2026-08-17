@@ -198,7 +198,9 @@ export function createMemoryRuntime(options: {
     },
     async autoDreamStatus() {
       await ensureCurrentStore();
-      return store.readOperationalState({ version: 1, newSessions: 0 });
+      const state = await store.readOperationalState({ version: 1, newSessions: 0 });
+      const gate = await autodream.canRun(options.settings().enabled && options.settings().autoDream);
+      return { ...state, gate };
     },
     async maybeRunAutoDream() {
       await ensureCurrentStore();

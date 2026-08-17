@@ -36,6 +36,7 @@ import { IconEye, IconPlus, IconSettings, IconProject } from "./icons";
 import SessionCanvas from "./canvas/SessionCanvas";
 import { useTitlebarActions, useTitlebarContext } from "./titlebar/Titlebar";
 import { ConfirmDialog, Modal } from "./ui/dialogs";
+import { LoomCheckboxField, LoomSelect, LoomSelectGroup, LoomSelectItem } from "./ui/controls";
 import MemoryPanel from "./memory/MemoryPanel";
 
 export interface SurfaceCtx {
@@ -917,22 +918,22 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
         <div className="model-config__block">
           <label className="field">
             <span>默认模型 <em className="src">{availableModels.length} 个已配置模型</em></span>
-            <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} disabled={availableModels.length === 0}>
-              <option value="">{availableModels.length === 0 ? "暂无可用模型" : "自动选择第一个可用模型"}</option>
+            <LoomSelect value={selectedModel || "__auto__"} onValueChange={(value) => setSelectedModel(value === "__auto__" ? "" : value)} disabled={availableModels.length === 0} placeholder={availableModels.length === 0 ? "暂无可用模型" : "自动选择第一个可用模型"} ariaLabel="默认模型">
+              <LoomSelectItem value="__auto__">{availableModels.length === 0 ? "暂无可用模型" : "自动选择第一个可用模型"}</LoomSelectItem>
               {configuredProviders.map((provider) => {
                 const configuredModels = provider.models.filter((item) => item.available);
                 if (configuredModels.length === 0) return null;
                 return (
-                  <optgroup key={provider.id} label={provider.name}>
+                  <LoomSelectGroup key={provider.id} label={provider.name}>
                     {configuredModels.map((item) => (
-                      <option key={`${provider.id}/${item.id}`} value={`${provider.id}/${item.id}`}>
+                      <LoomSelectItem key={`${provider.id}/${item.id}`} value={`${provider.id}/${item.id}`}>
                         {item.name} · {item.capabilities.contextWindow.toLocaleString()} ctx · {item.capabilities.maxOutputTokens.toLocaleString()} out
-                      </option>
+                      </LoomSelectItem>
                     ))}
-                  </optgroup>
+                  </LoomSelectGroup>
                 );
               })}
-            </select>
+            </LoomSelect>
           </label>
           {availableModels.length === 0 && <div className="ok-note">配置成功的模型才会出现在默认模型列表里。</div>}
         </div>
@@ -955,13 +956,13 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
             <div className="settings-grid">
               <label className="field">
                 <span>Provider</span>
-                <select value={providerId} onChange={(e) => selectProvider(e.target.value)} disabled={providerOptions.length === 0 || Boolean(editingModel)}>
+                <LoomSelect value={providerId} onValueChange={selectProvider} disabled={providerOptions.length === 0 || Boolean(editingModel)} placeholder="选择 Provider" ariaLabel="Provider">
                   {providerOptions.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
+                    <LoomSelectItem key={provider.id} value={provider.id}>
                       {provider.name} · {provider.id}
-                    </option>
+                    </LoomSelectItem>
                   ))}
-                </select>
+                </LoomSelect>
               </label>
               <label className="field">
                 <span>Base URL</span>
@@ -1033,13 +1034,13 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                 <>
                   <label className="field">
                     <span>API type</span>
-                    <select value={api} onChange={(e) => setApi(e.target.value)}>
-                      <option value="openai-completions">openai-completions</option>
-                      <option value="openai-responses">openai-responses</option>
-                      <option value="anthropic-messages">anthropic-messages</option>
-                      <option value="google-generative-ai">google-generative-ai</option>
-                      <option value="mistral-conversations">mistral-conversations</option>
-                    </select>
+                    <LoomSelect value={api} onValueChange={setApi} placeholder="选择 API type" ariaLabel="API type">
+                      <LoomSelectItem value="openai-completions">openai-completions</LoomSelectItem>
+                      <LoomSelectItem value="openai-responses">openai-responses</LoomSelectItem>
+                      <LoomSelectItem value="anthropic-messages">anthropic-messages</LoomSelectItem>
+                      <LoomSelectItem value="google-generative-ai">google-generative-ai</LoomSelectItem>
+                      <LoomSelectItem value="mistral-conversations">mistral-conversations</LoomSelectItem>
+                    </LoomSelect>
                   </label>
                   <label className="field">
                     <span>Model</span>
@@ -1088,26 +1089,26 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
         <div className="settings-grid">
           <label className="field">
             <span>Sandbox 范围</span>
-            <select value={sandboxMode} onChange={(e) => setSandboxMode(e.target.value as typeof sandboxMode)}>
-              <option value="read-only">只读观察</option>
-              <option value="workspace-write">修改当前项目</option>
-              <option value="danger-full-access">完全访问</option>
-            </select>
+            <LoomSelect value={sandboxMode} onValueChange={(value) => setSandboxMode(value as typeof sandboxMode)} placeholder="选择 Sandbox 范围" ariaLabel="Sandbox 范围">
+              <LoomSelectItem value="read-only">只读观察</LoomSelectItem>
+              <LoomSelectItem value="workspace-write">修改当前项目</LoomSelectItem>
+              <LoomSelectItem value="danger-full-access">完全访问</LoomSelectItem>
+            </LoomSelect>
           </label>
           <label className="field">
             <span>Approval policy</span>
-            <select value={approvalPolicy} onChange={(e) => setApprovalPolicy(e.target.value as typeof approvalPolicy)}>
-              <option value="on-request">越界时询问</option>
-              <option value="untrusted">不可信命令询问</option>
-              <option value="never">从不询问</option>
-            </select>
+            <LoomSelect value={approvalPolicy} onValueChange={(value) => setApprovalPolicy(value as typeof approvalPolicy)} placeholder="选择 Approval policy" ariaLabel="Approval policy">
+              <LoomSelectItem value="on-request">越界时询问</LoomSelectItem>
+              <LoomSelectItem value="untrusted">不可信命令询问</LoomSelectItem>
+              <LoomSelectItem value="never">从不询问</LoomSelectItem>
+            </LoomSelect>
           </label>
           <label className="field">
             <span>审批人</span>
-            <select value={approvalsReviewer} onChange={(e) => setApprovalsReviewer(e.target.value as typeof approvalsReviewer)}>
-              <option value="user">我</option>
-              <option value="auto-review">自动审查</option>
-            </select>
+            <LoomSelect value={approvalsReviewer} onValueChange={(value) => setApprovalsReviewer(value as typeof approvalsReviewer)} placeholder="选择审批人" ariaLabel="审批人">
+              <LoomSelectItem value="user">我</LoomSelectItem>
+              <LoomSelectItem value="auto-review">自动审查</LoomSelectItem>
+            </LoomSelect>
           </label>
         </div>
         <label className="check-field">
@@ -1121,11 +1122,11 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
         <h3>外观</h3>
         <label className="field">
           <span>主题</span>
-          <select value={theme} onChange={(e) => setTheme(e.target.value as any)}>
-            <option value="system">跟随系统</option>
-            <option value="light">亮色</option>
-            <option value="dark">暗色</option>
-          </select>
+          <LoomSelect value={theme} onValueChange={(value) => setTheme(value as typeof theme)} placeholder="选择主题" ariaLabel="主题">
+            <LoomSelectItem value="system">跟随系统</LoomSelectItem>
+            <LoomSelectItem value="light">亮色</LoomSelectItem>
+            <LoomSelectItem value="dark">暗色</LoomSelectItem>
+          </LoomSelect>
         </label>
       </section>
 
@@ -1141,21 +1142,20 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
         </label>
       </section>
 
-      <section>
+      <section className="settings-memory-section">
         <h3>长期记忆</h3>
         <p className="settings-help">跨会话记忆以 Markdown 保存。关闭后不会读取或运行后台提取；已有文件保留。</p>
-        <label className="check-field">
-          <input type="checkbox" checked={memoryEnabled} onChange={(e) => setMemoryEnabled(e.target.checked)} />
-          <span>启用跨会话长期记忆</span>
-        </label>
-        <label className="check-field">
-          <input type="checkbox" checked={backgroundExtraction} onChange={(e) => setBackgroundExtraction(e.target.checked)} disabled={!memoryEnabled} />
-          <span>回合结束后提取候选记忆 <em className="src">默认关闭，开启后会调用后台模型</em></span>
-        </label>
-        <label className="check-field">
-          <input type="checkbox" checked={autoDream} onChange={(e) => setAutoDream(e.target.checked)} disabled={!memoryEnabled} />
-          <span>允许 AutoDream 后台整理</span>
-        </label>
+        <div className="settings-memory-options">
+          <LoomCheckboxField checked={memoryEnabled} onCheckedChange={setMemoryEnabled} label="启用跨会话长期记忆" />
+          <LoomCheckboxField
+            checked={backgroundExtraction}
+            onCheckedChange={setBackgroundExtraction}
+            disabled={!memoryEnabled}
+            label="回合结束后提取候选记忆"
+            description={<em className="src">默认关闭，开启后会调用后台模型</em>}
+          />
+          <LoomCheckboxField checked={autoDream} onCheckedChange={setAutoDream} disabled={!memoryEnabled} label="允许 AutoDream 后台整理" />
+        </div>
         <label className="field settings-grid__wide">
           <span>Markdown 根目录 <em className="src">留空 = ~/.loom/memory</em></span>
           <input value={memoryRoot} onChange={(e) => setMemoryRoot(e.target.value)} placeholder="~/.loom/memory" />
