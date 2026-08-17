@@ -125,6 +125,9 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   ipcMain.handle("node:create", (_e, arg: { sessionId: string; parentId?: string; seed?: Seed; title?: string; includeParentContext?: boolean }) =>
     runtime.create(arg),
   );
+  ipcMain.handle("node:branchFromMessage", (_e, arg: { nodeId: string; sourceSeq: number; mode: "new-session" | "canvas-node" }) =>
+    runtime.branchFromMessage(arg),
+  );
   ipcMain.handle("node:send", (_e, arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[]; skillIds?: string[] }) =>
     runtime.send(arg),
   );

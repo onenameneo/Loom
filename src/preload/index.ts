@@ -84,6 +84,8 @@ const api = {
     open: (sessionId: string): Promise<any[]> => ipcRenderer.invoke("node:open", sessionId),
     create: (arg: { sessionId: string; parentId?: string; seed?: any; title?: string; includeParentContext?: boolean }): Promise<any> =>
       ipcRenderer.invoke("node:create", arg),
+    branchFromMessage: (arg: { nodeId: string; sourceSeq: number; mode: "new-session" | "canvas-node" }): Promise<any> =>
+      ipcRenderer.invoke("node:branchFromMessage", arg),
     send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[]): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("node:send", { nodeId, text, images, skillIds }),
     abort: (nodeId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("node:abort", nodeId),

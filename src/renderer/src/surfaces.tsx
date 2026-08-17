@@ -28,6 +28,7 @@ import type {
   ActivityToolStatus,
   AgentProc,
   ProjectMeta,
+  BranchSource,
   SettingsPayload,
   SessionMeta,
   SkillCatalogDto,
@@ -54,6 +55,7 @@ export interface SurfaceCtx {
   setActiveNodeId: (nodeId: string | null) => void;
   sessionMode: "chat" | "canvas" | null;
   setSessionMode: (mode: "chat" | "canvas") => void;
+  focusMessageSeq?: number | null;
   treeVersion: number;
   bumpTreeVersion: () => void;
   agentCount: number;
@@ -65,6 +67,8 @@ export interface SurfaceCtx {
   activityNow: number;
   refreshActivityStatus: () => Promise<void>;
   runActivityConfig: (action: "enable" | "disable", tool: ActivityTool) => Promise<void>;
+  createChatBranch?: (sourceNodeId: string, sourceSeq: number) => void | Promise<void>;
+  returnToBranchSource?: (source: BranchSource) => void | Promise<void>;
 }
 
 export interface Surface {
@@ -137,6 +141,10 @@ function ProjectPanel({ ctx }: { ctx: SurfaceCtx }) {
       onModeChange={ctx.setSessionMode}
       onTreeChange={ctx.bumpTreeVersion}
       initialMode={ctx.sessionMode}
+      branchSource={session.branchSource}
+      onCreateChatBranch={ctx.createChatBranch}
+      onReturnToBranch={ctx.returnToBranchSource}
+      focusMessageSeq={ctx.focusMessageSeq ?? undefined}
     />
   );
 }

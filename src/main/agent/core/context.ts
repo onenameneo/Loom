@@ -125,6 +125,20 @@ export function buildContextPlan(
   return out;
 }
 
+/**
+ * 装配某节点在指定持久化消息序号处的上下文快照。
+ * 分支创建使用这个边界，避免把源节点在分支点之后追加的消息带入子节点。
+ */
+export function buildContextPlanThroughSeq(
+  node: Pick<CanvasNodeModel, "seed"> & { frozenContext?: FrozenNodeContext },
+  ownMessages: AgentMessage[],
+  sourceSeq: number,
+  now = 0,
+): Message[] {
+  const boundary = Number.isFinite(sourceSeq) ? Math.floor(sourceSeq) : -1;
+  return buildContextPlan(node, boundary < 0 ? [] : ownMessages.slice(0, boundary + 1), now);
+}
+
 function projectOwnMessages(ownMessages: AgentMessage[], now: number): Message[] {
   const checkpoint = newestValidCheckpoint(ownMessages);
   if (!checkpoint) return ownMessages.filter(isLlmMessage);

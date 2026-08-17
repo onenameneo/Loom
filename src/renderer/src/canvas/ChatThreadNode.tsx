@@ -5,6 +5,7 @@ import type { ApprovalRequestPayload, ModelSelection, NodeBudget, NodeMsg, Skill
 import { Composer, type ComposerImage } from "../composer/Composer";
 import { IconArrowUpRight, IconChevronRight, IconSplit } from "../icons";
 import { Message } from "../message/Message";
+import type { MessageBranchMode } from "../ui/dialogs";
 import { BranchContext } from "./branch";
 import { ToolCallTimeline } from "./ToolCallTimeline";
 import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
@@ -751,6 +752,9 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
                 checkpoint={item.message.checkpoint}
                 canRegenerate={item.message.role === "assistant" && item.message.id === msgs[msgs.length - 1]?.id && !isBusy}
                 canEdit={item.message.role === "user" && !isBusy}
+                sourceSeq={item.message.seq}
+                messageSeq={item.message.seq}
+                onBranch={(mode: MessageBranchMode, sourceSeq) => data.onMessageBranch?.(id, sourceSeq, mode)}
                 onRegenerate={regenerate}
                 onEditResend={(text) => editResend(item.message.seq, text)}
                 onRetry={item.message.role === "error" ? regenerate : undefined}

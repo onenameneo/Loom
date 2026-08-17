@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { AlertDialog, Dialog, Popover, Tooltip } from "radix-ui";
-import { Folder, FolderPlus, X } from "lucide-react";
+import { Folder, FolderPlus, GitBranch, MessageSquarePlus, X } from "lucide-react";
 import { IconProject } from "../icons";
 
 // Radix Primitives（无样式、可访问）+ DESIGN.md token 样式。见 shell.css .dlg-*/.tip。
@@ -64,6 +64,107 @@ export function Modal({
         <Dialog.Overlay forceMount className="dlg-overlay" aria-hidden={!open} />
         <Dialog.Content forceMount className="settings-dialog-content" aria-label={ariaLabel} aria-hidden={!open}>
           {children}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+export type MessageBranchMode = "new-session" | "canvas-node";
+
+export function MessageBranchDialog({
+  open,
+  onOpenChange,
+  onSelect,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSelect: (mode: MessageBranchMode) => void | Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const busyRef = useRef(false);
+
+  useEffect(() => {
+    if (open) {
+      busyRef.current = false;
+      setBusy(false);
+      setError(null);
+    }
+  }, [open]);
+
+  const choose = async (mode: MessageBranchMode) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      await onSelect(mode);
+      onOpenChange(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "创建分支失败");
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!busyRef.current) onOpenChange(nextOpen);
+  };
+
+  return (
+    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay forceMount className="dlg-overlay" aria-hidden={!open} />
+        <Dialog.Content
+          forceMount
+          className="dlg-content branch-dialog"
+          aria-hidden={!open}
+          aria-label="从这里创建聊天分支"
+          onEscapeKeyDown={(event) => {
+            if (busyRef.current) event.preventDefault();
+          }}
+          onPointerDownOutside={(event) => {
+            if (busyRef.current) event.preventDefault();
+          }}
+          onInteractOutside={(event) => {
+            if (busyRef.current) event.preventDefault();
+          }}
+        >
+          <Dialog.Title className="dlg-title">从这里创建聊天分支</Dialog.Title>
+          <Dialog.Description className="dlg-desc">
+            保留当前聊天窗口，并选择分支继续的位置。
+          </Dialog.Description>
+          <div className="branch-dialog-options">
+            <button
+              className="branch-dialog-option"
+              type="button"
+              aria-label="在新聊天中继续"
+              disabled={busy}
+              onClick={() => void choose("new-session")}
+            >
+              <MessageSquarePlus size={17} aria-hidden="true" />
+              <span>
+                <strong>在新聊天中继续</strong>
+                <small>创建独立会话，复制当前消息之前的上下文</small>
+              </span>
+            </button>
+            <button
+              className="branch-dialog-option"
+              type="button"
+              aria-label="在画布中创建分支"
+              disabled={busy}
+              onClick={() => void choose("canvas-node")}
+            >
+              <GitBranch size={17} aria-hidden="true" />
+              <span>
+                <strong>在画布中创建分支</strong>
+                <small>在当前会话生成子节点，冻结当前消息上下文</small>
+              </span>
+            </button>
+          </div>
+          {error && <p className="branch-dialog-error" role="alert">{error}</p>}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

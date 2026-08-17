@@ -13,6 +13,37 @@ afterEach(() => {
 });
 
 describe("SqliteStore node layouts", () => {
+  it("persists chat branch origins and node branch points across reopen", () => {
+    const dir = mkdtempSync(join(tmpdir(), "loom-message-branch-origin-"));
+    dirs.push(dir);
+    const file = join(dir, "loom.db");
+    const firstStore = new SqliteStore(file);
+    const project = firstStore.createProject("Project");
+    const sourceSession = firstStore.ensureDefaultSession(project.id);
+    const sourceNode = firstStore.createNode({ sessionId: sourceSession.id, title: "Source" });
+    const origin = {
+      projectId: project.id,
+      sessionId: sourceSession.id,
+      nodeId: sourceNode.id,
+      messageSeq: 2,
+    };
+    const branchSession = firstStore.createSession(project.id, "Branch", { branchSource: origin });
+    const branchNode = firstStore.createNode({
+      sessionId: branchSession.id,
+      title: "Branch root",
+      branchPoint: { sourceNodeId: sourceNode.id, sourceMessageSeq: origin.messageSeq },
+    });
+    (firstStore as any).db.close();
+
+    const reopened = new SqliteStore(file);
+
+    expect(reopened.getSession(branchSession.id)?.branchSource).toEqual(origin);
+    expect(reopened.getNode(branchNode.id)?.branchPoint).toEqual({
+      sourceNodeId: sourceNode.id,
+      sourceMessageSeq: 2,
+    });
+  });
+
   it("persists a session's last open node and preferred view mode", () => {
     const dir = mkdtempSync(join(tmpdir(), "loom-session-ui-"));
     dirs.push(dir);

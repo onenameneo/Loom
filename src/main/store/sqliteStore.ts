@@ -11,7 +11,9 @@ import {
   isValidNodeLayout,
   type NodeLayout,
   type NodeRecord,
+  type NodeBranchPoint,
   type PersistedMessage,
+  type BranchSource,
   type SessionRecord,
   type SessionUiState,
   type Settings,
@@ -130,6 +132,7 @@ function toSession(row: SessionRow): SessionRecord {
   const meta = decode<Record<string, unknown>>(row.meta, {});
   const titleState = meta.titleState === "default" || meta.titleState === "manual" ? meta.titleState : undefined;
   const ui = meta.ui && typeof meta.ui === "object" ? meta.ui as Record<string, unknown> : undefined;
+  const branchSource = meta.branchSource && typeof meta.branchSource === "object" ? meta.branchSource as BranchSource : undefined;
   return {
     id: row.id,
     projectId: row.project_id,
@@ -144,6 +147,7 @@ function toSession(row: SessionRow): SessionRecord {
           ...(ui.mode === "chat" || ui.mode === "canvas" ? { mode: ui.mode } : {}),
         }
       : undefined,
+    branchSource,
   };
 }
 
@@ -311,7 +315,7 @@ export class SqliteStore implements Store {
     return this.createSession(projectId, DEFAULT_SESSION_TITLE, { titleState: "default" });
   }
 
-  createSession(projectId: string, title = "新会话", options: { titleState?: DefaultTitleState } = {}): SessionRecord {
+  createSession(projectId: string, title = "新会话", options: { titleState?: DefaultTitleState; branchSource?: BranchSource } = {}): SessionRecord {
     const project = this.db.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId);
     if (!project) throw new Error("Project not found.");
     const now = Date.now();
@@ -327,6 +331,7 @@ export class SqliteStore implements Store {
       createdAt: now,
       updatedAt: now,
       order,
+      branchSource: options.branchSource,
     };
     this.db
       .prepare(
@@ -334,6 +339,7 @@ export class SqliteStore implements Store {
       )
       .run(session.id, session.projectId, session.title, session.createdAt, session.updatedAt, session.order, encode({
         ...(session.titleState ? { titleState: session.titleState } : {}),
+        ...(session.branchSource ? { branchSource: session.branchSource } : {}),
       }));
     return session;
   }
@@ -388,6 +394,7 @@ export class SqliteStore implements Store {
     titleState?: DefaultTitleState;
     seed?: unknown;
     frozenContext?: FrozenNodeContext;
+    branchPoint?: NodeBranchPoint;
   }): NodeRecord {
     const sessionId = input.sessionId ?? (input.projectId ? this.ensureDefaultSession(input.projectId).id : undefined);
     if (!sessionId) throw new Error("Session not found.");
@@ -407,6 +414,7 @@ export class SqliteStore implements Store {
       titleState: input.titleState,
       seed: input.seed,
       frozenContext: input.frozenContext,
+      branchPoint: input.branchPoint,
       messages: [],
     };
     this.db
@@ -427,6 +435,7 @@ export class SqliteStore implements Store {
         encode({
           ...(node.titleState ? { titleState: node.titleState } : {}),
           ...(node.frozenContext ? { frozenContext: node.frozenContext } : {}),
+          ...(node.branchPoint ? { branchPoint: node.branchPoint } : {}),
         }),
       );
     return node;
@@ -659,6 +668,7 @@ export class SqliteStore implements Store {
     const color = typeof meta.color === "string" ? meta.color : undefined;
     const titleState = meta.titleState === "default" || meta.titleState === "manual" ? meta.titleState : undefined;
     const frozenContext = meta.frozenContext && typeof meta.frozenContext === "object" ? meta.frozenContext as FrozenNodeContext : undefined;
+    const branchPoint = meta.branchPoint && typeof meta.branchPoint === "object" ? meta.branchPoint as NodeBranchPoint : undefined;
     return {
       id: row.id,
       sessionId: row.session_id,
@@ -673,6 +683,7 @@ export class SqliteStore implements Store {
       color,
       layout: toLayout(row),
       frozenContext,
+      branchPoint,
       messages: this.listMessages(row.id),
     };
   }

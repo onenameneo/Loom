@@ -73,6 +73,31 @@ beforeEach(() => {
 });
 
 describe("ChatView turn and approval controls", () => {
+  it("shows a navigation notice at the copied branch boundary", () => {
+    const onReturnToBranch = vi.fn();
+    render(
+      <ChatView
+        nodeId="branch-root"
+        initialMessages={[
+          { role: "user", text: "question", seq: 0 },
+          { role: "assistant", text: "answer", seq: 1 },
+          { role: "user", text: "follow-up", seq: 2 },
+        ]}
+        hasFrozenContext={false}
+        branchSource={{ projectId: "p1", sessionId: "source", nodeId: "source-node", messageSeq: 1 }}
+        onReturnToBranch={onReturnToBranch}
+        onBranch={vi.fn()}
+        onExpandCanvas={vi.fn()}
+        noKey={false}
+        goSettings={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "从聊天中继续" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "从聊天中继续" }));
+    expect(onReturnToBranch).toHaveBeenCalledOnce();
+  });
+
   it("locks the current Node's stop action until its abort request settles", async () => {
     let resolveAbort: (() => void) | undefined;
     abort.mockImplementationOnce(() => new Promise((resolve) => {

@@ -8,7 +8,7 @@ import { createAgentSession } from "./session";
 import type { EngineFactory, EngineHandle, EventSinkPort, LlmEnginePort, NodeInit } from "../ports";
 import type { AgentTool } from "../core/tool";
 import { createLoomContextCheckpoint } from "../core/messages";
-import type { NodeLayout, NodeRecord, PersistedMessage, SessionRecord, Settings, Store, Project } from "../../store/store";
+import type { BranchSource, NodeBranchPoint, NodeLayout, NodeRecord, PersistedMessage, SessionRecord, Settings, Store, Project } from "../../store/store";
 import { DEFAULT_SETTINGS } from "../../store/store";
 
 function deferred<T = void>() {
@@ -63,17 +63,35 @@ class MemoryStore implements Store {
   listSessions(projectId: string) { return this.sessions.filter((session) => session.projectId === projectId); }
   getSession(id: string) { return this.sessions.find((session) => session.id === id); }
   ensureDefaultSession(projectId: string) { return this.listSessions(projectId)[0]; }
-  createSession() { return this.sessions[0]; }
+  createSession(projectId = "ws", title = "新会话", options: { titleState?: "default" | "manual"; branchSource?: BranchSource } = {}) {
+    const session: SessionRecord = {
+      id: `sess${this.sessions.length + 1}`,
+      projectId,
+      title,
+      createdAt: 1,
+      updatedAt: 1,
+      order: this.sessions.length,
+      titleState: options.titleState,
+      branchSource: options.branchSource,
+    };
+    this.sessions.push(session);
+    return session;
+  }
   renameSession(id: string, title: string, options: { titleState?: "default" | "manual" } = {}) {
     const session = this.getSession(id);
     if (!session) return;
     session.title = title;
     if (options.titleState) session.titleState = options.titleState;
   }
-  deleteSession() {}
+  deleteSession(id: string) {
+    this.sessions = this.sessions.filter((session) => session.id !== id);
+    for (const [nodeId, node] of this.nodes) {
+      if (node.sessionId === id) this.nodes.delete(nodeId);
+    }
+  }
   listNodes(sessionId: string) { return [...this.nodes.values()].filter((n) => n.sessionId === sessionId); }
   getNode(id: string) { return this.nodes.get(id); }
-  createNode(input: { sessionId?: string; projectId?: string; parentId?: string; title: string; seed?: unknown; frozenContext?: FrozenNodeContext }): NodeRecord {
+  createNode(input: { sessionId?: string; projectId?: string; parentId?: string; title: string; seed?: unknown; frozenContext?: FrozenNodeContext; branchPoint?: NodeBranchPoint }): NodeRecord {
     const session = (input.sessionId ? this.getSession(input.sessionId) : this.ensureDefaultSession(input.projectId ?? "ws")) ?? this.sessions[0];
     const node: NodeRecord = {
       id: `n${this.nodes.size + 1}`,
@@ -83,15 +101,19 @@ class MemoryStore implements Store {
       title: input.title,
       seed: input.seed,
       frozenContext: input.frozenContext,
+      branchPoint: input.branchPoint,
       messages: [],
     };
     this.nodes.set(node.id, node);
     return node;
   }
-  updateNode(id: string, patch: Partial<{ title: string; titleState: "default" | "manual" }>) {
+  updateNode(id: string, patch: Partial<{ title: string; titleState: "default" | "manual"; systemPrompt: string; model: any; thinkingLevel: any }>) {
     const node = this.nodes.get(id);
     if (node && Object.prototype.hasOwnProperty.call(patch, "title")) node.title = patch.title!;
     if (node && Object.prototype.hasOwnProperty.call(patch, "titleState")) node.titleState = patch.titleState;
+    if (node && Object.prototype.hasOwnProperty.call(patch, "systemPrompt")) node.systemPrompt = patch.systemPrompt;
+    if (node && Object.prototype.hasOwnProperty.call(patch, "model")) node.model = patch.model;
+    if (node && Object.prototype.hasOwnProperty.call(patch, "thinkingLevel")) node.thinkingLevel = patch.thinkingLevel;
   }
   updateNodeLayout(_id: string, _layout: NodeLayout) { return true; }
   updateNodeLayouts(items: Array<{ id: string; layout: NodeLayout }>) { return items.map((i) => i.id); }
@@ -167,6 +189,80 @@ const toolResult = (toolCallId: string, toolName: string, text: string): AgentMe
   }) as unknown as AgentMessage;
 
 describe("createAgentSession turn runner integration", () => {
+  it("creates an independent chat branch from a message boundary", () => {
+    const store = new MemoryStore([user("first"), assistant("answer"), user("later")]);
+    const source = store.getNode("n1")!;
+    source.model = { providerId: "local", modelId: "source-model" };
+    source.thinkingLevel = "high";
+    source.systemPrompt = "source persona";
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: (() => { let n = 0; return () => `branch-message-${n++}`; })() },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    const result = session.branchFromMessage({ nodeId: "n1", sourceSeq: 1, mode: "new-session" });
+
+    expect(result).toMatchObject({ ok: true, mode: "new-session" });
+    const branchSession = store.getSession(result.sessionId!);
+    const branchNode = store.getNode(result.nodeId!);
+    expect(branchSession?.branchSource).toEqual({ projectId: "ws", sessionId: "sess", nodeId: "n1", messageSeq: 1 });
+    expect(branchNode?.messages.map((message) => String((message.content as any).content))).toEqual(["first", "answer"]);
+    expect(branchNode).toMatchObject({ model: source.model, thinkingLevel: source.thinkingLevel, systemPrompt: source.systemPrompt });
+
+    store.appendMessages("n1", [{ id: "late", seq: 3, role: "user", content: user("after branch") }]);
+    expect(branchNode?.messages.map((message) => String((message.content as any).content))).not.toContain("after branch");
+  });
+
+  it("creates a canvas branch with a frozen context ending at the selected message", () => {
+    const store = new MemoryStore([user("first"), assistant("answer"), user("later")]);
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: (() => { let n = 0; return () => `canvas-branch-${n++}`; })() },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    const result = session.branchFromMessage({ nodeId: "n1", sourceSeq: 1, mode: "canvas-node" });
+    const branchNode = store.getNode(result.nodeId!);
+
+    expect(result).toMatchObject({ ok: true, mode: "canvas-node", sessionId: "sess" });
+    expect(branchNode).toMatchObject({
+      parentId: "n1",
+      branchPoint: { sourceNodeId: "n1", sourceMessageSeq: 1 },
+      frozenContext: { version: 1 },
+    });
+    expect(branchNode?.frozenContext?.messages.map((message) => String((message as any).content))).toEqual(["first", "answer"]);
+  });
+
+  it("rolls back an independent branch when transcript copying fails", () => {
+    const store = new MemoryStore([user("first"), assistant("answer")]);
+    const existingSessionIds = store.sessions.map((session) => session.id);
+    vi.spyOn(store, "appendMessages").mockImplementation((nodeId) => {
+      if (nodeId !== "n1") throw new Error("copy failed");
+    });
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "rollback-message" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    expect(session.branchFromMessage({ nodeId: "n1", sourceSeq: 1, mode: "new-session" })).toEqual({
+      ok: false,
+      reason: "copy failed",
+    });
+    expect(store.sessions.map((stored) => stored.id)).toEqual(existingSessionIds);
+    expect([...store.nodes.keys()]).toEqual(["n1", "n2"]);
+  });
+
   it("microCompacts stale model-facing tool results without mutating stored transcript", () => {
     const userDataDir = mkdtempSync(join(tmpdir(), "loom-microcompact-user-data-"));
     const sourceRoot = mkdtempSync(join(tmpdir(), "loom-microcompact-source-root-"));

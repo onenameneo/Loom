@@ -131,6 +131,19 @@ export interface SessionRecord {
   updatedAt: number;
   order: number;
   ui?: SessionUiState;
+  branchSource?: BranchSource;
+}
+
+export interface BranchSource {
+  projectId: string;
+  sessionId: string;
+  nodeId: string;
+  messageSeq: number;
+}
+
+export interface NodeBranchPoint {
+  sourceNodeId: string;
+  sourceMessageSeq: number;
 }
 
 /** Durable, renderer-owned resume state. Transcript and node layout stay in their own records. */
@@ -229,6 +242,7 @@ export interface NodeRecord {
   layout?: NodeLayout;
   /** Versioned child-owned context captured at branch creation. */
   frozenContext?: FrozenNodeContext;
+  branchPoint?: NodeBranchPoint;
   messages: PersistedMessage[];
 }
 
@@ -248,7 +262,7 @@ export interface Store {
   listSessions(projectId: string): SessionRecord[];
   getSession(id: string): SessionRecord | undefined;
   ensureDefaultSession(projectId: string): SessionRecord;
-  createSession(projectId: string, title?: string, options?: { titleState?: DefaultTitleState }): SessionRecord;
+  createSession(projectId: string, title?: string, options?: { titleState?: DefaultTitleState; branchSource?: BranchSource }): SessionRecord;
   renameSession(id: string, title: string, options?: { titleState?: DefaultTitleState }): void;
   deleteSession(id: string): void;
   updateSessionUi?(id: string, patch: SessionUiState): void;
@@ -263,6 +277,7 @@ export interface Store {
     titleState?: DefaultTitleState;
     seed?: unknown;
     frozenContext?: FrozenNodeContext;
+    branchPoint?: NodeBranchPoint;
   }): NodeRecord;
   updateNode(
     id: string,

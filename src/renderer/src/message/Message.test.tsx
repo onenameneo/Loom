@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Message } from "./Message";
 import "./message.css";
 
@@ -84,5 +84,43 @@ describe("Message checkpoint timeline item", () => {
     expect(screen.getByText("estimated summary request cost: 1400 tokens")).toBeTruthy();
     expect(screen.getByText(/\[summary truncated\]/)).toBeTruthy();
     expect(screen.queryByText(/User:/)).toBeNull();
+  });
+});
+
+describe("Message branching", () => {
+  it("offers the two branch destinations from the message action bar", () => {
+    const onBranch = vi.fn();
+    render(
+      <Message
+        role="assistant"
+        text="A useful answer"
+        sourceSeq={3}
+        onBranch={onBranch}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "分支" }));
+
+    expect(screen.getByRole("dialog", { name: "从这里创建聊天分支" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "在新聊天中继续" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "在画布中创建分支" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "在画布中创建分支" }));
+    expect(onBranch).toHaveBeenCalledWith("canvas-node", 3);
+  });
+
+  it("prevents duplicate branch requests while the first one is pending", async () => {
+    let resolve: (() => void) | undefined;
+    const onBranch = vi.fn(() => new Promise<void>((done) => { resolve = done; }));
+    render(<Message role="assistant" text="Answer" sourceSeq={1} onBranch={onBranch} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "分支" }));
+    const option = screen.getByRole("button", { name: "在画布中创建分支" });
+    fireEvent.click(option);
+    fireEvent.click(option);
+    expect(onBranch).toHaveBeenCalledOnce();
+    expect((option as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => resolve?.());
   });
 });

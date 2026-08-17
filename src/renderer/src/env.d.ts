@@ -80,6 +80,7 @@ export interface CanvasNodeDto {
   thinkingLevel?: ThinkingLevel;
   color?: string;
   layout?: { x: number; y: number; width: number; height: number };
+  branchPoint?: NodeBranchPoint;
   messages: NodeMsg[];
   skills?: SkillEffectiveDto[];
   skillContext?: {
@@ -362,6 +363,19 @@ export interface SessionMeta {
   updatedAt: number;
   order: number;
   ui?: { activeNodeId?: string; mode?: "chat" | "canvas" };
+  branchSource?: BranchSource;
+}
+
+export interface BranchSource {
+  projectId: string;
+  sessionId: string;
+  nodeId: string;
+  messageSeq: number;
+}
+
+export interface NodeBranchPoint {
+  sourceNodeId: string;
+  sourceMessageSeq: number;
 }
 
 export interface SettingsPayload {
@@ -506,6 +520,15 @@ declare global {
         list: (sessionId: string) => Promise<CanvasNodeDto[]>;
         open: (sessionId: string) => Promise<CanvasNodeDto[]>;
         create: (arg: { sessionId: string; parentId?: string; seed?: NodeSeed; title?: string; includeParentContext?: boolean }) => Promise<CanvasNodeDto>;
+        branchFromMessage: (arg: { nodeId: string; sourceSeq: number; mode: "new-session" | "canvas-node" }) => Promise<{
+          ok: boolean;
+          reason?: string;
+          mode?: "new-session" | "canvas-node";
+          sessionId?: string;
+          nodeId?: string;
+          source?: BranchSource;
+          node?: CanvasNodeDto;
+        }>;
         send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[]) => Promise<{ ok: boolean; recovered?: "overflow"; reason?: string }>;
         abort: (nodeId: string) => Promise<{ ok: boolean }>;
         compact: (nodeId: string) => Promise<{ ok: boolean; node?: CanvasNodeDto; reason?: string; error?: string }>;

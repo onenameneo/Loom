@@ -7,7 +7,9 @@ import {
   SCHEMA_VERSION,
   type NodeLayout,
   type NodeRecord,
+  type NodeBranchPoint,
   type PersistedMessage,
+  type BranchSource,
   type SessionRecord,
   type SessionUiState,
   type Settings,
@@ -168,7 +170,7 @@ export class JsonStore implements Store {
   ensureDefaultSession(projectId: string): SessionRecord {
     return this.listSessions(projectId)[0] ?? this.createSession(projectId, DEFAULT_SESSION_TITLE, { titleState: "default" });
   }
-  createSession(projectId: string, title = "新会话", options: { titleState?: DefaultTitleState } = {}): SessionRecord {
+  createSession(projectId: string, title = "新会话", options: { titleState?: DefaultTitleState; branchSource?: BranchSource } = {}): SessionRecord {
     const now = Date.now();
     const session: SessionRecord = {
       id: this.id("session"),
@@ -178,6 +180,7 @@ export class JsonStore implements Store {
       createdAt: now,
       updatedAt: now,
       order: this.listSessions(projectId).length,
+      branchSource: options.branchSource,
     };
     this.data.sessions = [...(this.data.sessions ?? []), session];
     this.flush();
@@ -221,6 +224,7 @@ export class JsonStore implements Store {
     titleState?: DefaultTitleState;
     seed?: unknown;
     frozenContext?: FrozenNodeContext;
+    branchPoint?: NodeBranchPoint;
   }): NodeRecord {
     throw new Error("JsonStore does not implement canvas node persistence.");
   }

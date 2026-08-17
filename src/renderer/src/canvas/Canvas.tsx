@@ -16,6 +16,7 @@ import {
   type Node,
 } from "@xyflow/react";
 import type { CanvasNodeDto, ModelSelection } from "../env";
+import type { MessageBranchMode } from "../ui/dialogs";
 import { useTitlebarActions } from "../titlebar/Titlebar";
 import { CanvasTitlebarActions, CanvasZoomControls } from "./CanvasControls";
 import { useCanvasLayoutPersistence, useCanvasLayoutStore } from "./CanvasLayoutContext";
@@ -119,6 +120,7 @@ function toNode(
       systemPrompt: dto.systemPrompt,
       model: dto.model || fallbackModel,
       color: dto.color,
+      branchPoint: dto.branchPoint,
       fresh,
       isRoot: !dto.parentId,
       ...actions,
@@ -149,6 +151,7 @@ type CanvasProps = {
   onSelectedNode?: (nodeId: string | null) => void;
   onReturnChat?: (nodeId: string) => void;
   onTreeChange?: () => void;
+  onCreateChatBranch?: (sourceNodeId: string, sourceSeq: number) => void | Promise<void>;
 };
 
 export default function Canvas(props: CanvasProps) {
@@ -166,6 +169,7 @@ function CanvasContent({
   onSelectedNode,
   onReturnChat,
   onTreeChange,
+  onCreateChatBranch,
 }: CanvasProps) {
   const [nodes, setNodes, applyNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -197,6 +201,11 @@ function CanvasContent({
   );
   const treeChangeRef = useRef(onTreeChange);
   const modelRef = useRef(model);
+  const messageBranchRef = useRef<(
+    sourceNodeId: string,
+    sourceSeq: number,
+    mode: MessageBranchMode,
+  ) => void | Promise<void>>(async () => {});
   const layoutStore = useCanvasLayoutStore();
   const layoutPersistence = useCanvasLayoutPersistence(sessionId);
   const resizeSessionRef = useRef(new ResizeSession());
@@ -528,6 +537,8 @@ function CanvasContent({
   const actions = useCallback(
     () => ({
       onTreeChange: () => treeChangeRef.current?.(),
+      onMessageBranch: (sourceNodeId: string, sourceSeq: number, mode: MessageBranchMode) =>
+        messageBranchRef.current(sourceNodeId, sourceSeq, mode),
       onSelect: (id: string) => {
         setNodes((nds) => nds.map((node) => ({ ...node, selected: node.id === id })));
       },
@@ -756,6 +767,49 @@ function CanvasContent({
     },
     [sessionId, model, nodes, setNodes, setEdges, actions, layoutStore],
   );
+
+  const branchFromMessage = useCallback(
+    async (sourceNodeId: string, sourceSeq: number, mode: MessageBranchMode) => {
+      if (mode === "new-session") {
+        await onCreateChatBranch?.(sourceNodeId, sourceSeq);
+        return;
+      }
+      if (!window.api) return;
+      const result = await window.api.canvas.branchFromMessage({ nodeId: sourceNodeId, sourceSeq, mode });
+      if (!result.ok || !result.node) throw new Error(result.reason ?? "创建画布分支失败");
+
+      const sourceNode = nodes.find((node) => node.id === sourceNodeId);
+      const baseX = sourceNode?.position.x ?? ROOT_X;
+      const baseY = sourceNode?.position.y ?? ROOT_Y;
+      const siblings = nodes.filter((node) => (node.data as any)?.parentId === sourceNodeId).length;
+      const preferredLayout = {
+        x: baseX + CARD_W + GAP_X,
+        y: baseY + siblings * ROW_H,
+        width: CARD_W,
+        height: NODE_H,
+      };
+      const initialLayout = findBranchPlacement({
+        existing: nodes.map(readNodeLayout),
+        preferred: preferredLayout,
+        gapX: GAP_X,
+        rowH: ROW_H,
+      });
+      const nodeActions = actions();
+      titleRef.current.set(result.node.id, result.node.title);
+      setNodes((current) => {
+        if (current.some((node) => node.id === result.node!.id)) return current;
+        return current.concat(toNode(result.node!, { x: initialLayout.x, y: initialLayout.y }, model, true, nodeActions, initialLayout));
+      });
+      layoutStore.enqueue(sessionId, result.node.id, initialLayout);
+      setEdges((current) => current.some((edge) => edge.id === `e-${sourceNodeId}-${result.node!.id}`)
+        ? current
+        : current.concat({ id: `e-${sourceNodeId}-${result.node!.id}`, source: sourceNodeId, target: result.node!.id }));
+      onSelectedNode?.(result.node.id);
+      treeChangeRef.current?.();
+    },
+    [actions, layoutStore, model, nodes, onCreateChatBranch, onSelectedNode, sessionId, setEdges, setNodes],
+  );
+  messageBranchRef.current = branchFromMessage;
 
   const tidyLayout = useCallback(() => {
     const dtos = nodes.map((node) => ({

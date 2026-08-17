@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CanvasNodeDto, ModelSelection } from "../env";
+import type { BranchSource, CanvasNodeDto, ModelSelection } from "../env";
+import type { MessageBranchMode } from "../ui/dialogs";
 import { useTitlebarContext } from "../titlebar/Titlebar";
 import Canvas from "./Canvas";
 import ChatView from "./ChatView";
@@ -20,6 +21,10 @@ export default function SessionCanvas({
   onModeChange,
   onTreeChange,
   initialMode,
+  branchSource,
+  onCreateChatBranch,
+  onReturnToBranch,
+  focusMessageSeq,
 }: {
   sessionId: string;
   sessionName: string;
@@ -31,6 +36,10 @@ export default function SessionCanvas({
   onModeChange?: (mode: "chat" | "canvas") => void;
   onTreeChange?: () => void;
   initialMode?: "chat" | "canvas" | null;
+  branchSource?: BranchSource;
+  onCreateChatBranch?: (sourceNodeId: string, sourceSeq: number) => void | Promise<void>;
+  onReturnToBranch?: (source: BranchSource) => void | Promise<void>;
+  focusMessageSeq?: number;
 }) {
   const [nodeList, setNodeList] = useState<CanvasNodeDto[]>([]);
   const [nodeCount, setNodeCount] = useState(1);
@@ -98,6 +107,23 @@ export default function SessionCanvas({
     [chatNode, sessionId, onModeChange, onTreeChange],
   );
 
+  const branchMessageFromChat = useCallback(
+    async (sourceSeq: number, mode: MessageBranchMode) => {
+      if (!chatNode) return;
+      if (mode === "new-session") {
+        await onCreateChatBranch?.(chatNode.id, sourceSeq);
+        return;
+      }
+      if (!window.api) return;
+      const result = await window.api.canvas.branchFromMessage({ nodeId: chatNode.id, sourceSeq, mode });
+      if (!result.ok || !result.nodeId) throw new Error(result.reason ?? "创建画布分支失败");
+      onModeChange?.("canvas");
+      onNodeChange?.(result.nodeId);
+      onTreeChange?.();
+    },
+    [chatNode, onCreateChatBranch, onModeChange, onNodeChange, onTreeChange],
+  );
+
   return (
     <div className="surface-fill">
       {isCanvas || !chatNode ? (
@@ -109,6 +135,7 @@ export default function SessionCanvas({
             onSelectedNode={onNodeChange}
             onReturnChat={returnChat}
             onTreeChange={onTreeChange}
+            onCreateChatBranch={onCreateChatBranch}
           />
         </div>
       ) : (
@@ -120,6 +147,10 @@ export default function SessionCanvas({
           model={chatNode.model || model}
           thinkingLevel={chatNode.thinkingLevel}
           onBranch={branchFromChat}
+          onMessageBranch={branchMessageFromChat}
+          branchSource={branchSource}
+          onReturnToBranch={branchSource ? () => onReturnToBranch?.(branchSource) : undefined}
+          focusMessageSeq={focusMessageSeq}
           onExpandCanvas={expandCanvas}
           onTreeChange={onTreeChange}
           noKey={noKey}

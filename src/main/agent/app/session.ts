@@ -1,12 +1,12 @@
 import { existsSync } from "node:fs";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
-import type { NodeLayout, NodeRecord, PersistedMessage } from "../../store/store";
+import type { NodeBranchPoint, NodeLayout, NodeRecord, PersistedMessage } from "../../store/store";
 import type { StoredModelSelection } from "../../modelConfig/modelRef";
 import { isThinkingLevel, type ThinkingLevel } from "../../modelConfig/thinkingLevels";
 import { saveNodeLayout, saveNodeLayouts } from "../../store/layoutPersistence";
 import { ancestorChain, descendants, type Seed } from "../core/graph";
-import { buildContextPlan, checkpointAttachmentMessages, checkpointContextMessage, isLlmMessage, roleOf, seedMessage, textOf, thinkingOf, type FrozenNodeContext } from "../core/context";
+import { buildContextPlan, buildContextPlanThroughSeq, checkpointAttachmentMessages, checkpointContextMessage, isLlmMessage, roleOf, seedMessage, textOf, thinkingOf, type FrozenNodeContext } from "../core/context";
 import {
   DEFAULT_POST_COMPACTION_ATTACHMENT_BUDGET_TOKENS,
   collectProjectFileAttachmentCandidates,
@@ -119,6 +119,7 @@ export interface CanvasNode {
   color?: string;
   layout?: NodeLayout;
   frozenContext?: FrozenNodeContext;
+  branchPoint?: NodeBranchPoint;
   messages: AgentMessage[];
   messageMeta: unknown[];
 }
@@ -314,6 +315,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       color: record.color,
       layout: record.layout,
       frozenContext: record.frozenContext,
+      branchPoint: record.branchPoint,
       messages: record.messages.map((m) => m.content),
       messageMeta: record.messages.map((m) => m.meta),
     };
@@ -342,6 +344,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       current.color = record.color;
       current.layout = record.layout;
       current.frozenContext = record.frozenContext;
+      current.branchPoint = record.branchPoint;
       return current;
     });
     return list;
@@ -699,6 +702,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     parentId: n.parentId,
     title: n.title,
     seed: n.seed,
+    branchPoint: n.branchPoint,
     hasFrozenContext: Boolean(n.frozenContext?.messages.length),
     frozenContextMessageCount: n.frozenContext?.messages.length ?? 0,
     frozenContextTokenEstimate: n.frozenContext?.messages.reduce(
@@ -1022,6 +1026,75 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     }
     ensureRecord(node.id, node);
     return dto(node);
+  }
+
+  function branchFromMessage(arg: {
+    nodeId: string;
+    sourceSeq: number;
+    mode: "new-session" | "canvas-node";
+  }) {
+    const source = loadNode(arg.nodeId);
+    const boundary = Number.isFinite(arg.sourceSeq) ? Math.floor(arg.sourceSeq) : -1;
+    if (!source || boundary < 0 || boundary >= source.messages.length) {
+      return { ok: false as const, reason: "source-message-not-found" as const };
+    }
+    if (runtime.get(source.id)?.liveSnapshot) {
+      return { ok: false as const, reason: "source-busy" as const };
+    }
+    const sourceSession = store.getSession(source.sessionId);
+    if (!sourceSession) return { ok: false as const, reason: "source-session-not-found" as const };
+
+    const sourceRef = {
+      projectId: source.projectId,
+      sessionId: source.sessionId,
+      nodeId: source.id,
+      messageSeq: boundary,
+    };
+    const title = branchTitleFromCandidates({
+      currentPrompt: textOf(source.messages[boundary]!),
+      fallback: UNTITLED_SESSION_TITLE,
+    });
+
+    if (arg.mode === "canvas-node") {
+      const frozenMessages = buildContextPlanThroughSeq(source, source.messages, boundary, clock.now()) as Message[];
+      const record = store.createNode({
+        sessionId: source.sessionId,
+        parentId: source.id,
+        title,
+        titleState: "default",
+        frozenContext: { version: 1, messages: frozenMessages },
+        branchPoint: { sourceNodeId: source.id, sourceMessageSeq: boundary },
+      });
+      store.updateNode(record.id, {
+        systemPrompt: source.systemPrompt,
+        model: source.model,
+        thinkingLevel: source.thinkingLevel,
+      });
+      const node = toCanvasNode(store.getNode(record.id) ?? record);
+      ensureRecord(node.id, node);
+      return { ok: true as const, mode: arg.mode, sessionId: node.sessionId, nodeId: node.id, source: sourceRef, node: dto(node) };
+    }
+
+    let branchSession: ReturnType<StorePort["createSession"]> | undefined;
+    try {
+      branchSession = store.createSession(source.projectId, title, { titleState: "default", branchSource: sourceRef });
+      const root = store.createNode({ sessionId: branchSession.id, title: DEFAULT_ROOT_TITLE, titleState: "default" });
+      store.updateNode(root.id, {
+        systemPrompt: source.systemPrompt,
+        model: source.model,
+        thinkingLevel: source.thinkingLevel,
+      });
+      const copied = store.listMessages(source.id)
+        .filter((message) => message.seq <= boundary)
+        .map((message) => ({ ...message, id: ids.message(), seq: 0 }));
+      store.appendMessages(root.id, copied);
+      const node = toCanvasNode(store.getNode(root.id) ?? root);
+      ensureRecord(node.id, node);
+      return { ok: true as const, mode: arg.mode, sessionId: branchSession.id, nodeId: node.id, source: sourceRef, node: dto(node) };
+    } catch (error) {
+      if (branchSession) store.deleteSession(branchSession.id);
+      return { ok: false as const, reason: error instanceof Error ? error.message : "branch-create-failed" };
+    }
   }
 
   async function send(arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[]; skillIds?: string[] }) {
@@ -1405,6 +1478,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     list,
     open,
     create,
+    branchFromMessage,
     send,
     abort,
     regenerate,

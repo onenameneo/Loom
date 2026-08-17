@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { LoomUiMessage } from "./messages";
 import { createLoomContextCheckpoint } from "./messages";
-import { buildContextPlan, isLlmMessage, roleOf, textOf } from "./context";
+import { buildContextPlan, buildContextPlanThroughSeq, isLlmMessage, roleOf, textOf } from "./context";
 
 const user = (text: string): AgentMessage => ({ role: "user", content: text, timestamp: 0 }) as AgentMessage;
 const asst = (text: string): AgentMessage =>
@@ -43,6 +43,25 @@ describe("buildContextPlan", () => {
   it("passes through own LLM messages and filters UI-only", () => {
     const plan = buildContextPlan({}, own);
     expect(plan.map((m) => m.role)).toEqual(["user", "assistant"]);
+  });
+
+  it("builds a frozen branch context only through the requested source sequence", () => {
+    const transcript = [user("u1"), asst("a1"), uiOnly(), user("u2"), asst("a2")];
+
+    const plan = buildContextPlanThroughSeq(
+      { frozenContext: { version: 1, messages: [user("parent")] as any }, seed: { text: "seed", from: "n1", parent: "n0" } },
+      transcript,
+      1,
+    );
+
+    expect(plan.map((message) => textOf(message as any))).toEqual([
+      "parent",
+      expect.stringContaining("seed"),
+      "u1",
+      "a1",
+    ]);
+    expect(plan.map((message) => textOf(message as any)).join(" ")).not.toContain("u2");
+    expect(plan.map((message) => textOf(message as any)).join(" ")).not.toContain("a2");
   });
 
   it("prepends seed message above own messages when seed present", () => {

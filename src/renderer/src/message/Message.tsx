@@ -3,6 +3,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BookOpen, Brain, Check, Copy, Pencil, RefreshCcw } from "lucide-react";
 import type { NodeMsg } from "../env";
+import { IconSplit } from "../icons";
+import { MessageBranchDialog, type MessageBranchMode } from "../ui/dialogs";
 import { CodeBlock } from "./CodeBlock";
 
 export type MsgRole = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
@@ -128,6 +130,9 @@ export function Message({
   onRegenerate,
   onEditResend,
   onRetry,
+  sourceSeq,
+  onBranch,
+  messageSeq,
 }: {
   role: MsgRole;
   text: string;
@@ -142,10 +147,14 @@ export function Message({
   onRegenerate?: () => void;
   onEditResend?: (text: string) => void;
   onRetry?: () => void;
+  sourceSeq?: number;
+  onBranch?: (mode: MessageBranchMode, sourceSeq: number) => void | Promise<void>;
+  messageSeq?: number;
 }) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);
+  const [branchOpen, setBranchOpen] = useState(false);
 
   async function copy() {
     try {
@@ -165,7 +174,7 @@ export function Message({
   }
 
   return (
-    <div className={`m m--${role} m--${density}`}>
+    <div className={`m m--${role} m--${density}`} data-message-seq={typeof messageSeq === "number" ? messageSeq : undefined}>
       <div className="m__bar nodrag">
         <button onClick={copy} title="复制">
           {copied ? <Check size={13} /> : <Copy size={13} />}
@@ -178,6 +187,11 @@ export function Message({
         {canEdit && (
           <button onClick={() => setEditing((v) => !v)} title="编辑重发">
             <Pencil size={13} />
+          </button>
+        )}
+        {typeof sourceSeq === "number" && onBranch && (
+          <button onClick={() => setBranchOpen(true)} title="分支" aria-label="分支">
+            <IconSplit size={13} />
           </button>
         )}
         {meta && <span className="m__meta">{meta}</span>}
@@ -223,6 +237,13 @@ export function Message({
       )}
       {role === "error" && onRetry && (
         <button className="m__retry nodrag" onClick={onRetry}>重试</button>
+      )}
+      {branchOpen && typeof sourceSeq === "number" && onBranch && (
+        <MessageBranchDialog
+          open={branchOpen}
+          onOpenChange={setBranchOpen}
+          onSelect={(mode) => onBranch(mode, sourceSeq)}
+        />
       )}
     </div>
   );

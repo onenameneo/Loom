@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/shallow";
-import type { ActivitySession, ActivityStatus, ActivityTool, AgentProc, ProjectMeta, SessionMeta, SettingsPayload } from "./env";
+import type { ActivitySession, ActivityStatus, ActivityTool, AgentProc, BranchSource, ProjectMeta, SessionMeta, SettingsPayload } from "./env";
 import Sidebar from "./Sidebar";
 import { CanvasLayoutProvider } from "./canvas/CanvasLayoutContext";
 import { AppChrome, TitlebarProvider } from "./titlebar/Titlebar";
@@ -36,6 +36,7 @@ export default function App() {
   const selectSession = useWorkspaceStore((state) => state.selectSession);
   const selectNode = useWorkspaceStore((state) => state.selectNode);
   const [sessionMode, setSessionMode] = useState<"chat" | "canvas" | null>(null);
+  const [focusMessageSeq, setFocusMessageSeq] = useState<number | null>(null);
   const sessionUiStateRef = useRef(new Map<string, { nodeId: string | null; mode: "chat" | "canvas" | null }>());
   const previousSessionIdRef = useRef<string | null>(null);
   const sessionLoadRequestRef = useRef(0);
@@ -278,6 +279,37 @@ export default function App() {
     setActiveSurface("project");
   }, [activeProjectId, reloadSessions, selectProject, selectSession]);
 
+  const createChatBranch = useCallback(async (sourceNodeId: string, sourceSeq: number) => {
+    if (!window.api) return;
+    const result = await window.api.canvas.branchFromMessage({ nodeId: sourceNodeId, sourceSeq, mode: "new-session" });
+    if (!result.ok || !result.sessionId) throw new Error(result.reason ?? "创建新聊天分支失败");
+    const projectId = result.source?.projectId ?? activeProjectId;
+    if (projectId) {
+      await reloadSessions(projectId);
+      selectProject(projectId);
+    }
+    sessionUiStateRef.current.set(result.sessionId, { nodeId: result.nodeId ?? null, mode: "chat" });
+    setFocusMessageSeq(null);
+    selectSession(result.sessionId);
+    setSessionMode("chat");
+    selectNode(result.nodeId ?? null);
+    setActiveSurface("project");
+  }, [activeProjectId, reloadSessions, selectNode, selectProject, selectSession]);
+
+  const returnToBranchSource = useCallback(async (source: BranchSource) => {
+    const sourceSessions = await reloadSessions(source.projectId);
+    // A source session may have been deleted after this branch was created.
+    // Keep the derived chat usable instead of navigating to an empty surface.
+    if (!sourceSessions.some((session) => session.id === source.sessionId)) return;
+    selectProject(source.projectId);
+    sessionUiStateRef.current.set(source.sessionId, { nodeId: source.nodeId, mode: "chat" });
+    selectSession(source.sessionId);
+    setSessionMode("chat");
+    selectNode(source.nodeId);
+    setFocusMessageSeq(source.messageSeq);
+    setActiveSurface("project");
+  }, [reloadSessions, selectNode, selectProject, selectSession]);
+
   // 原生菜单动作
   useEffect(() => {
     if (!window.api) return;
@@ -331,6 +363,7 @@ export default function App() {
     setActiveNodeId: setPersistedActiveNode,
     sessionMode,
     setSessionMode: setPersistedSessionMode,
+    focusMessageSeq,
     treeVersion,
     bumpTreeVersion: bumpProjectTree,
     agentCount: agents.length,
@@ -342,6 +375,8 @@ export default function App() {
     activityNow,
     refreshActivityStatus,
     runActivityConfig,
+    createChatBranch,
+    returnToBranchSource,
   };
 
   const Active = SURFACES.find((s) => s.id === activeSurface) ?? SURFACES[0];
@@ -369,6 +404,7 @@ export default function App() {
                 setSurface={setActiveSurface}
                 ctx={ctx}
                 onSelectSession={async (id) => {
+                  setFocusMessageSeq(null);
                   selectSession(id);
                   if (sessionMode !== "canvas") {
                     return;
@@ -378,6 +414,7 @@ export default function App() {
                   selectNode(root?.id ?? null);
                 }}
                 onFocusNode={(sessionId, nodeId) => {
+                  setFocusMessageSeq(null);
                   const session = useWorkspaceStore.getState().sessionsById[sessionId];
                   const remembered = sessionUiStateRef.current.get(sessionId);
                   const nextMode = sessionId === activeSessionId

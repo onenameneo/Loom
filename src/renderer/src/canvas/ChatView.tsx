@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import type { ApprovalRequestPayload, ModelSelection, NodeBudget, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
+import type { ApprovalRequestPayload, BranchSource, ModelSelection, NodeBudget, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
 import { IconSplit, IconProject } from "../icons";
 import { Message } from "../message/Message";
+import type { MessageBranchMode } from "../ui/dialogs";
 import { Composer, type ComposerImage } from "../composer/Composer";
 import { useTitlebarActions } from "../titlebar/Titlebar";
 import { ToolCallTimeline } from "./ToolCallTimeline";
@@ -35,6 +36,10 @@ export default function ChatView({
   model,
   thinkingLevel: initialThinkingLevel,
   onBranch,
+  onMessageBranch,
+  branchSource,
+  onReturnToBranch,
+  focusMessageSeq,
   onExpandCanvas,
   onTreeChange,
   noKey,
@@ -47,6 +52,10 @@ export default function ChatView({
   model?: ModelSelection;
   thinkingLevel?: ThinkingLevel;
   onBranch: (seedText: string, includeParentContext: boolean) => void;
+  onMessageBranch?: (sourceSeq: number, mode: MessageBranchMode) => void | Promise<void>;
+  branchSource?: BranchSource;
+  onReturnToBranch?: () => void | Promise<void>;
+  focusMessageSeq?: number;
   onExpandCanvas: () => void;
   onTreeChange?: () => void;
   noKey: boolean;
@@ -201,6 +210,12 @@ export default function ChatView({
     setThinkingLevelState(initialThinkingLevel ?? "off");
     refreshBudget();
   }, [initialThinkingLevel, model, nodeId, refreshBudget, systemPrompt]);
+
+  useEffect(() => {
+    if (typeof focusMessageSeq !== "number") return;
+    const target = threadRef.current?.querySelector(`[data-message-seq="${focusMessageSeq}"]`);
+    target?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+  }, [focusMessageSeq, nodeId, msgs.length]);
 
   useEffect(() => {
     localStorage.setItem(`loom:draft:${nodeId}`, input);
@@ -439,6 +454,16 @@ export default function ChatView({
     return parts.length ? parts.join(" · ") : undefined;
   }
 
+  function BranchReturnNotice() {
+    if (!branchSource || !onReturnToBranch) return null;
+    return (
+      <button className="branch-return-notice" type="button" onClick={() => void onReturnToBranch()}>
+        <IconSplit size={14} aria-hidden="true" />
+        <span>从聊天中继续</span>
+      </button>
+    );
+  }
+
   function onScroll() {
     const el = scrollRef.current;
     if (!el) return;
@@ -473,26 +498,31 @@ export default function ChatView({
             </div>
           )}
           {groupToolTimelineMessages(msgs).map((item) => (
-            item.kind === "tools" ? (
-              <ToolCallTimeline key={item.key} calls={item.calls} density="comfortable" />
-            ) : (
-              <Message
-                key={item.message.id}
-                role={item.message.role}
-                text={item.message.text}
-                thinking={item.message.thinking}
-                images={item.message.images}
-                density="comfortable"
-                streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1].id}
-                meta={item.message.role === "assistant" ? metaFor(item.message) : undefined}
-                checkpoint={item.message.checkpoint}
-                canRegenerate={item.message.role === "assistant" && item.message.id === msgs[msgs.length - 1]?.id && !isBusy}
-                canEdit={item.message.role === "user" && !isBusy}
-                onRegenerate={regenerate}
-                onEditResend={(text) => editResend(item.message.seq, text)}
-                onRetry={item.message.role === "error" ? regenerate : undefined}
-              />
-            )
+            <Fragment key={item.kind === "tools" ? item.key : item.message.id}>
+              {item.kind === "tools" ? (
+                <ToolCallTimeline calls={item.calls} density="comfortable" />
+              ) : (
+                <Message
+                  role={item.message.role}
+                  text={item.message.text}
+                  thinking={item.message.thinking}
+                  images={item.message.images}
+                  density="comfortable"
+                  streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1].id}
+                  meta={item.message.role === "assistant" ? metaFor(item.message) : undefined}
+                  checkpoint={item.message.checkpoint}
+                  canRegenerate={item.message.role === "assistant" && item.message.id === msgs[msgs.length - 1]?.id && !isBusy}
+                  canEdit={item.message.role === "user" && !isBusy}
+                  sourceSeq={item.message.seq}
+                  messageSeq={item.message.seq}
+                  onBranch={onMessageBranch ? (mode, sourceSeq) => onMessageBranch(sourceSeq, mode) : undefined}
+                  onRegenerate={regenerate}
+                  onEditResend={(text) => editResend(item.message.seq, text)}
+                  onRetry={item.message.role === "error" ? regenerate : undefined}
+                />
+              )}
+              {item.kind === "message" && item.message.seq === branchSource?.messageSeq && <BranchReturnNotice />}
+            </Fragment>
           ))}
           {thinking && !liveTurn && (
             <div className="thinking">

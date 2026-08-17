@@ -69,6 +69,19 @@ describe("main/preload project IPC contracts", () => {
     expect(envSource).toContain("CompactionCanvasEventPayload");
   });
 
+  it("exposes message branching through the canvas IPC contract", () => {
+    const canvasSource = readSource("src/main/canvas.ts");
+    const preloadSource = readSource("src/preload/index.ts");
+    const envSource = readSource("src/renderer/src/env.d.ts");
+
+    expect(canvasSource).toContain('ipcMain.handle("node:branchFromMessage"');
+    expect(canvasSource).toContain("runtime.branchFromMessage");
+    expect(preloadSource).toContain('branchFromMessage:');
+    expect(preloadSource).toContain('ipcRenderer.invoke("node:branchFromMessage"');
+    expect(envSource).toContain("branchFromMessage");
+    expect(envSource).toContain('mode: "new-session" | "canvas-node"');
+  });
+
   it("routes main-to-renderer pushes through the renderer lifecycle gate", () => {
     const mainSource = readSource("src/main/index.ts");
     const safeSendSource = readSource("src/main/ipcSafeSend.ts");
