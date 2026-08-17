@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Canvas from "./Canvas";
 import { TitlebarProvider } from "../titlebar/Titlebar";
@@ -201,5 +201,17 @@ describe("Canvas resize lifecycle", () => {
     view.unmount();
     expect(layoutStore.enqueue).toHaveBeenCalledOnce();
     expect(layoutStore.enqueue).not.toHaveBeenCalledWith("session-1", "n1", initial);
+  });
+
+  it("opens the shared alert dialog before deleting a branch", async () => {
+    await renderCanvas();
+    const nativeConfirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    act(() => nodeActions().onDelete("n1"));
+
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(screen.getByText("删除这个分支及其后代？")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
   });
 });

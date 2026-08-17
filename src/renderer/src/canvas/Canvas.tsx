@@ -16,7 +16,7 @@ import {
   type Node,
 } from "@xyflow/react";
 import type { CanvasNodeDto, ModelSelection } from "../env";
-import type { MessageBranchMode } from "../ui/dialogs";
+import { ConfirmDialog, type MessageBranchMode } from "../ui/dialogs";
 import { useTitlebarActions } from "../titlebar/Titlebar";
 import { CanvasTitlebarActions, CanvasZoomControls } from "./CanvasControls";
 import { useCanvasLayoutPersistence, useCanvasLayoutStore } from "./CanvasLayoutContext";
@@ -175,6 +175,7 @@ function CanvasContent({
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
+  const [deletingNodeId, setDeletingNodeId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [interaction, setInteraction] = useState<CanvasInteraction>({ kind: "idle" });
   const interactionRef = useRef<CanvasInteraction>({ kind: "idle" });
@@ -411,6 +412,19 @@ function CanvasContent({
     [layoutStore, setNodes, setEdges, sessionId],
   );
 
+  const confirmDeleteNode = useCallback(async () => {
+    const id = deletingNodeId;
+    setDeletingNodeId(null);
+    if (!id) return;
+    if (window.api) {
+      const result = await window.api.canvas.delete(id);
+      if (result.ok) removeIds(result.deletedIds);
+    } else {
+      removeIds([id]);
+    }
+    treeChangeRef.current?.();
+  }, [deletingNodeId, removeIds]);
+
   const focusNode = useCallback(
     (id: string, opts?: { flash?: boolean; duration?: number }) => {
       const collapsedAncestors = ancestorIds(id).filter((ancestorId) => collapsed.has(ancestorId));
@@ -611,19 +625,12 @@ function CanvasContent({
         publishNodeUpdate(update);
         treeChangeRef.current?.();
       },
-      onDelete: async (id: string) => {
-        if (!confirm("删除这个分支及其后代？")) return;
-        if (window.api) {
-          const r = await window.api.canvas.delete(id);
-          if (r.ok) removeIds(r.deletedIds);
-        } else {
-          removeIds([id]);
-        }
-        treeChangeRef.current?.();
+      onDelete: (id: string) => {
+        setDeletingNodeId(id);
       },
       onReturnChat: (id: string) => onReturnChat?.(id),
     }),
-    [applyResizeLayout, layoutStore, onReturnChat, removeIds, setNodes, sessionId],
+    [applyResizeLayout, layoutStore, onReturnChat, setNodes, sessionId],
   );
 
   useEffect(() => subscribeNodeUpdates((update) => {
@@ -962,6 +969,15 @@ function CanvasContent({
           maskColor="var(--minimap-mask)"
         />
       </ReactFlow>
+      <ConfirmDialog
+        open={Boolean(deletingNodeId)}
+        onOpenChange={(open) => {
+          if (!open) setDeletingNodeId(null);
+        }}
+        title="删除这个分支及其后代？"
+        description="此操作不可撤销。"
+        onConfirm={() => void confirmDeleteNode()}
+      />
     </BranchContext.Provider>
   );
 }
