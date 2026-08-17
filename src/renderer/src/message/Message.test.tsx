@@ -7,7 +7,7 @@ import "./message.css";
 afterEach(() => cleanup());
 
 describe("Message thinking", () => {
-  it("renders assistant thinking as a collapsed detail separate from the answer", () => {
+  it("renders assistant thinking as a collapsed animated section separate from the answer", () => {
     const { container } = render(
       <Message
         role="assistant"
@@ -16,8 +16,13 @@ describe("Message thinking", () => {
       />,
     );
 
-    const details = container.querySelector("details.m__thinking");
-    expect(details?.hasAttribute("open")).toBe(false);
+    const thinking = container.querySelector(".m__thinking");
+    expect(thinking?.classList.contains("is-open")).toBe(false);
+    const toggle = screen.getByRole("button", { name: "Thinking" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(thinking?.classList.contains("is-open")).toBe(true);
     expect(screen.getByText("Thinking")).toBeTruthy();
     expect(screen.getByText("Final answer")).toBeTruthy();
     expect(screen.getByText("I should inspect the code path first.")).toBeTruthy();

@@ -104,14 +104,23 @@ function CheckpointView({ checkpoint, text }: { checkpoint?: CheckpointInfo; tex
 }
 
 function ThinkingView({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+
   return (
-    <details className="m__thinking">
-      <summary>
+    <div className={`m__thinking ${open ? "is-open" : ""}`}>
+      <button
+        className="m__thinking-toggle"
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
         <Brain size={13} />
         <span>Thinking</span>
-      </summary>
-      <div className="m__thinking-body">{text}</div>
-    </details>
+      </button>
+      <div className="m__thinking-collapse" aria-hidden={!open}>
+        <div className="m__thinking-body">{text}</div>
+      </div>
+    </div>
   );
 }
 
