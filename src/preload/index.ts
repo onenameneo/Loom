@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { FileMentionRef } from "../common/fileMentions";
 
 type CanvasEvent = { nodeId: string; type: string; payload?: unknown };
 type LiveTurnSnapshot = { nodeId: string; sessionId: string; turnId: string; operation: "send" | "regenerate" | "edit-resend"; state: "running" | "awaiting_approval"; revision: number; assistantText: string; approval?: { requestId: string; toolName: string; toolCallId: string; reason?: string; sandboxMode?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "untrusted" | "on-request" | "never" } };
@@ -86,8 +87,10 @@ const api = {
       ipcRenderer.invoke("node:create", arg),
     branchFromMessage: (arg: { nodeId: string; sourceSeq: number; mode: "new-session" | "canvas-node" }): Promise<any> =>
       ipcRenderer.invoke("node:branchFromMessage", arg),
-    send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[]): Promise<{ ok: boolean }> =>
-      ipcRenderer.invoke("node:send", { nodeId, text, images, skillIds }),
+    send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[], mentions?: FileMentionRef[]): Promise<{ ok: boolean; recovered?: "overflow"; reason?: string; errors?: Array<{ root: string; path: string; code: string; message: string }> }> =>
+      ipcRenderer.invoke("node:send", { nodeId, text, images, skillIds, mentions }),
+    fileCandidates: (nodeId: string, query?: string): Promise<{ ok: boolean; candidates?: Array<{ root: string; rootName: string; path: string; kind: "file" }>; reason?: string }> =>
+      ipcRenderer.invoke("node:fileCandidates", { nodeId, query }),
     abort: (nodeId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("node:abort", nodeId),
     compact: (nodeId: string): Promise<{ ok: boolean; node?: any; reason?: string; error?: string }> => ipcRenderer.invoke("node:compact", nodeId),
     regenerate: (nodeId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("node:regenerate", nodeId),

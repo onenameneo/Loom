@@ -12,3 +12,4 @@ dist
 .worktrees/
 docs/
 *.bak
+openspec/

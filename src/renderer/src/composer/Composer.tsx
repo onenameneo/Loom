@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ClipboardEvent } from "react";
-import { BookOpen, Brain, ChevronDown, Square, X } from "lucide-react";
-import { Slider } from "radix-ui";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ClipboardEvent } from "react";
+import { BookOpen, Brain, ChevronDown, FileText, Folder, FolderOpen, Square, X } from "lucide-react";
+import { Popover, Slider } from "radix-ui";
+import type { FileCandidate, FileMentionRef } from "../../../common/fileMentions";
 import type { ModelListItem, SkillEffectiveDto, ThinkingLevel } from "../env";
 import { IconSend } from "../icons";
 import type { CmdCtx } from "./commands";
 import { CommandMenu } from "./CommandMenu";
 import { SlashPalette, type SlashPaletteHandle } from "./SlashPalette";
+import { findFileMentionTrigger } from "./fileMentionParser";
 
 export type ComposerImage = { data: string; mimeType: string };
+type ComposerSubmitResult = { ok: boolean; reason?: string; errors?: Array<{ path: string; message: string }> };
 
 export function Composer({
   nodeId,
@@ -45,7 +48,7 @@ export function Composer({
   budgetLine?: string;
   activeSkills?: SkillEffectiveDto[];
   topAccessory?: ReactNode;
-  onSubmit: (text: string, images: ComposerImage[], skillIds: string[]) => void;
+  onSubmit: (text: string, images: ComposerImage[], skillIds: string[], mentions: FileMentionRef[]) => void | Promise<ComposerSubmitResult>;
   onStop: () => void;
   onOpenPersona: () => void;
   onClearNode: () => void;
@@ -61,6 +64,14 @@ export function Composer({
   const slashRef = useRef<SlashPaletteHandle>(null);
   const [slashOpen, setSlashOpen] = useState(false);
   const [commandError, setCommandError] = useState<string | null>(null);
+  const [mentions, setMentions] = useState<FileMentionRef[]>([]);
+  const [cursorPosition, setCursorPosition] = useState(value.length);
+  const [fileCandidates, setFileCandidates] = useState<FileCandidate[]>([]);
+  const [fileCandidatesLoading, setFileCandidatesLoading] = useState(false);
+  const [fileCandidatesError, setFileCandidatesError] = useState<string | null>(null);
+  const [fileCandidatesUnavailable, setFileCandidatesUnavailable] = useState(false);
+  const [fileCandidateActive, setFileCandidateActive] = useState(0);
+  const [fileMentionDismissed, setFileMentionDismissed] = useState(false);
   const [images, setImages] = useState<ComposerImage[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelListItem[]>([]);
   const composingRef = useRef(false);
@@ -68,6 +79,51 @@ export function Composer({
   const [modelActive, setModelActive] = useState(0);
   const modelRootRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
+  const fileMentionListId = useId();
+  const [isComposing, setIsComposing] = useState(false);
+  const fileMentionTrigger = useMemo(() => findFileMentionTrigger(value, cursorPosition), [cursorPosition, value]);
+  const fileMentionOpen = Boolean(fileMentionTrigger && !fileMentionDismissed && !busy && !slashOpen && !isComposing);
+  const fileCandidateGroups = useMemo(() => {
+    const roots = new Map<string, { root: string; rootName: string; directories: Map<string, FileCandidate[]> }>();
+    for (const candidate of fileCandidates) {
+      const root = roots.get(candidate.root) ?? { root: candidate.root, rootName: candidate.rootName, directories: new Map() };
+      const parts = candidate.path.split("/");
+      const directory = parts.length > 1 ? parts.slice(0, -1).join("/") : "项目根目录";
+      const files = root.directories.get(directory) ?? [];
+      files.push(candidate);
+      root.directories.set(directory, files);
+      roots.set(candidate.root, root);
+    }
+    return [...roots.values()].map((root) => ({
+      ...root,
+      directories: [...root.directories.entries()].map(([directory, candidates]) => ({ directory, candidates })),
+    }));
+  }, [fileCandidates]);
+
+  useEffect(() => {
+    if (!fileMentionOpen || !fileMentionTrigger || !window.api) {
+      setFileCandidates([]);
+      setFileCandidatesError(null);
+      setFileCandidatesUnavailable(false);
+      setFileCandidatesLoading(false);
+      return;
+    }
+    setFileCandidateActive(0);
+    setFileCandidatesLoading(true);
+    setFileCandidatesError(null);
+    setFileCandidatesUnavailable(false);
+    const timer = window.setTimeout(() => {
+      window.api.canvas.fileCandidates(nodeId, fileMentionTrigger.query).then((result) => {
+        if (!result.ok) throw new Error(result.reason || "无法搜索项目文件。");
+        setFileCandidates(result.candidates ?? []);
+        setFileCandidatesUnavailable(result.reason === "no-source-roots");
+      }).catch((error) => {
+        setFileCandidates([]);
+        setFileCandidatesError(error instanceof Error ? error.message : "无法搜索项目文件。");
+      }).finally(() => setFileCandidatesLoading(false));
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [fileMentionOpen, fileMentionTrigger, nodeId]);
 
   const insertText = useCallback(
     (text: string) => {
@@ -220,13 +276,76 @@ export function Composer({
 
   function submit() {
     const text = value.trim();
-    if (busy || (!text && images.length === 0)) return;
-    onSubmit(text, images, (activeSkills ?? []).map((skill) => skill.id));
+    if (busy || (!text && images.length === 0 && mentions.length === 0)) return;
+    const submittedImages = images;
+    const submittedMentions = mentions;
+    const result = onSubmit(text, submittedImages, (activeSkills ?? []).map((skill) => skill.id), submittedMentions);
     setImages([]);
+    setMentions([]);
     setSlashOpen(false);
+    if (result && typeof (result as Promise<ComposerSubmitResult>).then === "function") {
+      void (result as Promise<ComposerSubmitResult>).then((response) => {
+        if (response && !response.ok) {
+          setImages(submittedImages);
+          setMentions(submittedMentions);
+        }
+      });
+    }
   }
 
-  const sendDisabled = !busy && !value.trim() && images.length === 0;
+  const sendDisabled = !busy && !value.trim() && images.length === 0 && mentions.length === 0;
+
+  function selectFileCandidate(candidate: FileCandidate) {
+    if (!fileMentionTrigger) return;
+    const next = `${value.slice(0, fileMentionTrigger.start)}${value.slice(fileMentionTrigger.end)}`;
+    const mention: FileMentionRef = { root: candidate.root, path: candidate.path };
+    setFileMentionDismissed(false);
+    setMentions((current) => current.some((item) => item.root === mention.root && item.path === mention.path) ? current : [...current, mention]);
+    onChange(next);
+    setCursorPosition(fileMentionTrigger.start);
+    requestAnimationFrame(() => {
+      const target = textareaRef.current;
+      target?.focus();
+      target?.setSelectionRange(fileMentionTrigger.start, fileMentionTrigger.start);
+    });
+  }
+
+  function removeFileMention(mention: FileMentionRef) {
+    setMentions((current) => current.filter((item) => item.root !== mention.root || item.path !== mention.path));
+    requestAnimationFrame(() => {
+      const target = textareaRef.current;
+      target?.focus({ preventScroll: true });
+    });
+  }
+
+  function closeFileMention() {
+    setFileMentionDismissed(true);
+  }
+
+  function handleFileMentionKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (!fileMentionOpen) return false;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setFileCandidateActive((index) => (fileCandidates.length ? (index + 1) % fileCandidates.length : 0));
+      return true;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setFileCandidateActive((index) => (fileCandidates.length ? (index - 1 + fileCandidates.length) % fileCandidates.length : 0));
+      return true;
+    }
+    if (event.key === "Enter" && fileCandidates[fileCandidateActive]) {
+      event.preventDefault();
+      selectFileCandidate(fileCandidates[fileCandidateActive]);
+      return true;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeFileMention();
+      return true;
+    }
+    return false;
+  }
 
   return (
     <div className="composer-wrap nodrag">
@@ -285,42 +404,159 @@ export function Composer({
             ))}
           </div>
         )}
-        <textarea
-          ref={textareaRef}
-          className="ask"
-          rows={1}
-          placeholder={placeholder}
-          value={value}
-          disabled={busy}
-          onChange={(event) => {
-            const next = event.target.value;
-            onChange(next);
-            setCommandError(null);
-            setSlashOpen(next.startsWith("/"));
+        {mentions.length > 0 && (
+          <div className="composer-file-mentions" aria-label="已引用文件">
+            {mentions.map((mention) => {
+              const fileName = mention.path.split("/").pop() || mention.path;
+              return (
+                <span className="composer-file-mention" key={`${mention.root}:${mention.path}`}>
+                  <FileText size={12} aria-hidden="true" />
+                  <span className="composer-file-mention__path" title={`@${mention.path}`}>@{fileName}</span>
+                  <button
+                    type="button"
+                    aria-label={`移除文件引用 ${mention.path}`}
+                    title="移除文件引用"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => removeFileMention(mention)}
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+        <Popover.Root
+          modal={false}
+          open={fileMentionOpen}
+          onOpenChange={(open) => {
+            if (!open) closeFileMention();
           }}
-          onFocus={() => setSlashOpen(value.startsWith("/"))}
-          onPaste={handlePaste}
-          onBlur={() => window.setTimeout(() => setSlashOpen(false), 120)}
-          onCompositionStart={() => {
-            composingRef.current = true;
-          }}
-          onCompositionEnd={() => {
-            composingRef.current = false;
-          }}
-          onKeyDown={(event) => {
-            const nativeEvent = event.nativeEvent as KeyboardEvent & { keyCode?: number };
-            const isComposing = composingRef.current || event.nativeEvent.isComposing || nativeEvent.keyCode === 229;
-            if (isComposing) return;
-            if (slashOpen && ["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) {
-              slashRef.current?.handleKeyDown(event);
-              return;
-            }
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              submit();
-            }
-          }}
-        />
+        >
+          <Popover.Anchor asChild>
+            <div className="composer-textarea-anchor">
+              <textarea
+                ref={textareaRef}
+                className="ask"
+                rows={1}
+                placeholder={placeholder}
+                value={value}
+                disabled={busy}
+                role="combobox"
+                aria-autocomplete="list"
+                aria-controls={fileMentionListId}
+                aria-expanded={fileMentionOpen}
+                aria-haspopup="listbox"
+                onChange={(event) => {
+                  const next = event.target.value;
+                  onChange(next);
+                  setCursorPosition(event.target.selectionStart);
+                  setFileMentionDismissed(false);
+                  setCommandError(null);
+                  setSlashOpen(next.startsWith("/"));
+                }}
+                onSelect={(event) => setCursorPosition(event.currentTarget.selectionStart)}
+                onFocus={() => {
+                  setCursorPosition(textareaRef.current?.selectionStart ?? value.length);
+                  setFileMentionDismissed(false);
+                  setSlashOpen(value.startsWith("/"));
+                }}
+                onPaste={handlePaste}
+                onBlur={() => window.setTimeout(() => setSlashOpen(false), 120)}
+                onCompositionStart={() => {
+                  composingRef.current = true;
+                  setIsComposing(true);
+                }}
+                onCompositionEnd={() => {
+                  composingRef.current = false;
+                  setIsComposing(false);
+                }}
+                onKeyDown={(event) => {
+                  const nativeEvent = event.nativeEvent as KeyboardEvent & { keyCode?: number };
+                  const isComposing = composingRef.current || event.nativeEvent.isComposing || nativeEvent.keyCode === 229;
+                  if (isComposing) return;
+                  if (handleFileMentionKeyDown(event)) return;
+                  if (slashOpen && ["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) {
+                    slashRef.current?.handleKeyDown(event);
+                    return;
+                  }
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    submit();
+                  }
+                }}
+              />
+            </div>
+          </Popover.Anchor>
+          <Popover.Portal>
+            <Popover.Content
+              id={fileMentionListId}
+              role="listbox"
+              aria-label="项目文件"
+              className="composer-popover file-mention-popover nodrag"
+              side="top"
+              align="start"
+              sideOffset={8}
+              onOpenAutoFocus={(event) => event.preventDefault()}
+              onInteractOutside={(event) => {
+                const target = event.target;
+                if (target instanceof Node && textareaRef.current?.contains(target)) event.preventDefault();
+              }}
+            >
+              <div className="file-mention-title">项目文件</div>
+              {fileCandidatesLoading && <div className="cmd-empty">搜索中…</div>}
+              {!fileCandidatesLoading && fileCandidatesError && <div className="cmd-empty file-mention-error">{fileCandidatesError}</div>}
+              {!fileCandidatesLoading && !fileCandidatesError && fileCandidatesUnavailable && (
+                <div className="file-mention-unavailable">
+                  <FolderOpen size={16} aria-hidden="true" />
+                  <strong>当前项目未关联本地目录</strong>
+                  <span>@ 文件只支持当前项目目录中的文件。</span>
+                  <small>请先为项目关联本地目录，再重新使用 @。</small>
+                </div>
+              )}
+              {!fileCandidatesLoading && !fileCandidatesError && !fileCandidatesUnavailable && fileCandidates.length === 0 && <div className="cmd-empty">没有匹配的项目文件</div>}
+              {!fileCandidatesLoading && !fileCandidatesError && !fileCandidatesUnavailable && fileCandidateGroups.map((root) => (
+                <div className="file-mention-root" key={root.root}>
+                  <div className="file-mention-root__header">
+                    <FolderOpen size={13} aria-hidden="true" />
+                    <span>{root.rootName}</span>
+                    <small>{root.root}</small>
+                  </div>
+                  {root.directories.map((directory) => (
+                    <div className="file-mention-directory-group" key={`${root.root}:${directory.directory}`}>
+                      <div className="file-mention-directory-heading">
+                        <Folder size={12} aria-hidden="true" />
+                        <span>{directory.directory}</span>
+                      </div>
+                      {directory.candidates.map((candidate) => {
+                        const index = fileCandidates.findIndex((item) => item.root === candidate.root && item.path === candidate.path);
+                        const parts = candidate.path.split("/");
+                        const fileName = parts[parts.length - 1] ?? candidate.path;
+                        return (
+                          <button
+                            key={`${candidate.root}:${candidate.path}`}
+                            type="button"
+                            role="option"
+                            aria-selected={index === fileCandidateActive}
+                            className={`cmd-row file-mention-row ${index === fileCandidateActive ? "is-active" : ""}`}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onMouseEnter={() => setFileCandidateActive(index)}
+                            onClick={() => selectFileCandidate(candidate)}
+                          >
+                            <span className="file-mention-path">
+                              <FileText size={12} aria-hidden="true" />
+                              <strong>{fileName}</strong>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
         <div className="composer-hint">输入 / 打开命令</div>
         {commandError && <div className="composer-command-error" role="alert">{commandError}</div>}
         <div className="composer-bar">

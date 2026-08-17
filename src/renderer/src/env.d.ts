@@ -17,6 +17,7 @@ export interface NodeMsg {
   text: string;
   thinking?: string;
   images?: { data: string; mimeType: string }[];
+  fileMentions?: FileMentionRef[];
   seq: number;
   usage?: {
     input?: number;
@@ -529,7 +530,8 @@ declare global {
           source?: BranchSource;
           node?: CanvasNodeDto;
         }>;
-        send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[]) => Promise<{ ok: boolean; recovered?: "overflow"; reason?: string }>;
+        send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[], mentions?: FileMentionRef[]) => Promise<{ ok: boolean; recovered?: "overflow"; reason?: string; errors?: Array<{ root: string; path: string; code: string; message: string }> }>;
+        fileCandidates: (nodeId: string, query?: string) => Promise<{ ok: boolean; candidates?: FileCandidate[]; reason?: string }>;
         abort: (nodeId: string) => Promise<{ ok: boolean }>;
         compact: (nodeId: string) => Promise<{ ok: boolean; node?: CanvasNodeDto; reason?: string; error?: string }>;
         regenerate: (nodeId: string) => Promise<{ ok: boolean }>;
@@ -656,3 +658,4 @@ declare global {
     };
   }
 }
+import type { FileCandidate, FileMentionRef } from "../../../common/fileMentions";

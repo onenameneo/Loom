@@ -71,6 +71,8 @@ import {
   createLiveTurnPublisher,
 } from "./liveTurns";
 import { createNodeRuntimeStore } from "./nodeRuntime";
+import type { FileCandidate, FileMentionRef } from "../../../common/fileMentions";
+import { findProjectFileCandidates, resolveProjectFileMentions } from "../tools/projectFiles/fileMentions";
 import type { RetrievalQuery } from "../../memory/retrieval";
 import type { MemoryFileAccess } from "../../memory/fileAccess";
 import {
@@ -177,6 +179,7 @@ interface CanvasMessageDto {
   text: string;
   thinking?: string;
   images?: { data: string; mimeType: string }[];
+  fileMentions?: FileMentionRef[];
   seq: number;
   usage?: LlmUsage;
   meta?: unknown;
@@ -285,14 +288,15 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
 
   // ---- 图缓存 & 映射 --------------------------------------------------------
 
-  function persisted(msg: AgentMessage): PersistedMessage {
+  function persisted(msg: AgentMessage, extraMeta?: Record<string, unknown>): PersistedMessage {
     const usage = normalizeLlmUsage((msg as any)?.usage);
+    const meta = { ...(extraMeta ?? {}), ...(usage ? { usage } : {}) };
     return {
       id: ids.message(),
       seq: 0,
       role: roleOf(msg),
       content: msg,
-      ...(usage ? { meta: { usage } } : {}),
+      ...(Object.keys(meta).length > 0 ? { meta } : {}),
     };
   }
 
@@ -543,11 +547,14 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return [node.systemPrompt || DEFAULT_SYSTEM_PROMPT, FILE_TOOL_PATH_GUIDANCE, memoryPrompt, skillIndex].filter(Boolean).join("\n\n");
   }
 
-  async function refreshMemoryPrompt(node: CanvasNode, handle: EngineHandle, text: string): Promise<void> {
-    if (!deps.memory) return;
+  async function refreshMemoryPrompt(node: CanvasNode, handle: EngineHandle, text: string, supplementalContext?: string): Promise<void> {
+    if (!deps.memory) {
+      if (supplementalContext) handle.setSystemPrompt?.([systemPromptFor(node), supplementalContext].join("\n\n"));
+      return;
+    }
     try {
       const result = await deps.memory.retrieve(node.sessionId, { text, projectId: node.projectId });
-      handle.setSystemPrompt?.([systemPromptFor(node), result.reminder].filter(Boolean).join("\n\n"));
+      handle.setSystemPrompt?.([systemPromptFor(node), result.reminder, supplementalContext].filter(Boolean).join("\n\n"));
       if (result.issues.length > 0) events.emit(node.id, "memory", { state: "diagnostic", issues: result.issues });
     } catch (error) {
       events.emit(node.id, "memory", { state: "diagnostic", issues: [error instanceof Error ? error.message : String(error)] });
@@ -695,6 +702,19 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return images.length ? images : undefined;
   }
 
+  function fileMentionsOf(meta: unknown): FileMentionRef[] | undefined {
+    if (!meta || typeof meta !== "object") return undefined;
+    const mentions = (meta as { fileMentions?: unknown }).fileMentions;
+    if (!Array.isArray(mentions)) return undefined;
+    const refs = mentions.filter((mention): mention is FileMentionRef => (
+      Boolean(mention)
+      && typeof mention === "object"
+      && typeof (mention as FileMentionRef).root === "string"
+      && typeof (mention as FileMentionRef).path === "string"
+    ));
+    return refs.length > 0 ? refs : undefined;
+  }
+
   const dto = (n: CanvasNode) => ({
     id: n.id,
     sessionId: n.sessionId,
@@ -783,7 +803,16 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       if (role !== "user" && role !== "assistant") return [];
       const usage = normalizeLlmUsage((m as any)?.usage);
       const thinking = role === "assistant" ? thinkingOf(m) : "";
-      return [{ role, text: textOf(m), thinking: thinking || undefined, images: imagesOf(m), seq, usage, meta: n.messageMeta[seq] }];
+      return [{
+        role,
+        text: textOf(m),
+        thinking: thinking || undefined,
+        images: imagesOf(m),
+        fileMentions: fileMentionsOf(n.messageMeta[seq]),
+        seq,
+        usage,
+        meta: n.messageMeta[seq],
+      }];
     }),
     skills: effectiveSkillsFor(n.id).skills.map((skill) => ({
       id: skill.id,
@@ -1097,7 +1126,16 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     }
   }
 
-  async function send(arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[]; skillIds?: string[] }) {
+  async function fileCandidates(arg: { nodeId: string; query?: string }): Promise<{ ok: boolean; candidates?: FileCandidate[]; reason?: string }> {
+    const node = loadNode(arg.nodeId);
+    if (!node) return { ok: false, reason: "node-not-found" };
+    const project = store.listProjects().find((candidate) => candidate.id === node.projectId);
+    if (!project) return { ok: false, reason: "project-not-found" };
+    if (project.sourceRoots.length === 0) return { ok: true, candidates: [], reason: "no-source-roots" };
+    return { ok: true, candidates: await findProjectFileCandidates(project.sourceRoots, arg.query ?? "") };
+  }
+
+  async function send(arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[]; skillIds?: string[]; mentions?: FileMentionRef[] }) {
     const node = loadNode(arg.nodeId);
     if (!node) {
       events.emit(arg.nodeId, "error", "节点不存在。");
@@ -1116,6 +1154,22 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       events.emit(arg.nodeId, "error", NO_KEY_ERROR);
       return { ok: false };
     }
+    const project = store.listProjects().find((candidate) => candidate.id === node.projectId);
+    const mentionResolution = arg.mentions?.length
+      ? await resolveProjectFileMentions(project?.sourceRoots ?? [], arg.mentions)
+      : { files: [], errors: [], metadata: { requested: 0, resolved: 0, rejected: 0, totalBytes: 0 } };
+    if (mentionResolution.errors.length > 0) {
+      return { ok: false, reason: "file-mention-error", errors: mentionResolution.errors, metadata: mentionResolution.metadata };
+    }
+    if (mentionResolution.files.length > 0) events.emit(arg.nodeId, "file_context", mentionResolution.metadata);
+    const text = arg.text.trim();
+    const fileContext = mentionResolution.files.length
+      ? [
+          "<loom-file-context>",
+          ...mentionResolution.files.map((file) => `### @${file.path}\n${file.content}`),
+          "</loom-file-context>",
+        ].join("\n\n")
+      : "";
     let activeTurn: { turnId: string; signal: AbortSignal } | undefined;
     let promptFromSeq = node.messages.length;
     const shouldNameSession = arg.text.trim().length > 0 && node.messages.length === 0;
@@ -1130,7 +1184,6 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
         runtime.transition(arg.nodeId, (r) => ({
           pendingSkillIds: [...new Set((arg.skillIds ?? []).map((id) => id.trim()).filter(Boolean))],
         }));
-        const text = arg.text.trim();
         const images = (arg.images ?? []).filter((img) => img.data && img.mimeType);
         const content =
           images.length > 0
@@ -1140,14 +1193,19 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
               ]
             : text;
         const userMessage: AgentMessage = { role: "user", content, timestamp: clock.now() };
-        await refreshMemoryPrompt(node, handle, text);
+        await refreshMemoryPrompt(node, handle, text, fileContext);
         await maybeCompactNode(node, "threshold", {
           turnId: activeTurn?.turnId,
           signal: activeTurn?.signal,
           handle,
           pendingUserInput: userMessage,
         });
-        const persistedUser = persisted(userMessage);
+        const persistedUser = persisted(
+          userMessage,
+          mentionResolution.files.length > 0
+            ? { fileMentions: mentionResolution.files.map(({ root, path }) => ({ root, path })) }
+            : undefined,
+        );
         store.appendMessages(arg.nodeId, [persistedUser]);
         node.messages.push(userMessage);
         node.messageMeta.push(persistedUser.meta);
@@ -1480,6 +1538,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     create,
     branchFromMessage,
     send,
+    fileCandidates,
     abort,
     regenerate,
     editResend,

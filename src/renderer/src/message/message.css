@@ -319,6 +319,55 @@
   border-radius: var(--r-sm);
   background: var(--surface-2);
 }
+.m__file-mentions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: 100%;
+  margin-bottom: 6px;
+}
+.m__file-mention {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 7px;
+  max-width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+.m__file-mention > svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent);
+}
+.m__file-mention-info {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.m__file-mention-info strong,
+.m__file-mention-info small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.m__file-mention-info strong {
+  color: var(--text);
+  font-size: calc(var(--m-fs) - 2px);
+  font-weight: 500;
+}
+.m__file-mention-info small {
+  color: var(--faint);
+  font-size: calc(var(--m-fs) - 3px);
+}
+.m--compact .m__file-mention {
+  padding: 4px 7px;
+}
 
 /* 预留：工具消息 */
 .m--tool .m__plain {

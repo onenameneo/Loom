@@ -1297,6 +1297,150 @@
   box-shadow: var(--shadow-float);
   z-index: 70;
 }
+.composer-textarea-anchor {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+.composer-textarea-anchor > .ask {
+  display: block;
+  width: 100%;
+}
+.file-mention-popover {
+  width: min(460px, calc(100vw - 32px));
+  max-height: 280px;
+  padding: 6px;
+  overflow-y: auto;
+}
+.file-mention-title {
+  padding: 5px 8px 6px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.file-mention-root + .file-mention-root {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.file-mention-root__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 2px 8px 4px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.file-mention-root__header svg {
+  color: var(--accent);
+  flex: none;
+}
+.file-mention-root__header span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-mention-root__header small {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 10px;
+}
+.file-mention-directory-group + .file-mention-directory-group {
+  margin-top: 3px;
+}
+.file-mention-directory-heading {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 20px;
+  padding: 2px 8px 1px 20px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.file-mention-directory-heading svg {
+  color: var(--muted);
+  flex: none;
+}
+.file-mention-row {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "label"
+    "hint";
+  gap: 2px;
+}
+.file-mention-row {
+  min-height: 32px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.file-mention-path {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.file-mention-path svg {
+  flex: none;
+  color: var(--muted);
+}
+.file-mention-directory {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-mention-path strong {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-mention-row small {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--faint);
+}
+.file-mention-error {
+  color: var(--err);
+}
+.file-mention-unavailable {
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+  padding: 12px 10px 11px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.file-mention-unavailable svg {
+  color: var(--accent);
+}
+.file-mention-unavailable strong {
+  color: var(--text);
+  font-weight: 500;
+}
+.file-mention-unavailable span,
+.file-mention-unavailable small {
+  color: var(--faint);
+  font-size: 10px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .file-mention-popover,
+  .file-mention-row {
+    scroll-behavior: auto;
+    transition: none;
+  }
+}
 .cmd-menu {
   left: 0;
   right: auto;
@@ -1534,6 +1678,59 @@
   flex-wrap: wrap;
   gap: 6px;
 }
+.composer-file-mentions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+  padding: 1px 0;
+}
+.composer-file-mention {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 3px 5px 3px 7px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+}
+.composer-file-mention > svg {
+  flex: none;
+  color: var(--accent);
+}
+.composer-file-mention__path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-file-mention button {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin: -1px -2px -1px 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+.composer-file-mention button:hover,
+.composer-file-mention button:focus-visible {
+  color: var(--text);
+  background: var(--surface);
+  outline: none;
+}
 .composer-image {
   position: relative;
   width: 54px;
@@ -1570,6 +1767,7 @@
   border: none;
   padding: 2px 2px 0;
   color: var(--text);
+  caret-color: var(--text);
   font-size: 12.5px;
   outline: none;
   font-family: var(--font-ui);

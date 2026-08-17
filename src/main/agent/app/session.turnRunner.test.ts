@@ -515,6 +515,45 @@ describe("createAgentSession turn runner integration", () => {
     }
   });
 
+  it("injects selected project files into the model context without changing the user text", async () => {
+    const root = mkdtempSync(join(tmpdir(), "loom-session-file-mention-"));
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src", "index.ts"), "export const answer = 42;", "utf-8");
+    const store = new MemoryStore();
+    store.projects[0].sourceRoots = [root];
+    const messages: AgentMessage[] = [];
+    const prompt = vi.fn(async (message: AgentMessage) => {
+      messages.push(message, assistant("ok"));
+    });
+    const setSystemPrompt = vi.fn();
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine({ ...createHandle(messages, prompt), setSystemPrompt }),
+    });
+
+    try {
+      await expect(session.send({
+        nodeId: "n1",
+        text: "summarize this file",
+        mentions: [{ root: "project:0", path: "src/index.ts" }],
+      })).resolves.toMatchObject({ ok: true });
+
+      expect(prompt).toHaveBeenCalledWith(expect.objectContaining({ content: "summarize this file" }));
+      expect(setSystemPrompt).toHaveBeenCalledWith(expect.stringContaining("### @src/index.ts"));
+      expect(setSystemPrompt).toHaveBeenCalledWith(expect.stringContaining("export const answer = 42;"));
+      expect(store.getNode("n1")?.messages.map((message) => String((message.content as any).content))).toContain("summarize this file");
+      expect(session.open("sess")[0]?.messages[0]).toMatchObject({
+        fileMentions: [{ root: "project:0", path: "src/index.ts" }],
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("exposes active global skills to the agent as the read tool", () => {
     const root = mkdtempSync(join(tmpdir(), "loom-session-skill-tools-"));
     try {

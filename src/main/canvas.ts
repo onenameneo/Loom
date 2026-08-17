@@ -18,6 +18,7 @@ import { createRuntimeModelsFromRegistry } from "./modelConfig/runtimeModels";
 import { loadScopedModelSettings, resolveStoredModelSelection } from "./modelConfig/scopes";
 import type { ContextModelMetadata } from "./agent/core/budget";
 import type { MemoryRuntimePort } from "./memory/runtime";
+import type { FileMentionRef } from "../common/fileMentions";
 
 // ---------------------------------------------------------------------------
 // 画布引擎接线（主进程）：组装洋葱四圈 + 把 node:* IPC 绑定到 ② runtime。
@@ -128,9 +129,10 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   ipcMain.handle("node:branchFromMessage", (_e, arg: { nodeId: string; sourceSeq: number; mode: "new-session" | "canvas-node" }) =>
     runtime.branchFromMessage(arg),
   );
-  ipcMain.handle("node:send", (_e, arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[]; skillIds?: string[] }) =>
+  ipcMain.handle("node:send", (_e, arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[]; skillIds?: string[]; mentions?: FileMentionRef[] }) =>
     runtime.send(arg),
   );
+  ipcMain.handle("node:fileCandidates", (_e, arg: { nodeId: string; query?: string }) => runtime.fileCandidates(arg));
   ipcMain.handle("node:abort", (_e, nodeId: string) => runtime.abort(nodeId));
   ipcMain.handle("node:compact", (_e, nodeId: string) => runtime.compact(nodeId));
   ipcMain.handle("node:regenerate", (_e, nodeId: string) => runtime.regenerate(nodeId));

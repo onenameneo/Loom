@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import type { ApprovalRequestPayload, BranchSource, ModelSelection, NodeBudget, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
+import type { FileMentionRef } from "../../../common/fileMentions";
 import { IconSplit, IconProject } from "../icons";
 import { Message } from "../message/Message";
 import type { MessageBranchMode } from "../ui/dialogs";
@@ -13,7 +14,7 @@ import { ApprovalPrompt, type ApprovalState } from "./ApprovalPrompt";
 import { selectNodeLiveTurn, useWorkspaceStore } from "../workspace/store";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
-type Msg = { id: number; role: Role; text: string; thinking?: string; images?: ComposerImage[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
+type Msg = { id: number; role: Role; text: string; thinking?: string; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
 
 function formatModelSelection(model?: ModelSelection) {
   if (!model) return undefined;
@@ -71,6 +72,7 @@ export default function ChatView({
     text: m.text,
     thinking: m.thinking,
     images: m.images,
+    fileMentions: m.fileMentions,
     seq: m.seq,
     usage: m.usage,
     meta: m.meta,
@@ -145,7 +147,7 @@ export default function ChatView({
   useTitlebarActions(titlebarActions);
 
   const reloadFromInitial = useCallback((items: NodeMsg[], targetNodeId: string) => {
-    const restored: Msg[] = items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }));
+    const restored: Msg[] = items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, fileMentions: m.fileMentions, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }));
     // A tree refresh can race an in-flight Node. Merge the authoritative live
     // snapshot into the refreshed transcript instead of briefly replacing it
     // with an older persisted copy.
@@ -316,19 +318,33 @@ export default function ChatView({
   const streaming = isBusy && msgs[msgs.length - 1]?.role === "assistant";
   const awaitingApproval = turn?.state === "awaiting_approval" && approval;
 
-  function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = []) {
-    if (isBusy || (!text && images.length === 0)) return;
-    setMsgs((m) => [...m, { id: idRef.current++, role: "user", text, images }]);
+  async function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = [], mentions: FileMentionRef[] = []) {
+    if (isBusy || (!text && images.length === 0 && mentions.length === 0)) return { ok: false };
+    const optimisticId = idRef.current++;
+    setMsgs((m) => [...m, { id: optimisticId, role: "user", text, images, fileMentions: mentions }]);
     setInput("");
     setDraftSkills([]);
     localStorage.removeItem(`loom:draft:${nodeId}`);
     if (!window.api) {
       setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: "浏览器预览：在 Electron 中运行（pnpm dev）以对话。" }]);
-      return;
+      return { ok: false };
     }
     setBusy(true);
     setThinking(true);
-    window.api.canvas.send(nodeId, text, images, skillIds);
+    const result = mentions.length
+      ? await window.api.canvas.send(nodeId, text, images, skillIds, mentions)
+      : await window.api.canvas.send(nodeId, text, images, skillIds);
+    if (!result.ok && result.reason === "file-mention-error") {
+      const details = result.errors?.map((error) => `@${error.path}：${error.message}`).join("；") || "文件无法读取";
+      setBusy(false);
+      setThinking(false);
+      setInput(text);
+      setMsgs((m) => [
+        ...m.filter((message) => message.id !== optimisticId),
+        { id: idRef.current++, role: "error", text: `文件引用失败：${details}。请移除引用后重试。` },
+      ]);
+    }
+    return result;
   }
 
   async function stop() {
@@ -507,6 +523,7 @@ export default function ChatView({
                   text={item.message.text}
                   thinking={item.message.thinking}
                   images={item.message.images}
+                  fileMentions={item.message.fileMentions}
                   density="comfortable"
                   streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1].id}
                   meta={item.message.role === "assistant" ? metaFor(item.message) : undefined}

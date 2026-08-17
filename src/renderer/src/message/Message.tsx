@@ -1,7 +1,8 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { BookOpen, Brain, Check, Copy, Pencil, RefreshCcw } from "lucide-react";
+import { BookOpen, Brain, Check, Copy, FileText, Pencil, RefreshCcw } from "lucide-react";
+import type { FileMentionRef } from "../../../common/fileMentions";
 import type { NodeMsg } from "../env";
 import { IconSplit } from "../icons";
 import { MessageBranchDialog, type MessageBranchMode } from "../ui/dialogs";
@@ -130,6 +131,7 @@ export function Message({
   text,
   thinking,
   images,
+  fileMentions,
   density = "comfortable",
   streaming = false,
   meta,
@@ -147,6 +149,7 @@ export function Message({
   text: string;
   thinking?: string;
   images?: { data: string; mimeType: string }[];
+  fileMentions?: FileMentionRef[];
   density?: Density;
   streaming?: boolean;
   meta?: string;
@@ -198,7 +201,7 @@ export function Message({
             <Pencil size={13} />
           </button>
         )}
-        {typeof sourceSeq === "number" && onBranch && (
+        {role !== "user" && typeof sourceSeq === "number" && onBranch && (
           <button onClick={() => setBranchOpen(true)} title="分支" aria-label="分支">
             <IconSplit size={13} />
           </button>
@@ -211,6 +214,23 @@ export function Message({
           {images.map((image, index) => (
             <img key={`${image.mimeType}-${index}`} src={`data:${image.mimeType};base64,${image.data}`} alt="" />
           ))}
+        </div>
+      )}
+
+      {fileMentions && fileMentions.length > 0 && (
+        <div className="m__file-mentions" aria-label="引用文件">
+          {fileMentions.map((mention) => {
+            const fileName = mention.path.split("/").pop() || mention.path;
+            return (
+              <div className="m__file-mention" key={`${mention.root}:${mention.path}`} title={`@${mention.root}/${mention.path}`}>
+                <FileText size={13} aria-hidden="true" />
+                <span className="m__file-mention-info">
+                  <strong>@{fileName}</strong>
+                  <small>{mention.path}</small>
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -247,7 +267,7 @@ export function Message({
       {role === "error" && onRetry && (
         <button className="m__retry nodrag" onClick={onRetry}>重试</button>
       )}
-      {branchOpen && typeof sourceSeq === "number" && onBranch && (
+      {role !== "user" && branchOpen && typeof sourceSeq === "number" && onBranch && (
         <MessageBranchDialog
           open={branchOpen}
           onOpenChange={setBranchOpen}

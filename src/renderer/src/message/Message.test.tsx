@@ -106,6 +106,12 @@ describe("Message checkpoint timeline item", () => {
 });
 
 describe("Message branching", () => {
+  it("does not offer branching from a user message", () => {
+    render(<Message role="user" text="Question" sourceSeq={3} onBranch={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "分支" })).toBeNull();
+  });
+
   it("offers the two branch destinations from the message action bar", () => {
     const onBranch = vi.fn();
     render(
@@ -140,5 +146,21 @@ describe("Message branching", () => {
     expect((option as HTMLButtonElement).disabled).toBe(true);
 
     await act(async () => resolve?.());
+  });
+});
+
+describe("Message file references", () => {
+  it("shows the selected file and its project path on the sent message", () => {
+    const { container } = render(
+      <Message
+        role="user"
+        text="请总结这个文件"
+        fileMentions={[{ root: "project:0", path: "src/common/titleDefaults.ts" }]}
+      />,
+    );
+
+    expect(screen.getByText("@titleDefaults.ts")).toBeTruthy();
+    expect(screen.getByText("src/common/titleDefaults.ts")).toBeTruthy();
+    expect(container.querySelector(".m__file-mentions")).toBeTruthy();
   });
 });

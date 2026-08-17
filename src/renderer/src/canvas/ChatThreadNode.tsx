@@ -2,6 +2,7 @@ import { memo, useCallback, useContext, useEffect, useRef, useState, type CSSPro
 import { Handle, NodeResizeControl, Position, type ResizeParams } from "@xyflow/react";
 import { Check, ChevronDown, MessageSquareText, Pencil, Trash2 } from "lucide-react";
 import type { ApprovalRequestPayload, ModelSelection, NodeBudget, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
+import type { FileMentionRef } from "../../../common/fileMentions";
 import { Composer, type ComposerImage } from "../composer/Composer";
 import { IconArrowUpRight, IconChevronRight, IconSplit } from "../icons";
 import { Message } from "../message/Message";
@@ -15,7 +16,7 @@ import { type NodeUpdate } from "./nodeUpdates";
 import { selectNodeLiveTurn, useWorkspaceStore } from "../workspace/store";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
-type Msg = { id: number; role: Role; text: string; thinking?: string; images?: ComposerImage[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
+type Msg = { id: number; role: Role; text: string; thinking?: string; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
 type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number; includeParentContext: boolean };
 type RectLike = Pick<DOMRect, "left" | "top" | "bottom" | "width" | "height">;
 
@@ -91,7 +92,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   const idRef = useRef(1);
 
   const toMsgs = useCallback((items: NodeMsg[] = []) => (
-    items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }))
+    items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, fileMentions: m.fileMentions, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }))
   ), []);
 
   const [msgs, setMsgs] = useState<Msg[]>(() => toMsgs(data.messages ?? []));
@@ -331,19 +332,33 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     window.getSelection()?.removeAllRanges();
   };
 
-  function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = []) {
-    if (isBusy || (!text && images.length === 0)) return;
-    setMsgs((m) => [...m, { id: idRef.current++, role: "user", text, images }]);
+  async function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = [], mentions: FileMentionRef[] = []) {
+    if (isBusy || (!text && images.length === 0 && mentions.length === 0)) return { ok: false };
+    const optimisticId = idRef.current++;
+    setMsgs((m) => [...m, { id: optimisticId, role: "user", text, images, fileMentions: mentions }]);
     setInput("");
     setDraftSkills([]);
     localStorage.removeItem(`loom:draft:${id}`);
     if (!window.api) {
       setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: "浏览器预览：在 Electron 中运行（pnpm dev）以对话。" }]);
-      return;
+      return { ok: false };
     }
     setBusy(true);
     setThinking(true);
-    window.api.canvas.send(id, text, images, skillIds);
+    const result = mentions.length
+      ? await window.api.canvas.send(id, text, images, skillIds, mentions)
+      : await window.api.canvas.send(id, text, images, skillIds);
+    if (!result.ok && result.reason === "file-mention-error") {
+      const details = result.errors?.map((error) => `@${error.path}：${error.message}`).join("；") || "文件无法读取";
+      setBusy(false);
+      setThinking(false);
+      setInput(text);
+      setMsgs((m) => [
+        ...m.filter((message) => message.id !== optimisticId),
+        { id: idRef.current++, role: "error", text: `文件引用失败：${details}。请移除引用后重试。` },
+      ]);
+    }
+    return result;
   }
 
   async function stop() {
@@ -746,6 +761,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
                 text={item.message.text}
                 thinking={item.message.thinking}
                 images={item.message.images}
+                fileMentions={item.message.fileMentions}
                 density="compact"
                 streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1]?.id}
                 meta={item.message.role === "assistant" ? metaFor(item.message) : undefined}
