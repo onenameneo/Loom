@@ -3,7 +3,7 @@ import { BookOpen, Brain, ChevronDown, Square, X } from "lucide-react";
 import { Slider } from "radix-ui";
 import type { ModelListItem, SkillEffectiveDto, ThinkingLevel } from "../env";
 import { IconSend } from "../icons";
-import type { CmdCtx } from "./commands";
+import { unknownSlashCommand, type CmdCtx } from "./commands";
 import { CommandMenu } from "./CommandMenu";
 import { SlashPalette, type SlashPaletteHandle } from "./SlashPalette";
 
@@ -60,6 +60,7 @@ export function Composer({
   const fileRef = useRef<HTMLInputElement>(null);
   const slashRef = useRef<SlashPaletteHandle>(null);
   const [slashOpen, setSlashOpen] = useState(false);
+  const [commandError, setCommandError] = useState<string | null>(null);
   const [images, setImages] = useState<ComposerImage[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelListItem[]>([]);
   const composingRef = useRef(false);
@@ -219,6 +220,12 @@ export function Composer({
 
   function submit() {
     const text = value.trim();
+    const slashError = unknownSlashCommand(text);
+    if (slashError) {
+      setCommandError(slashError);
+      setSlashOpen(false);
+      return;
+    }
     if (busy || (!text && images.length === 0)) return;
     onSubmit(text, images, (activeSkills ?? []).map((skill) => skill.id));
     setImages([]);
@@ -235,10 +242,17 @@ export function Composer({
         <SlashPalette
           ref={slashRef}
           value={slashOpen ? value : ""}
-          setValue={onChange}
+          setValue={(next) => {
+            onChange(next);
+            setCommandError(null);
+          }}
           ctx={ctx}
           modelOptions={modelOptions}
           onClose={() => setSlashOpen(false)}
+          onUnknownCommand={(message) => {
+            setCommandError(message);
+            setSlashOpen(false);
+          }}
         />
         {activeSkills && activeSkills.length > 0 && (
           <div className="composer-skills" aria-label="已启用 Skills">
@@ -283,6 +297,7 @@ export function Composer({
           onChange={(event) => {
             const next = event.target.value;
             onChange(next);
+            setCommandError(null);
             setSlashOpen(next.startsWith("/"));
           }}
           onFocus={() => setSlashOpen(value.startsWith("/"))}
@@ -309,6 +324,7 @@ export function Composer({
           }}
         />
         <div className="composer-hint">输入 / 打开命令</div>
+        {commandError && <div className="composer-command-error" role="alert">{commandError}</div>}
         <div className="composer-bar">
           <input
             ref={fileRef}

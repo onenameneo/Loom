@@ -1209,6 +1209,11 @@
   margin-top: -2px;
   user-select: none;
 }
+.composer-command-error {
+  color: var(--err);
+  font-size: 11px;
+  line-height: 1.35;
+}
 .composer-skills {
   display: flex;
   flex-wrap: wrap;

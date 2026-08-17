@@ -20,12 +20,14 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
   ctx: CmdCtx;
   modelOptions: { id: string; name: string }[];
   onClose?: () => void;
+  onUnknownCommand?: (message: string) => void;
 }>(function SlashPalette({
   value,
   setValue,
   ctx,
   modelOptions,
   onClose,
+  onUnknownCommand,
 }, ref) {
   const [active, setActive] = useState(0);
   const listId = useId();
@@ -77,7 +79,10 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
 
   function executeModel(index: number) {
     const model = modelItems[index]?.id;
-    if (!model || !modelCommand) return;
+    if (!model || !modelCommand) {
+      onUnknownCommand?.("没有匹配的已添加模型");
+      return;
+    }
     modelCommand.run(ctx, model);
     setValue("");
     onClose?.();
@@ -85,7 +90,10 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
 
   function executeSkill(index: number) {
     const skill = skillItems[index]?.id;
-    if (!skill || !skillCommand) return;
+    if (!skill || !skillCommand) {
+      onUnknownCommand?.("没有匹配的 Skill");
+      return;
+    }
     skillCommand.run(ctx, skill);
     setValue("");
     onClose?.();
@@ -103,6 +111,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
       if (modelMode) executeModel(active);
       else if (skillMode) executeSkill(active);
       else if (filtered[active]) executeCommand(filtered[active]);
+      else onUnknownCommand?.(parsed.name ? `未知命令：/${parsed.name}` : "没有匹配命令");
     } else if (event.key === "Escape") {
       event.preventDefault();
       onClose?.();
