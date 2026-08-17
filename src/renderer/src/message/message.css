@@ -58,10 +58,10 @@
   margin-bottom: var(--m-block-gap);
 }
 .m__thinking-toggle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 7px;
-  width: 100%;
+  width: fit-content;
   padding: 0;
   border: 0;
   background: transparent;
