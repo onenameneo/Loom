@@ -271,15 +271,11 @@ body {
 .memory-page__header p { margin: 0; color: var(--muted); font-size: 12px; }
 .memory-page__actions { display: flex; align-items: flex-start; gap: var(--s2); }
 .memory-page__actions .btn { margin-top: 0; }
-.memory-dream-control { min-width: 250px; display: grid; gap: var(--s1); }
+.memory-dream-control { min-width: 0; display: grid; gap: var(--s1); }
 .memory-dream-control__actions { display: flex; gap: var(--s2); }
-.memory-dream-control__actions .btn { flex: 1; justify-content: center; white-space: nowrap; }
-.memory-dream-status { min-height: 17px; display: flex; align-items: center; gap: 6px; color: var(--muted); font: 10px/1.4 var(--font-mono); }
-.memory-dream-status__dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--faint); }
-.memory-dream-status.running .memory-dream-status__dot { background: var(--accent); animation: monitor-live-pulse 1600ms cubic-bezier(0.2, 0, 0, 1) infinite; }
-.memory-dream-status.success .memory-dream-status__dot { background: var(--ok); }
-.memory-dream-status.error .memory-dream-status__dot { background: var(--err); }
-.memory-dream-status.blocked .memory-dream-status__dot { background: var(--warn); }
+.memory-dream-control__trigger { display: inline-flex; }
+.memory-dream-control__actions .btn { justify-content: center; white-space: nowrap; }
+.memory-page .btn:disabled { cursor: not-allowed; opacity: .55; border-color: var(--border); background: var(--surface-2); color: var(--faint); }
 .memory-dream-progress { height: 3px; overflow: hidden; border-radius: var(--r-pill); background: var(--surface-2); }
 .memory-dream-progress span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 220ms var(--panel-motion-curve); }
 .eyebrow { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font: 10px var(--font-mono); letter-spacing: .04em; }

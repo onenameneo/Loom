@@ -59,4 +59,66 @@ describe("MemoryPanel", () => {
     expect(remember).toHaveBeenCalledWith(expect.objectContaining({ type: "user", content: "默认使用中文回答。" }));
     expect(screen.queryByRole("dialog", { name: "新增记忆" })).toBeNull();
   });
+
+  it("disables AutoDream when the gate is closed and explains why on hover", async () => {
+    const onEvent = vi.fn(() => vi.fn());
+    (window as any).api = {
+      memory: {
+        list: vi.fn(async () => ({ records: [], issues: [], stats: { active: 0, candidates: 0, archived: 0, stale: 0, conflicted: 0, issues: 0 } })),
+        onEvent,
+        autodreamStatus: vi.fn(async () => ({ status: "idle", newSessions: 3, gate: { eligible: false, reason: "sessions" } })),
+        autodreamRun: vi.fn(async () => undefined),
+      },
+    };
+
+    render(<MemoryPanel />);
+    const autoDreamButton = await screen.findByRole("button", { name: "运行 AutoDream" }) as HTMLButtonElement;
+    expect(autoDreamButton.disabled).toBe(true);
+
+    await userEvent.hover(autoDreamButton.parentElement!);
+    await waitFor(() => expect(screen.getByRole("tooltip")).toBeTruthy());
+    expect(screen.getByRole("tooltip").textContent).toContain("暂不可运行 · 已积累 3 个新会话");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("closes the open memory detail after confirming forget", async () => {
+    const record = {
+      id: "mem_1",
+      type: "user",
+      scope: { kind: "user" },
+      status: "active",
+      confidence: 0.8,
+      description: "Use Chinese",
+      content: "Use Chinese by default.",
+      source: { trigger: "explicit" },
+      updatedAt: 1,
+    };
+    const list = vi.fn(async () => ({
+      records: [record],
+      issues: [],
+      stats: { active: 1, candidates: 0, archived: 0, stale: 0, conflicted: 0, issues: 0 },
+    }));
+    const forget = vi.fn(async () => undefined);
+    (window as any).api = {
+      memory: {
+        list,
+        onEvent: vi.fn(() => vi.fn()),
+        approve: vi.fn(async () => undefined),
+        reject: vi.fn(async () => undefined),
+        forget,
+        autodreamStatus: vi.fn(async () => ({ status: "idle", gate: { eligible: true, reason: "ready" } })),
+        autodreamRun: vi.fn(async () => undefined),
+      },
+    };
+
+    render(<MemoryPanel />);
+    await userEvent.click(await screen.findByRole("button", { name: /Use Chinese/ }));
+    expect(screen.getByRole("dialog", { name: "记忆详情" })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "遗忘" }));
+    await userEvent.click(screen.getByRole("button", { name: "删除" }));
+
+    await waitFor(() => expect(forget).toHaveBeenCalledWith("mem_1", "forgotten from memory center"));
+    expect(screen.queryByRole("dialog", { name: "记忆详情" })).toBeNull();
+  });
 });

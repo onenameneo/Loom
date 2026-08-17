@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Brain, Check, RefreshCw, Trash2, X } from "lucide-react";
 import type { ProjectMeta } from "../env";
-import { ConfirmDialog, Modal } from "../ui/dialogs";
+import { ConfirmDialog, Modal, Tip } from "../ui/dialogs";
 import { LoomSelect, LoomSelectItem } from "../ui/controls";
 
 type MemoryRecord = {
@@ -128,6 +128,7 @@ export default function MemoryPanel({ project }: { project?: ProjectMeta }) {
   async function archive() {
     if (!forgetting) return;
     await window.api?.memory.forget(forgetting.id, "forgotten from memory center");
+    setSelectedId(null);
     setForgetting(null);
     await reload();
   }
@@ -219,7 +220,7 @@ export default function MemoryPanel({ project }: { project?: ProjectMeta }) {
     return "自动整理跨会话记忆";
   }
 
-  const dreamStateClass = dreaming ? "running" : dreamStatus.status === "failed" ? "error" : dreamStatus.status === "completed" ? "success" : dreamStatus.gate && !dreamStatus.gate.eligible ? "blocked" : "";
+  const autoDreamDisabled = dreaming || dreamStatus.status === "checking" || Boolean(dreamStatus.gate && !dreamStatus.gate.eligible);
 
   return (
     <div className="memory-page">
@@ -234,12 +235,12 @@ export default function MemoryPanel({ project }: { project?: ProjectMeta }) {
           <button className="btn primary" type="button" onClick={() => { setRememberError(null); setAddOpen(true); }}>新增记忆</button>
           <div className="memory-dream-control">
             <div className="memory-dream-control__actions">
-              <button className="btn" type="button" onClick={() => void runAutoDream()} disabled={dreaming}>{dreaming ? "整理中…" : "运行 AutoDream"}</button>
+              <Tip label={dreamStatusText()}>
+                <span className="memory-dream-control__trigger">
+                  <button className="btn" type="button" onClick={() => void runAutoDream()} disabled={autoDreamDisabled}>{dreaming ? "整理中…" : "运行 AutoDream"}</button>
+                </span>
+              </Tip>
               {dreaming && <button className="btn" type="button" onClick={() => void cancelAutoDream()}>取消</button>}
-            </div>
-            <div className={`memory-dream-status ${dreamStateClass}`} role="status" aria-live="polite">
-              <span className="memory-dream-status__dot" aria-hidden="true" />
-              <span>{dreamStatusText()}</span>
             </div>
             {dreaming && <div className="memory-dream-progress" aria-hidden="true"><span style={{ width: `${Math.max(4, Math.round((dreamStatus.progress ?? 0) * 100))}%` }} /></div>}
           </div>
