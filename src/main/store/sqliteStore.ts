@@ -7,6 +7,7 @@ import {
   MIN_NODE_HEIGHT,
   MIN_NODE_WIDTH,
   normalizePermissionSettings,
+  normalizeMemorySettings,
   isValidNodeLayout,
   type NodeLayout,
   type NodeRecord,
@@ -175,6 +176,7 @@ export class SqliteStore implements Store {
       activity: decode(values.get("activity"), DEFAULT_SETTINGS.activity),
       skills: decode(values.get("skills"), DEFAULT_SETTINGS.skills),
       permissions: normalizePermissionSettings(decode(values.get("permissions"), DEFAULT_SETTINGS.permissions)),
+      memory: normalizeMemorySettings(decode(values.get("memory"), DEFAULT_SETTINGS.memory)),
       apiKeyEnc: decode<string | undefined>(values.get("apiKeyEnc"), undefined),
     };
   }
@@ -189,6 +191,7 @@ export class SqliteStore implements Store {
       activity: { ...current.activity, ...(patch.activity ?? {}) },
       skills: { ...current.skills, ...(patch.skills ?? {}) },
       permissions: normalizePermissionSettings({ ...current.permissions, ...(patch.permissions ?? {}) }),
+      memory: normalizeMemorySettings({ ...current.memory, ...(patch.memory ?? {}) }),
     };
     const stmt = this.db.prepare(`
       INSERT INTO settings(key, value) VALUES (?, ?)
@@ -201,6 +204,7 @@ export class SqliteStore implements Store {
       stmt.run("activity", encode(next.activity));
       stmt.run("skills", encode(next.skills));
       stmt.run("permissions", encode(next.permissions));
+      stmt.run("memory", encode(next.memory));
     });
     tx();
     return next;

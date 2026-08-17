@@ -34,6 +34,8 @@ export interface EngineHandle {
   readonly messages: AgentMessage[];
   /** 用给定转写覆盖引擎消息（截断/编辑重发后同步）。 */
   syncMessages(msgs: AgentMessage[]): void;
+  /** 更新运行期 system prompt（例如当前会话选中的长期记忆提醒）。 */
+  setSystemPrompt?(prompt: string): void;
 }
 
 export type TurnOperationKind = "send" | "regenerate" | "edit-resend";

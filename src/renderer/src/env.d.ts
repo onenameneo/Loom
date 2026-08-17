@@ -377,6 +377,12 @@ export interface SettingsPayload {
     writableRoots: string[];
     commandOutputLimit: number;
   };
+  memory?: {
+    enabled: boolean;
+    backgroundExtraction: boolean;
+    autoDream: boolean;
+    rootDir?: string;
+  };
   modelRegistry?: ModelRegistryPayload;
   globalDefaultModel?: { providerId: string; modelId: string };
   sources: { baseUrl: string; model: string; key: string };
@@ -563,6 +569,38 @@ declare global {
         enable: (arg: ActivityConfigArg) => Promise<ActivityConfigResult>;
         disable: (arg: ActivityConfigArg) => Promise<ActivityConfigResult>;
         onEvent: (cb: (e: ActivityEvent) => void) => () => void;
+      };
+      memory: {
+        list: (arg?: { projectId?: string; includeArchived?: boolean }) => Promise<{
+          records: Array<{
+            id: string;
+            type: "user" | "feedback" | "project" | "reference";
+            scope: { kind: "user" } | { kind: "project"; projectId: string };
+            status: "active" | "candidate" | "rejected" | "archived" | "stale" | "conflicted";
+            confidence: number;
+            description: string;
+            content: string;
+            source: { trigger: string; sessionId?: string; nodeId?: string; excerpt?: string };
+            createdAt: number;
+            updatedAt: number;
+            supersedes?: string[];
+            archivedReason?: string;
+          }>;
+          issues: Array<{ path: string; message: string }>;
+          stats: { active: number; candidates: number; archived: number; stale: number; conflicted: number; issues: number };
+        }>;
+        stats: () => Promise<{ active: number; candidates: number; archived: number; stale: number; conflicted: number; issues: number }>;
+        preview: (id: string) => Promise<{ record: unknown; markdown: string } | undefined>;
+        remember: (input: any) => Promise<any>;
+        edit: (arg: { id: string; patch: any }) => Promise<any>;
+        archive: (id: string, reason?: string) => Promise<any>;
+        forget: (id: string, reason?: string) => Promise<any>;
+        approve: (id: string, overrides?: any) => Promise<any>;
+        reject: (id: string, reason?: string) => Promise<any>;
+        autodreamStatus: () => Promise<any>;
+        autodreamRun: () => Promise<any>;
+        autodreamCancel: () => Promise<{ ok: boolean }>;
+        onEvent: (cb: (event: { type: string; [key: string]: unknown }) => void) => () => void;
       };
       acp: {
         start: (arg: { cwd: string }) => Promise<{ ok: boolean; sessionId?: string; message?: string; hint?: string }>;

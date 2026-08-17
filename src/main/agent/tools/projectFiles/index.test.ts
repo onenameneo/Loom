@@ -1,9 +1,9 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, symlinkSync, readFileSync } from "fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, symlinkSync, readFileSync, realpathSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createProjectFileTools, createProjectMutationTools } from ".";
-import { withFileMutationQueue } from "./access";
+import { fileVersion, withFileMutationQueue } from "./access";
 
 const dirs: string[] = [];
 
@@ -32,6 +32,16 @@ function mutationTool<T extends string>(root: string, name: T) {
   return createProjectMutationTools([root]).find((candidate) => candidate.name === name)!;
 }
 
+async function readVersion(root: string, path: string): Promise<string> {
+  const read = tool(root, "read");
+  const result = await read.execute({ toolCallId: `version-${path}`, args: { path } });
+  return (result.details as { version: string }).version;
+}
+
+function fileStatVersion(path: string): string {
+  return fileVersion(statSync(path));
+}
+
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   const promise = new Promise<T>((res) => {
@@ -47,7 +57,7 @@ describe("project coding tools", () => {
 
   it("reports missing or unconfigured roots as Project source roots", async () => {
     const root = projectRoot();
-    const read = tool(root, "project_read_file");
+    const read = tool(root, "read");
 
     expect(() => createProjectMutationTools([])).not.toThrow();
     await expect(read.execute({ toolCallId: "t1", args: { root: join(root, "not-configured"), path: "src/index.ts" } })).rejects.toThrow(
@@ -57,7 +67,7 @@ describe("project coding tools", () => {
 
   it("reads numbered bounded lines and reports truncation", async () => {
     const root = projectRoot();
-    const read = tool(root, "project_read_file");
+    const read = tool(root, "read");
     const result = await read.execute({ toolCallId: "t1", args: { path: "src/index.ts", offset: 2, limit: 1 } });
 
     expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("2 | needle here") });
@@ -66,7 +76,7 @@ describe("project coding tools", () => {
 
   it("caps long lines and returns an actionable continuation after the byte limit", async () => {
     const root = projectRoot();
-    const read = tool(root, "project_read_file");
+    const read = tool(root, "read");
     const longLine = "x".repeat(2_100);
     const content = Array.from({ length: 220 }, (_, index) => `${index + 1}-${"y".repeat(300)}`).join("\n");
     writeFileSync(join(root, "src", "large.txt"), `${longLine}\n${content}\n`, "utf-8");
@@ -86,7 +96,7 @@ describe("project coding tools", () => {
 
   it("rejects an offset beyond the end of the file", async () => {
     const root = projectRoot();
-    const read = tool(root, "project_read_file");
+    const read = tool(root, "read");
 
     await expect(read.execute({ toolCallId: "t-offset", args: { path: "src/index.ts", offset: 99 } })).rejects.toThrow(
       /offset 99 is out of range/i,
@@ -95,9 +105,9 @@ describe("project coding tools", () => {
 
   it("returns a file version and rejects stale writes and edits", async () => {
     const root = projectRoot();
-    const read = tool(root, "project_read_file");
-    const write = mutationTool(root, "project_write_file");
-    const edit = mutationTool(root, "project_edit_file");
+    const read = tool(root, "read");
+    const write = mutationTool(root, "write");
+    const edit = mutationTool(root, "edit");
     const readResult = await read.execute({ toolCallId: "t-version-read", args: { path: "src/index.ts" } });
     const version = (readResult.details as { version: string }).version;
     writeFileSync(join(root, "src", "index.ts"), "externally changed\n", "utf-8");
@@ -118,12 +128,14 @@ describe("project coding tools", () => {
 
   it("omits the contextual diff when the existing file exceeds the diff input cap", async () => {
     const root = projectRoot();
-    const write = mutationTool(root, "project_write_file");
-    writeFileSync(join(root, "src", "large-existing.txt"), `${"old\n".repeat(2_700_001)}`, "utf-8");
+    const write = mutationTool(root, "write");
+    const largePath = join(root, "src", "large-existing.txt");
+    writeFileSync(largePath, `${"old\n".repeat(2_700_001)}`, "utf-8");
+    const version = await readVersion(root, "src/large-existing.txt");
 
     const result = await write.execute({
       toolCallId: "t-large-write",
-      args: { path: "src/large-existing.txt", content: "new\n", overwrite: true },
+      args: { path: "src/large-existing.txt", content: "new\n", overwrite: true, expectedVersion: version },
     });
 
     expect(result.details).toMatchObject({ truncation: { truncated: true, reason: "input" } });
@@ -145,12 +157,44 @@ describe("project coding tools", () => {
     dirs.push(outside);
     writeFileSync(join(outside, "secret.txt"), "secret", "utf-8");
     symlinkSync(join(outside, "secret.txt"), join(root, "src", "outside-link"));
-    const read = tool(root, "project_read_file");
+    const read = tool(root, "read");
     const list = tool(root, "project_list_files");
 
     await expect(read.execute({ toolCallId: "t1", args: { path: "../outside.txt" } })).rejects.toThrow("outside this Project");
     await expect(read.execute({ toolCallId: "t2", args: { path: "src/outside-link" } })).rejects.toThrow("outside this Project");
     await expect(list.execute({ toolCallId: "t3", args: { path: "src" } })).rejects.toThrow("outside this Project");
+  });
+
+  it("reads a user-provided external absolute path only in full-access mode", async () => {
+    const root = projectRoot();
+    const outside = mkdtempSync(join(tmpdir(), "loom-project-external-read-"));
+    dirs.push(outside);
+    const target = join(outside, "memory.ts");
+    writeFileSync(target, "export const memory = true;\n", "utf-8");
+
+    const restricted = createProjectFileTools([root], { getSandboxMode: () => "workspace-write" })
+      .find((candidate) => candidate.name === "read")!;
+    await expect(restricted.execute({ toolCallId: "t-external-restricted", args: { path: target } })).rejects.toThrow("outside this Project");
+
+    const fullAccess = createProjectFileTools([root], { getSandboxMode: () => "danger-full-access" })
+      .find((candidate) => candidate.name === "read")!;
+    const result = await fullAccess.execute({ toolCallId: "t-external-full", args: { path: target } });
+    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("export const memory = true") });
+    expect(result.details).toMatchObject({ path: realpathSync(target), root: "external", external: true });
+  });
+
+  it("keeps read available for an empty Project in full-access mode", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "loom-empty-project-external-read-"));
+    dirs.push(outside);
+    const target = join(outside, "README.md");
+    writeFileSync(target, "external context\n", "utf-8");
+
+    expect(createProjectFileTools([], { getSandboxMode: () => "danger-full-access" }).map((candidate) => candidate.name)).toEqual(["read"]);
+    const read = createProjectFileTools([], { getSandboxMode: () => "danger-full-access" }).find((candidate) => candidate.name === "read")!;
+    const result = await read.execute({ toolCallId: "t-empty-project-read", args: { path: target } });
+
+    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("external context") });
+    expect(result.details).toMatchObject({ path: realpathSync(target), root: "external" });
   });
 
   it("selects only an explicitly configured second root", async () => {
@@ -204,7 +248,7 @@ describe("project coding tools", () => {
 
   it("creates a project file and requires explicit overwrite", async () => {
     const root = projectRoot();
-    const write = mutationTool(root, "project_write_file");
+    const write = mutationTool(root, "write");
 
     const created = await write.execute({ toolCallId: "t1", args: { path: "src/new.md", content: "hello Neo!" } });
     expect(readFileSync(join(root, "src", "new.md"), "utf-8")).toBe("hello Neo!");
@@ -214,28 +258,106 @@ describe("project coding tools", () => {
     await expect(write.execute({ toolCallId: "t2", args: { path: "src/new.md", content: "changed" } })).rejects.toThrow("overwrite: true");
     expect(readFileSync(join(root, "src", "new.md"), "utf-8")).toBe("hello Neo!");
 
-    const overwritten = await write.execute({ toolCallId: "t3", args: { path: "src/new.md", content: "changed", overwrite: true } });
+    const version = await readVersion(root, "src/new.md");
+    const overwritten = await write.execute({ toolCallId: "t3", args: { path: "src/new.md", content: "changed", overwrite: true, expectedVersion: version } });
     expect(readFileSync(join(root, "src", "new.md"), "utf-8")).toBe("changed");
     expect(overwritten.details).toMatchObject({ operation: "overwrite" });
   });
 
+  it("creates, overwrites, and edits an external file in full-access mode", async () => {
+    const root = projectRoot();
+    const outside = mkdtempSync(join(tmpdir(), "loom-project-external-write-"));
+    dirs.push(outside);
+    const target = join(outside, "notes.md");
+    const options = { getSandboxMode: () => "danger-full-access" as const };
+    const read = createProjectFileTools([root], options).find((candidate) => candidate.name === "read")!;
+    const write = createProjectMutationTools([root], options).find((candidate) => candidate.name === "write")!;
+    const edit = createProjectMutationTools([root], options).find((candidate) => candidate.name === "edit")!;
+
+    expect(await write.approval?.normalizeTarget({ path: target, content: "hello Neo\n" })).toBe(`external:${join(realpathSync(outside), "notes.md")}`);
+
+    const created = await write.execute({ toolCallId: "t-external-create", args: { path: target, content: "hello Neo\n" } });
+    expect(created.details).toMatchObject({ path: realpathSync(target), root: "external", operation: "create" });
+    expect(readFileSync(target, "utf-8")).toBe("hello Neo\n");
+
+    const firstVersion = (await read.execute({ toolCallId: "t-external-version-1", args: { path: target } })).details as { version: string };
+    const overwritten = await write.execute({
+      toolCallId: "t-external-overwrite",
+      args: { path: target, content: "hello Loom\n", overwrite: true, expectedVersion: firstVersion.version },
+    });
+    expect(overwritten.details).toMatchObject({ root: "external", operation: "overwrite" });
+
+    const secondVersion = (await read.execute({ toolCallId: "t-external-version-2", args: { path: target } })).details as { version: string };
+    const edited = await edit.execute({
+      toolCallId: "t-external-edit",
+      args: { path: target, oldText: "hello Loom", newText: "hello world", expectedVersion: secondVersion.version },
+    });
+    expect(edited.details).toMatchObject({ path: realpathSync(target), root: "external", replacements: 1 });
+    expect(readFileSync(target, "utf-8")).toBe("hello world\n");
+
+    const thirdVersion = (await read.execute({ toolCallId: "t-external-version-3", args: { path: target } })).details as { version: string };
+    await write.execute({
+      toolCallId: "t-external-overwrite-2",
+      args: { path: target, content: "same\nsame\n", overwrite: true, expectedVersion: thirdVersion.version },
+    });
+    const fourthVersion = (await read.execute({ toolCallId: "t-external-version-4", args: { path: target } })).details as { version: string };
+    const replacedAll = await edit.execute({
+      toolCallId: "t-external-edit-all",
+      args: { path: target, oldText: "same", newText: "other", replaceAll: true, expectedVersion: fourthVersion.version },
+    });
+    expect(replacedAll.details).toMatchObject({ root: "external", replacements: 2 });
+    expect(readFileSync(target, "utf-8")).toBe("other\nother\n");
+
+    const concurrentVersion = (await read.execute({ toolCallId: "t-external-version-5", args: { path: target } })).details as { version: string };
+    const first = edit.execute({ toolCallId: "t-external-concurrent-1", args: { path: target, oldText: "other\nother", newText: "one\ntwo", expectedVersion: concurrentVersion.version } });
+    const second = edit.execute({ toolCallId: "t-external-concurrent-2", args: { path: target, oldText: "other\nother", newText: "two\none", expectedVersion: concurrentVersion.version } });
+    const concurrentResults = await Promise.allSettled([first, second]);
+    expect(concurrentResults.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(concurrentResults.filter((result) => result.status === "rejected")).toHaveLength(1);
+  });
+
+  it("rejects unsafe or unguarded external mutations", async () => {
+    const root = projectRoot();
+    const outside = mkdtempSync(join(tmpdir(), "loom-project-external-mutation-boundary-"));
+    const other = mkdtempSync(join(tmpdir(), "loom-project-external-mutation-other-"));
+    dirs.push(outside, other);
+    const target = join(outside, "notes.md");
+    writeFileSync(target, "original\n", "utf-8");
+    symlinkSync(target, join(outside, "link.md"));
+    const restrictedOptions = { getSandboxMode: () => "workspace-write" as const };
+    const fullOptions = { getSandboxMode: () => "danger-full-access" as const };
+    const restrictedWrite = createProjectMutationTools([root], restrictedOptions).find((candidate) => candidate.name === "write")!;
+    const fullWrite = createProjectMutationTools([root], fullOptions).find((candidate) => candidate.name === "write")!;
+    const fullEdit = createProjectMutationTools([root], fullOptions).find((candidate) => candidate.name === "edit")!;
+    writeFileSync(join(outside, "binary.bin"), Buffer.from([0xff, 0xfe]));
+    const binaryVersion = fileStatVersion(join(outside, "binary.bin"));
+
+    await expect(restrictedWrite.execute({ toolCallId: "t-external-write-restricted", args: { path: target, content: "blocked" } })).rejects.toThrow("danger-full-access");
+    await expect(fullWrite.execute({ toolCallId: "t-external-write-missing-version", args: { path: target, content: "blocked", overwrite: true } })).rejects.toThrow("expectedVersion");
+    await expect(fullEdit.execute({ toolCallId: "t-external-edit-missing-version", args: { path: target, oldText: "original", newText: "changed" } })).rejects.toThrow("expectedVersion");
+    await expect(fullWrite.execute({ toolCallId: "t-external-write-parent", args: { path: join(other, "missing", "new.md"), content: "blocked" } })).rejects.toThrow("Parent directory");
+    await expect(fullWrite.execute({ toolCallId: "t-external-write-link", args: { path: join(outside, "link.md"), content: "blocked", overwrite: true, expectedVersion: fileStatVersion(target) } })).rejects.toThrow("symbolic link");
+    await expect(fullEdit.execute({ toolCallId: "t-external-edit-binary", args: { path: join(outside, "binary.bin"), oldText: "x", newText: "y", expectedVersion: binaryVersion } })).rejects.toThrow();
+    expect(readFileSync(target, "utf-8")).toBe("original\n");
+  });
+
   it("edits a project file by exact match and supports explicit replace all", async () => {
     const root = projectRoot();
-    const edit = mutationTool(root, "project_edit_file");
+    const edit = mutationTool(root, "edit");
 
-    const single = await edit.execute({ toolCallId: "t1", args: { path: "src/index.ts", oldText: "needle here", newText: "needle there" } });
+    const single = await edit.execute({ toolCallId: "t1", args: { path: "src/index.ts", oldText: "needle here", newText: "needle there", expectedVersion: await readVersion(root, "src/index.ts") } });
     expect(readFileSync(join(root, "src", "index.ts"), "utf-8")).toContain("needle there");
     expect(single.details).toMatchObject({ path: "src/index.ts", operation: "edit", replacements: 1 });
 
     writeFileSync(join(root, "src", "dupes.txt"), "same\nsame\n", "utf-8");
     await expect(
-      edit.execute({ toolCallId: "t2", args: { path: "src/dupes.txt", oldText: "same", newText: "other" } }),
+      edit.execute({ toolCallId: "t2", args: { path: "src/dupes.txt", oldText: "same", newText: "other", expectedVersion: await readVersion(root, "src/dupes.txt") } }),
     ).rejects.toThrow("matched 2 times");
     expect(readFileSync(join(root, "src", "dupes.txt"), "utf-8")).toBe("same\nsame\n");
 
     const all = await edit.execute({
       toolCallId: "t3",
-      args: { path: "src/dupes.txt", oldText: "same", newText: "other", replaceAll: true },
+      args: { path: "src/dupes.txt", oldText: "same", newText: "other", replaceAll: true, expectedVersion: await readVersion(root, "src/dupes.txt") },
     });
     expect(readFileSync(join(root, "src", "dupes.txt"), "utf-8")).toBe("other\nother\n");
     expect(all.details).toMatchObject({ replacements: 2 });
@@ -248,23 +370,24 @@ describe("project coding tools", () => {
     writeFileSync(join(outside, "secret.txt"), "secret", "utf-8");
     symlinkSync(join(outside, "secret.txt"), join(root, "src", "outside-link"));
     writeFileSync(join(root, "src", "binary.txt"), Buffer.from([0xff, 0xfe]));
-    const write = mutationTool(root, "project_write_file");
-    const edit = mutationTool(root, "project_edit_file");
+    const write = mutationTool(root, "write");
+    const edit = mutationTool(root, "edit");
 
     await expect(write.execute({ toolCallId: "t1", args: { path: "../outside.txt", content: "x" } })).rejects.toThrow("outside this Project");
     await expect(write.execute({ toolCallId: "t2", args: { path: "missing/new.txt", content: "x" } })).rejects.toThrow();
     await expect(write.execute({ toolCallId: "t3", args: { path: "src/outside-link", content: "x", overwrite: true } })).rejects.toThrow("symbolic link");
-    await expect(edit.execute({ toolCallId: "t4", args: { path: "src/index.ts", oldText: "absent", newText: "x" } })).rejects.toThrow("not found");
-    await expect(edit.execute({ toolCallId: "t5", args: { path: "src/binary.txt", oldText: "x", newText: "y" } })).rejects.toThrow();
+    await expect(edit.execute({ toolCallId: "t4", args: { path: "src/index.ts", oldText: "absent", newText: "x", expectedVersion: await readVersion(root, "src/index.ts") } })).rejects.toThrow("not found");
+    await expect(edit.execute({ toolCallId: "t5", args: { path: "src/binary.txt", oldText: "x", newText: "y", expectedVersion: fileStatVersion(join(root, "src", "binary.txt")) } })).rejects.toThrow();
     expect(existsSync(join(outside, "secret.txt"))).toBe(true);
   });
 
   it("serializes same-file mutations and allows independent file queues to progress", async () => {
     const root = projectRoot();
-    const edit = mutationTool(root, "project_edit_file");
+    const edit = mutationTool(root, "edit");
 
-    const first = edit.execute({ toolCallId: "t1", args: { path: "src/index.ts", oldText: "zero", newText: "one" } });
-    const second = edit.execute({ toolCallId: "t2", args: { path: "src/index.ts", oldText: "zero", newText: "two" } });
+    const version = await readVersion(root, "src/index.ts");
+    const first = edit.execute({ toolCallId: "t1", args: { path: "src/index.ts", oldText: "zero", newText: "one", expectedVersion: version } });
+    const second = edit.execute({ toolCallId: "t2", args: { path: "src/index.ts", oldText: "zero", newText: "two", expectedVersion: version } });
     const results = await Promise.allSettled([first, second]);
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);

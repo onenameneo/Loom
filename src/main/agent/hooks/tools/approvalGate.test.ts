@@ -28,7 +28,7 @@ const approvedTool: ReadonlyAgentTool<{ path: string }> = {
 };
 
 const mutationTool: AgentTool<{ path: string; content: string }> = {
-  name: "project_write_file",
+  name: "write",
   label: "Write Project File",
   description: "Writes a Project file",
   parameters: Type.Object({ path: Type.String(), content: Type.String() }),
@@ -122,7 +122,7 @@ describe("createApprovalGate", () => {
     const gate = createApprovalGate({
       approvals,
       policies: createApprovalPolicyStore(),
-      getTool: (nodeId, name) => (nodeId === "n1" && name === "project_write_file" ? mutationTool : undefined),
+      getTool: (nodeId, name) => (nodeId === "n1" && name === "write" ? mutationTool : undefined),
       setAwaitingApproval: () => true,
       setRunning: () => true,
     });
@@ -130,7 +130,7 @@ describe("createApprovalGate", () => {
     const pending = gate.onToolCall?.({
       nodeId: "n1",
       turnId: "t1",
-      toolName: "project_write_file",
+      toolName: "write",
       toolCallId: "tc",
       args: { path: "a.md", content: "secret full content" },
     });
@@ -144,7 +144,7 @@ describe("createApprovalGate", () => {
       nodeId: "n1",
       turnId: "t1",
       toolCallId: "tc",
-      toolName: "project_write_file",
+      toolName: "write",
       action: "deny",
     });
     await expect(pending).resolves.toEqual({ block: true, reason: "approval denied" });
@@ -154,7 +154,7 @@ describe("createApprovalGate", () => {
     const eventLog = events();
     const approvals = createApprovalBroker({ events: eventLog.sink, clock: { now: () => 1 } });
     const policies = createApprovalPolicyStore({
-      isPersistentAllowed: (toolName, target) => toolName === "project_write_file" && target === "root:a.md",
+      isPersistentAllowed: (toolName, target) => toolName === "write" && target === "root:a.md",
       grantPersistent: () => undefined,
     });
     const gate = createApprovalGate({
@@ -169,7 +169,7 @@ describe("createApprovalGate", () => {
       gate.onToolCall?.({
         nodeId: "n1",
         turnId: "t1",
-        toolName: "project_write_file",
+        toolName: "write",
         toolCallId: "tc1",
         args: { path: "a.md", content: "x" },
       }),
@@ -179,7 +179,7 @@ describe("createApprovalGate", () => {
     const pending = gate.onToolCall?.({
       nodeId: "n1",
       turnId: "t1",
-      toolName: "project_write_file",
+      toolName: "write",
       toolCallId: "tc2",
       args: { path: "b.md", content: "x" },
     });
@@ -189,7 +189,7 @@ describe("createApprovalGate", () => {
       nodeId: "n1",
       turnId: "t1",
       toolCallId: "tc2",
-      toolName: "project_write_file",
+      toolName: "write",
       action: "allow",
       scope: "once",
     });
@@ -210,7 +210,7 @@ describe("createApprovalGate", () => {
     await expect(gate.onToolCall?.({
       nodeId: "n1",
       turnId: "t1",
-      toolName: "project_write_file",
+        toolName: "write",
       toolCallId: "tc",
       args: { path: "a.md", content: "x" },
     })).resolves.toEqual({ block: true, reason: "approval policy never" });

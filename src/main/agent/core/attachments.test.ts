@@ -66,9 +66,9 @@ describe("context attachments", () => {
 
   it("collects bounded project file context only from paired tool calls/results", () => {
     const messages: any[] = [
-      { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "project_read_file", args: { path: "src/app.ts" } }], timestamp: 0 },
-      { role: "toolResult", toolCallId: "call-other", toolName: "project_read_file", content: "wrong", details: { path: "../secret" }, timestamp: 0 },
-      { role: "toolResult", toolCallId: "call-1", toolName: "project_read_file", content: "valid file\n" + "x".repeat(100), details: { path: "./src/app.ts", version: "v1" }, timestamp: 0 },
+      { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "read", args: { path: "src/app.ts" } }], timestamp: 0 },
+      { role: "toolResult", toolCallId: "call-other", toolName: "read", content: "wrong", details: { path: "../secret" }, timestamp: 0 },
+      { role: "toolResult", toolCallId: "call-1", toolName: "read", content: "valid file\n" + "x".repeat(100), details: { path: "./src/app.ts", version: "v1" }, timestamp: 0 },
     ];
     const candidates = collectProjectFileAttachmentCandidates(messages, { maxChars: 20 });
     expect(candidates).toHaveLength(1);

@@ -78,16 +78,19 @@ export function createCommandTool(input: {
         writableRoots: input.writableRoots,
       });
       const output = [result.stdout, result.stderr].filter(Boolean).join(result.stdout && result.stderr ? "\n" : "");
+      const executable = basename(result.argv[0] ?? "").toLowerCase();
+      const noMatch = result.exitCode === 1 && (executable === "grep" || executable === "rg");
       return textResult(output, {
         argv: result.argv,
         cwd: result.cwd,
         exitCode: result.exitCode,
+        noMatch,
         signal: result.signal,
         timedOut: result.timedOut,
         cancelled: result.cancelled,
         truncation: { truncated: result.truncated },
         blocked: result.blocked,
-      }, Boolean(result.blocked) || (result.exitCode !== null && result.exitCode !== 0));
+      }, Boolean(result.blocked) || (result.exitCode !== null && result.exitCode !== 0 && !noMatch));
     },
   };
 }

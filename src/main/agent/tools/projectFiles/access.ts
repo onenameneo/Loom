@@ -16,8 +16,19 @@ export interface ProjectRoot {
 }
 
 export interface ProjectFileTarget {
+  kind: "project";
   root: ProjectRoot;
   absolutePath: string;
+  relativePath: string;
+  canonicalKey: string;
+  exists: boolean;
+  version?: string;
+}
+
+export interface ExternalFileTarget {
+  kind: "external";
+  absolutePath: string;
+  /** External targets use their canonical absolute path as their display path. */
   relativePath: string;
   canonicalKey: string;
   exists: boolean;
@@ -45,15 +56,47 @@ function isInside(root: string, target: string): boolean {
 
 export async function selectProjectRoot(sourceRoots: string[], requested?: string): Promise<ProjectRoot> {
   const configured = [...new Set(sourceRoots.map((root) => resolve(root)).filter(Boolean))];
-  if (configured.length === 0) throw new Error("No source roots are configured for this Project.");
-  const configuredPath = requested ? resolve(requested) : configured[0];
+  if (configured.length === 0) {
+    throw new Error("No source roots are configured for this Project. Use an absolute path in danger-full-access or select an explicit memory root.");
+  }
+  const logicalMatch = requested?.match(/^project:(\d+)$/);
+  const configuredPath = logicalMatch
+    ? configured[Number(logicalMatch[1])]
+    : requested
+      ? resolve(requested)
+      : configured[0];
+  if (!configuredPath) throw new Error("Requested Project root does not exist.");
   if (!configured.includes(configuredPath)) throw new Error("Requested root is not one of this Project's source roots.");
   return { configuredPath, realPath: await fs.realpath(configuredPath) };
 }
 
+/**
+ * Finds the configured Project root containing an absolute path. This lets the
+ * agent use the same absolute-path contract for files inside the active
+ * Project, while keeping external access separately gated by sandbox mode.
+ */
+export async function findProjectRootForAbsolute(sourceRoots: string[], inputPath: string): Promise<ProjectRoot | undefined> {
+  const absolutePath = resolve(inputPath);
+  const configured = [...new Set(sourceRoots.map((root) => resolve(root)).filter(Boolean))];
+  for (const configuredPath of configured) {
+    let realPath: string;
+    try {
+      realPath = await fs.realpath(configuredPath);
+    } catch {
+      continue;
+    }
+    if (isInside(realPath, absolutePath) || isInside(configuredPath, absolutePath)) {
+      return { configuredPath, realPath };
+    }
+  }
+  return undefined;
+}
+
 export async function resolveInside(root: ProjectRoot, inputPath = "."): Promise<string> {
   const lexical = resolve(root.realPath, inputPath);
-  if (!isInside(root.realPath, lexical)) throw new Error("Path is outside this Project's source roots.");
+  if (!isInside(root.realPath, lexical) && !isInside(root.configuredPath, lexical)) {
+    throw new Error("Path is outside this Project's source roots.");
+  }
   const realPath = await fs.realpath(lexical);
   if (!isInside(root.realPath, realPath)) throw new Error("Path is outside this Project's source roots.");
   return realPath;
@@ -64,6 +107,7 @@ export async function resolveExistingFile(root: ProjectRoot, inputPath: string):
   const stat = await fs.stat(absolutePath);
   if (!stat.isFile()) throw new Error("Path is not a file.");
   return {
+    kind: "project",
     root,
     absolutePath,
     relativePath: relativeProjectPath(root, absolutePath),
@@ -75,7 +119,9 @@ export async function resolveExistingFile(root: ProjectRoot, inputPath: string):
 
 export async function resolveMutationTarget(root: ProjectRoot, inputPath: string): Promise<ProjectFileTarget> {
   const lexical = resolve(root.realPath, inputPath);
-  if (!isInside(root.realPath, lexical)) throw new Error("Path is outside this Project's source roots.");
+  if (!isInside(root.realPath, lexical) && !isInside(root.configuredPath, lexical)) {
+    throw new Error("Path is outside this Project's source roots.");
+  }
   const parent = dirname(lexical);
   const parentRealPath = await fs.realpath(parent);
   if (!isInside(root.realPath, parentRealPath)) throw new Error("Path is outside this Project's source roots.");
@@ -98,6 +144,7 @@ export async function resolveMutationTarget(root: ProjectRoot, inputPath: string
   }
 
   return {
+    kind: "project",
     root,
     absolutePath,
     relativePath: relativeProjectPath(root, absolutePath),
@@ -117,6 +164,63 @@ export function isWithinRoot(root: ProjectRoot, target: string): boolean {
 
 export function canonicalApprovalTarget(target: Pick<ProjectFileTarget, "root" | "relativePath">): string {
   return `${target.root.realPath}:${target.relativePath}`;
+}
+
+export function canonicalExternalApprovalTarget(inputPath: string): string {
+  return `external:${resolve(inputPath)}`;
+}
+
+export async function resolveExternalExistingFile(inputPath: string): Promise<ExternalFileTarget> {
+  const requestedPath = resolve(inputPath);
+  const absolutePath = await fs.realpath(requestedPath);
+  const stat = await fs.stat(absolutePath);
+  if (!stat.isFile()) throw new Error("Path is not a file.");
+  return {
+    kind: "external",
+    absolutePath,
+    relativePath: absolutePath,
+    canonicalKey: `external\u0000${absolutePath}`,
+    exists: true,
+    version: fileVersion(stat),
+  };
+}
+
+export async function resolveExternalMutationTarget(inputPath: string): Promise<ExternalFileTarget> {
+  const lexical = resolve(inputPath);
+  const parent = dirname(lexical);
+  let parentRealPath: string;
+  try {
+    parentRealPath = await fs.realpath(parent);
+  } catch {
+    throw new Error("Parent directory does not exist or cannot be accessed.");
+  }
+
+  const absolutePath = join(parentRealPath, basename(lexical));
+  try {
+    const lstat = await fs.lstat(absolutePath);
+    if (lstat.isSymbolicLink()) throw new Error("Mutation target must not be a symbolic link.");
+    if (!lstat.isFile()) throw new Error("Mutation target must be a regular file.");
+    const realPath = await fs.realpath(absolutePath);
+    const stat = await fs.stat(realPath);
+    return {
+      kind: "external",
+      absolutePath: realPath,
+      relativePath: realPath,
+      canonicalKey: `external\u0000${realPath}`,
+      exists: true,
+      version: fileVersion(stat),
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+
+  return {
+    kind: "external",
+    absolutePath,
+    relativePath: absolutePath,
+    canonicalKey: `external\u0000${absolutePath}`,
+    exists: false,
+  };
 }
 
 export function boundedPreview(value: string, limit = 160): { length: number; preview: string; truncated: boolean } {

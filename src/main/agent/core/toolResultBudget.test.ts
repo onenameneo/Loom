@@ -120,11 +120,11 @@ describe("applyToolResultBudget", () => {
 
   it("skips opt-out tools and marks them seen", () => {
     const state = createToolResultBudgetState();
-    const skipped = toolResult("tc-skip", "project_read_file", "x".repeat(120));
+    const skipped = toolResult("tc-skip", "read", "x".repeat(120));
 
     const result = applyToolResultBudget([skipped], state, {
       maxToolResultGroupChars: 50,
-      skipToolNames: ["project_read_file"],
+      skipToolNames: ["read"],
     });
 
     expect((result.messages[0] as ToolResultMessage).content[0]).toMatchObject({ text: "x".repeat(120) });

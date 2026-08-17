@@ -23,6 +23,9 @@ import { addGlobalSkillSource, buildSkillCatalog, openSkillSource, removeGlobalS
 import { markRendererNotReady, markRendererReady, sendToWindow } from "./ipcSafeSend";
 import { DEFAULT_ROOT_TITLE, DEFAULT_SESSION_TITLE } from "../common/titleDefaults";
 import { developmentIconPath, PRODUCT_NAME } from "./appBranding";
+import { createMemoryRuntime, type MemoryRuntimeService } from "./memory/runtime";
+import { createRuntimeMemoryExtractor } from "./memory/llmExtractor";
+import type { MemoryWriteInput } from "./memory/types";
 
 // ---------------------------------------------------------------------------
 // 主进程：持久化(store) + 设置 + 会话 + 画布引擎(pi 多节点)。
@@ -36,6 +39,7 @@ let canvas: ReturnType<typeof registerCanvas> | null = null;
 let monitor: ReturnType<typeof registerMonitor> | null = null;
 let acp: ReturnType<typeof registerAcp> | null = null;
 let collector: ReturnType<typeof registerCollector> | null = null;
+let memory: MemoryRuntimeService | null = null;
 
 // productName 只在 electron-builder 打包时写入 Info.plist；开发态 Electron
 // 二进制没有 Info.plist，app.getName() 默认返回 "Electron"，必须显式覆盖。
@@ -76,6 +80,7 @@ function registerIpc() {
       monitor: s.monitor,
       skills: s.skills,
       permissions: s.permissions,
+      memory: s.memory,
       modelRegistry: registry.toRendererDTO(),
       globalDefaultModel: scoped.globalSettings.defaults?.model,
       // 左上角模型名必须与实际运行模型一致：buildModel 走 resolveSelectedModel
@@ -97,6 +102,7 @@ function registerIpc() {
     store.patchSettings(patch ?? {});
     applyThemeSource();
     invalidateAgent();
+    if (store.getSettings().memory.enabled) void memory?.initialize();
     return { ok: true, appearance: store.getSettings().appearance, permissions: store.getSettings().permissions };
   });
   ipcMain.handle("settings:getPermissions", () => store.getSettings().permissions);
@@ -157,6 +163,7 @@ function registerIpc() {
     const project = store.createProject(input);
     const session = store.ensureDefaultSession(project.id);
     store.createNode({ sessionId: session.id, title: DEFAULT_ROOT_TITLE, titleState: "default" });
+    void memory?.recordSession();
     return project;
   };
   ipcMain.handle("project:list", () => store.listProjects());
@@ -192,6 +199,7 @@ function registerIpc() {
   ipcMain.handle("session:create", (_e, { projectId, title }: { projectId: string; title?: string }) => {
     const session = store.createSession(projectId, title ?? DEFAULT_SESSION_TITLE, { titleState: title ? "manual" : "default" });
     store.createNode({ sessionId: session.id, title: DEFAULT_ROOT_TITLE, titleState: "default" });
+    void memory?.recordSession();
     return session;
   });
   ipcMain.handle("session:rename", (_e, { id, title }: { id: string; title: string }) => {
@@ -207,6 +215,41 @@ function registerIpc() {
   });
   ipcMain.handle("session:updateUi", (_e, { id, ui }: { id: string; ui: { activeNodeId?: string; mode?: "chat" | "canvas" } }) => {
     store.updateSessionUi?.(id, ui);
+    return { ok: true };
+  });
+
+  // ---- cross-session long-term memory ------------------------------------
+  const assertMemoryProjectScope = (scope: MemoryWriteInput["scope"] | undefined) => {
+    if (scope?.kind === "project" && !store.listProjects().some((project) => project.id === scope.projectId)) {
+      throw new Error("记忆所属项目不存在。");
+    }
+  };
+  ipcMain.handle("memory:list", async (_e, arg: { projectId?: string; includeArchived?: boolean } = {}) => {
+    if (!memory) return { records: [], issues: [], stats: await Promise.resolve({ active: 0, candidates: 0, archived: 0, stale: 0, conflicted: 0, issues: 0 }) };
+    const scan = await memory.list(arg.projectId, arg.includeArchived);
+    return { ...scan, stats: await memory.stats() };
+  });
+  ipcMain.handle("memory:stats", () => memory?.stats() ?? { active: 0, candidates: 0, archived: 0, stale: 0, conflicted: 0, issues: 0 });
+  ipcMain.handle("memory:preview", (_e, id: string) => memory?.preview(id));
+  ipcMain.handle("memory:remember", (_e, input: MemoryWriteInput) => {
+    assertMemoryProjectScope(input?.scope);
+    return memory?.remember(input);
+  });
+  ipcMain.handle("memory:edit", (_e, arg: { id: string; patch: Partial<MemoryWriteInput> }) => {
+    assertMemoryProjectScope(arg?.patch?.scope);
+    return memory?.edit(arg.id, arg.patch);
+  });
+  ipcMain.handle("memory:archive", (_e, arg: { id: string; reason?: string }) => memory?.archive(arg.id, arg.reason));
+  ipcMain.handle("memory:forget", (_e, arg: { id: string; reason?: string }) => memory?.forget(arg.id, arg.reason));
+  ipcMain.handle("memory:approve", (_e, arg: { id: string; overrides?: Parameters<MemoryRuntimeService["approveCandidate"]>[1] }) => {
+    assertMemoryProjectScope(arg?.overrides?.scope);
+    return memory?.approveCandidate(arg.id, arg.overrides);
+  });
+  ipcMain.handle("memory:reject", (_e, arg: { id: string; reason?: string }) => memory?.rejectCandidate(arg.id, arg.reason));
+  ipcMain.handle("memory:autodreamStatus", () => memory?.autoDreamStatus());
+  ipcMain.handle("memory:autodreamRun", () => memory?.maybeRunAutoDream());
+  ipcMain.handle("memory:autodreamCancel", () => {
+    memory?.cancelAutoDream();
     return { ok: true };
   });
 }
@@ -234,6 +277,7 @@ function buildMenu() {
         { type: "separator" as const },
         { label: "项目", accelerator: "CmdOrCtrl+1", click: menuAction("surface:project") },
         { label: "工作站", accelerator: "CmdOrCtrl+2", click: menuAction("surface:observatory") },
+        { label: "记忆", accelerator: "CmdOrCtrl+3", click: menuAction("surface:memory") },
         { type: "separator" as const },
         { role: "toggleDevTools" as const },
         { role: "resetZoom" as const },
@@ -295,9 +339,16 @@ app.whenReady().then(() => {
   // 开发态更新 Dock 图标（正式包由 electron-builder 写入 bundle，无需此调用）
   if (process.platform === "darwin" && developmentIcon) app.dock?.setIcon(developmentIcon);
   store = new SqliteStore(dbPath(app.getPath("userData")));
+  memory = createMemoryRuntime({
+    getWin: () => win,
+    homeDir: app.getPath("home"),
+    settings: () => store.getSettings().memory,
+    extractor: createRuntimeMemoryExtractor({ loadRegistry: () => ModelRegistry.load() }),
+  });
+  void memory.initialize();
   ensureLoomAgentDefaults({ homeDir: app.getPath("home"), legacyApiKeyPresent: Boolean(store.getApiKeyEnc()) });
   applyThemeSource();
-  canvas = registerCanvas({ getWin: () => win, store, userDataDir: app.getPath("userData") });
+  canvas = registerCanvas({ getWin: () => win, store, userDataDir: app.getPath("userData"), memory });
   monitor = registerMonitor({ getWin: () => win, store });
   acp = registerAcp({ getWin: () => win, store });
   collector = registerCollector({ getWin: () => win, store });

@@ -366,6 +366,30 @@ describe("createAgentSession turn runner integration", () => {
     expect(getTools?.("n1").some((tool) => tool.name.startsWith("project_"))).toBe(false);
   });
 
+  it("injects the dynamic memory contract only when the memory port provides it", () => {
+    const store = new MemoryStore();
+    let getNodeInit: ((nodeId: string) => any) | undefined;
+    createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      memory: {
+        retrieve: async () => ({ issues: [] }),
+        memoryPrompt: () => "MEMORY CONTRACT",
+        handleCommand: async () => ({ handled: false, ok: false }),
+        afterTurn: async () => undefined,
+      },
+      createEngine: (hooks) => {
+        getNodeInit = hooks.getNodeInit;
+        return createEngine(createHandle([], vi.fn()));
+      },
+    });
+
+    expect(getNodeInit?.("n1")?.systemPrompt).toContain("MEMORY CONTRACT");
+  });
+
   it("resolves project coding tools dynamically for the node project", () => {
     const root = mkdtempSync(join(tmpdir(), "loom-session-tools-"));
     writeFileSync(join(root, "file.ts"), "export {};", "utf-8");
@@ -387,8 +411,8 @@ describe("createAgentSession turn runner integration", () => {
 
     try {
       expect(getTools?.("n1").map((tool) => tool.name)).toEqual(expect.arrayContaining([
-        "now", "calc", "web_fetch", "project_read_file", "project_list_files", "project_find_files", "project_grep",
-        "project_write_file", "project_edit_file",
+        "now", "calc", "web_fetch", "read", "project_list_files", "project_find_files", "project_grep",
+        "write", "edit",
       ]));
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -454,8 +478,8 @@ describe("createAgentSession turn runner integration", () => {
     });
 
     try {
-      const firstRead = getTools?.("n1").find((tool) => tool.name === "project_read_file")!;
-      const secondRead = getTools?.("n2").find((tool) => tool.name === "project_read_file")!;
+      const firstRead = getTools?.("n1").find((tool) => tool.name === "read")!;
+      const secondRead = getTools?.("n2").find((tool) => tool.name === "read")!;
 
       await expect(firstRead.execute({ toolCallId: "t1", args: { root: firstRoot, path: "only-first.ts" } })).resolves.toMatchObject({
         content: [{ type: "text", text: expect.stringContaining("first") }],
@@ -676,7 +700,8 @@ describe("createAgentSession turn runner integration", () => {
 
     const child = session.create({ sessionId: "sess", parentId: "n1", includeParentContext: true });
 
-    expect(getNodeInit!(child.id)?.systemPrompt).toBe("parent persona");
+    expect(getNodeInit!(child.id)?.systemPrompt).toContain("parent persona");
+    expect(getNodeInit!(child.id)?.systemPrompt).toContain("File tool path contract");
   });
 
   it("does not let later parent checkpoints change an existing mounted child", async () => {
@@ -1116,10 +1141,10 @@ describe("createAgentSession turn runner integration", () => {
   it("attaches paired project file context to the persisted manual checkpoint", async () => {
     const sourceRoot = mkdtempSync(join(tmpdir(), "loom-attachment-source-root-"));
     const call = {
-      role: "assistant", content: "", toolCalls: [{ id: "read-1", name: "project_read_file", args: { path: "src/app.ts" } }], timestamp: 0,
+      role: "assistant", content: "", toolCalls: [{ id: "read-1", name: "read", args: { path: "src/app.ts" } }], timestamp: 0,
     } as any;
     const result = {
-      role: "toolResult", toolCallId: "read-1", toolName: "project_read_file", content: [{ type: "text", text: "const answer = 42;\n" + "x".repeat(20_000) }],
+      role: "toolResult", toolCallId: "read-1", toolName: "read", content: [{ type: "text", text: "const answer = 42;\n" + "x".repeat(20_000) }],
       details: { path: "./src/app.ts", version: "v1", returnedLines: 1, totalLines: 1 }, timestamp: 0,
     } as any;
     const store = new MemoryStore([user("read file"), call, result, user("question"), assistant("answer")]);
@@ -1361,17 +1386,17 @@ describe("createAgentSession turn runner integration", () => {
             const block = await hooks.dispatcher.toolCall({
               nodeId: "n1",
               turnId: hooks.getCurrentTurnId("n1"),
-              toolName: "project_write_file",
+              toolName: "write",
               toolCallId: "tc-write",
               args,
             });
             if (block) throw new Error(block.reason ?? "blocked");
-            const tool = hooks.getTools("n1").find((candidate) => candidate.name === "project_write_file")!;
+            const tool = hooks.getTools("n1").find((candidate) => candidate.name === "write")!;
             const result = await tool.execute({ toolCallId: "tc-write", args });
             await hooks.dispatcher.toolResult({
               nodeId: "n1",
               turnId: hooks.getCurrentTurnId("n1"),
-              toolName: "project_write_file",
+              toolName: "write",
               toolCallId: "tc-write",
               args,
               content: result.content as any,
@@ -1380,7 +1405,7 @@ describe("createAgentSession turn runner integration", () => {
             });
             engineMessages.push({
               role: "toolResult",
-              toolName: "project_write_file",
+              toolName: "write",
               toolCallId: "tc-write",
               content: result.content,
               details: result.details,
@@ -1401,7 +1426,7 @@ describe("createAgentSession turn runner integration", () => {
         nodeId: "n1",
         turnId: approval.turnId,
         toolCallId: "tc-write",
-        toolName: "project_write_file",
+        toolName: "write",
         action: "allow",
         scope: "once",
       })).toEqual({ ok: true });

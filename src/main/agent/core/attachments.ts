@@ -180,9 +180,9 @@ export function collectProjectFileAttachmentCandidates(
   }
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index] as any;
-    if (message?.role !== "toolResult" || message.toolName !== "project_read_file" || typeof message.toolCallId !== "string") continue;
+    if (message?.role !== "toolResult" || message.toolName !== "read" || typeof message.toolCallId !== "string") continue;
     const call = calls.get(message.toolCallId);
-    if (!call || call.name !== "project_read_file") continue;
+    if (!call || call.name !== "read") continue;
     const details = message.details && typeof message.details === "object" ? message.details : undefined;
     const path = normalizeProjectRelativePath(details?.path);
     if (!path) continue;

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BellRing,
+  Brain,
   CheckCircle2,
   Circle,
   Clock3,
@@ -35,6 +36,7 @@ import { IconEye, IconPlus, IconSettings, IconProject } from "./icons";
 import SessionCanvas from "./canvas/SessionCanvas";
 import { useTitlebarActions, useTitlebarContext } from "./titlebar/Titlebar";
 import { ConfirmDialog, Modal } from "./ui/dialogs";
+import MemoryPanel from "./memory/MemoryPanel";
 
 export interface SurfaceCtx {
   projects: ProjectMeta[];
@@ -136,6 +138,10 @@ function ProjectPanel({ ctx }: { ctx: SurfaceCtx }) {
       initialMode={ctx.sessionMode}
     />
   );
+}
+
+function LongTermMemoryPanel({ ctx }: { ctx: SurfaceCtx }) {
+  return <MemoryPanel project={ctx.projects.find((project) => project.id === ctx.activeProjectId)} />;
 }
 
 export function isDarwinRenderer(): boolean {
@@ -592,6 +598,10 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [approvalPolicy, setApprovalPolicy] = useState<"untrusted" | "on-request" | "never">("on-request");
   const [approvalsReviewer, setApprovalsReviewer] = useState<"user" | "auto-review">("user");
   const [networkAccess, setNetworkAccess] = useState(false);
+  const [memoryEnabled, setMemoryEnabled] = useState(false);
+  const [backgroundExtraction, setBackgroundExtraction] = useState(false);
+  const [autoDream, setAutoDream] = useState(false);
+  const [memoryRoot, setMemoryRoot] = useState("");
   const [saved, setSaved] = useState(false);
   const [skillCatalog, setSkillCatalog] = useState<SkillCatalogDto | null>(null);
   const [skillSourceDraft, setSkillSourceDraft] = useState("");
@@ -621,6 +631,10 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
     setApprovalPolicy(permissions.approvalPolicy);
     setApprovalsReviewer(permissions.approvalsReviewer);
     setNetworkAccess(permissions.networkAccess);
+    setMemoryEnabled(s.memory?.enabled ?? false);
+    setBackgroundExtraction(s.memory?.backgroundExtraction ?? false);
+    setAutoDream(s.memory?.autoDream ?? false);
+    setMemoryRoot(s.memory?.rootDir ?? "");
   }, [s]);
 
   const reloadSkills = useCallback(async () => {
@@ -640,6 +654,12 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
     await window.api.settings.set({
       appearance: { theme },
       monitor: { notify: monitorNotify },
+      memory: {
+        enabled: memoryEnabled,
+        backgroundExtraction,
+        autoDream,
+        ...(memoryRoot.trim() ? { rootDir: memoryRoot.trim() } : { rootDir: undefined }),
+      },
     });
     await window.api.settings.setPermissions({ sandboxMode, approvalPolicy, approvalsReviewer, networkAccess });
     await window.api.monitor.setNotify(monitorNotify);
@@ -1121,6 +1141,27 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
         </label>
       </section>
 
+      <section>
+        <h3>长期记忆</h3>
+        <p className="settings-help">跨会话记忆以 Markdown 保存。关闭后不会读取或运行后台提取；已有文件保留。</p>
+        <label className="check-field">
+          <input type="checkbox" checked={memoryEnabled} onChange={(e) => setMemoryEnabled(e.target.checked)} />
+          <span>启用跨会话长期记忆</span>
+        </label>
+        <label className="check-field">
+          <input type="checkbox" checked={backgroundExtraction} onChange={(e) => setBackgroundExtraction(e.target.checked)} disabled={!memoryEnabled} />
+          <span>回合结束后提取候选记忆 <em className="src">默认关闭，开启后会调用后台模型</em></span>
+        </label>
+        <label className="check-field">
+          <input type="checkbox" checked={autoDream} onChange={(e) => setAutoDream(e.target.checked)} disabled={!memoryEnabled} />
+          <span>允许 AutoDream 后台整理</span>
+        </label>
+        <label className="field settings-grid__wide">
+          <span>Markdown 根目录 <em className="src">留空 = ~/.loom/memory</em></span>
+          <input value={memoryRoot} onChange={(e) => setMemoryRoot(e.target.value)} placeholder="~/.loom/memory" />
+        </label>
+      </section>
+
       <div className="settings-foot settings-actions">
         <button className="btn primary" onClick={save}>保存</button>
         {saved && <span className="saved">已保存</span>}
@@ -1177,5 +1218,6 @@ export const SURFACES: Surface[] = [
     Panel: MonitorPanel,
     badge: (ctx) => ctx.agentCount || null,
   },
+  { id: "memory", label: "记忆", icon: (props) => <Brain {...props} />, Panel: LongTermMemoryPanel },
   { id: "settings", label: "设置", icon: IconSettings, Panel: SettingsPanel },
 ];

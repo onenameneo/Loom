@@ -71,6 +71,8 @@ import {
   createLiveTurnPublisher,
 } from "./liveTurns";
 import { createNodeRuntimeStore } from "./nodeRuntime";
+import type { RetrievalQuery } from "../../memory/retrieval";
+import type { MemoryFileAccess } from "../../memory/fileAccess";
 import {
   buildSkillCatalog,
   compileAvailableSkillsIndex,
@@ -148,6 +150,13 @@ export interface CanvasRuntimeDeps {
   titleGenerator?: {
     generate(input: { prompt: string; response?: string; signal?: AbortSignal }): Promise<string>;
   };
+  memory?: {
+    retrieve(sessionId: string, query: RetrievalQuery): Promise<{ reminder?: string; issues: string[] }>;
+    memoryPrompt?(projectId?: string): string | undefined;
+    fileAccess?(projectId?: string, context?: { sessionId: string; nodeId: string }): MemoryFileAccess;
+    handleCommand(text: string, context: { sessionId: string; nodeId: string; projectId?: string }): Promise<{ handled: boolean; ok: boolean; message?: string }>;
+    afterTurn(input: { sessionId: string; nodeId: string; projectId?: string; userText: string; assistantText?: string; sourceKey?: string }): Promise<void>;
+  };
   /** 注入引擎工厂：由组装根提供 pi 适配器；session 只认端口，引擎缓存持有于 runtime 记录。 */
   createEngine: (hooks: {
     buildContext: (nodeId: string, own: AgentMessage[]) => Message[] | Promise<Message[]>;
@@ -203,9 +212,15 @@ interface CanvasMessageDto {
 
 const NO_KEY_ERROR = "未配置 API key（去设置填写，或设置 ANTHROPIC_API_KEY）。";
 const DEFAULT_SYSTEM_PROMPT = "你是一个冷静、精确、克制的思考助手。回答直接，不啰嗦。";
+const FILE_TOOL_PATH_GUIDANCE = [
+  "## File tool path contract",
+  "- Use absolute paths for Project and external files with read, write, and edit; preserve the exact absolute path supplied by the user or returned by search/command output.",
+  "- Use an explicit memory:* root for memory-relative paths; never treat an external path as a memory path.",
+  "- Do not shorten an external absolute path to a relative path or infer it from the current working directory.",
+].join("\n");
 const DEFAULT_COMPACTION_TAIL_BUDGET_TOKENS = 12_000;
 const DEFAULT_MANUAL_COMPACTION_TAIL_BUDGET_TOKENS = 6_000;
-const TOOL_RESULT_BUDGET_OPT_OUT_TOOLS = new Set(["project_read_file", "skill_read"]);
+const TOOL_RESULT_BUDGET_OPT_OUT_TOOLS = new Set(["read", "skill_read"]);
 
 export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   const { store, events: eventSink, ids, clock, getApiKey } = deps;
@@ -519,6 +534,23 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return node ? projectModelMessages(node, messages) : messages;
   }
 
+  function systemPromptFor(node: CanvasNode): string {
+    const skillIndex = compileAvailableSkillsIndex(catalogFor(node.id).skills);
+    const memoryPrompt = deps.memory?.memoryPrompt?.(node.projectId);
+    return [node.systemPrompt || DEFAULT_SYSTEM_PROMPT, FILE_TOOL_PATH_GUIDANCE, memoryPrompt, skillIndex].filter(Boolean).join("\n\n");
+  }
+
+  async function refreshMemoryPrompt(node: CanvasNode, handle: EngineHandle, text: string): Promise<void> {
+    if (!deps.memory) return;
+    try {
+      const result = await deps.memory.retrieve(node.sessionId, { text, projectId: node.projectId });
+      handle.setSystemPrompt?.([systemPromptFor(node), result.reminder].filter(Boolean).join("\n\n"));
+      if (result.issues.length > 0) events.emit(node.id, "memory", { state: "diagnostic", issues: result.issues });
+    } catch (error) {
+      events.emit(node.id, "memory", { state: "diagnostic", issues: [error instanceof Error ? error.message : String(error)] });
+    }
+  }
+
   function effectiveMessages(node: CanvasNode): AgentMessage[] {
     return projectModelMessages(node, buildContextPlan(node, node.messages, clock.now())) as AgentMessage[];
   }
@@ -526,9 +558,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   function getNodeInit(nodeId: string): NodeInit | undefined {
     const n = loadNode(nodeId);
     if (!n) return undefined;
-    const skillIndex = compileAvailableSkillsIndex(catalogFor(nodeId).skills);
     return {
-      systemPrompt: [n.systemPrompt || DEFAULT_SYSTEM_PROMPT, skillIndex].filter(Boolean).join("\n\n"),
+      systemPrompt: systemPromptFor(n),
       model: n.model,
       thinkingLevel: n.thinkingLevel ?? "off",
       messages: effectiveMessages(n),
@@ -542,7 +573,11 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   }
 
   function toolsFor(nodeId: string): AgentTool[] {
+    const node = loadNode(nodeId);
     const sourceRoots = sourceRootsFor(nodeId);
+    const memory = node && deps.memory?.memoryPrompt?.(node.projectId)
+      ? deps.memory.fileAccess?.(node.projectId, { sessionId: node.sessionId, nodeId: node.id })
+      : undefined;
     const skillTools = catalogFor(nodeId).activeSkills.length > 0
       ? [
           createSkillReadTool(() => catalogFor(nodeId).activeSkills),
@@ -557,7 +592,13 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
           getPermissionContext: () => ({ ...store.getSettings().permissions }),
         })]
       : [];
-    return [...tools.list(), ...skillTools, ...createProjectFileTools(sourceRoots), ...createProjectMutationTools(sourceRoots), ...commandTools];
+    return [...tools.list(), ...skillTools, ...createProjectFileTools(sourceRoots, {
+      memory,
+      getSandboxMode: () => store.getSettings().permissions.sandboxMode,
+    }), ...createProjectMutationTools(sourceRoots, {
+      memory,
+      getSandboxMode: () => store.getSettings().permissions.sandboxMode,
+    }), ...commandTools];
   }
 
   const tools = createToolRegistry(createDefaultReadonlyTools(clock));
@@ -989,6 +1030,15 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       events.emit(arg.nodeId, "error", "节点不存在。");
       return { ok: false };
     }
+    const memoryCommand = await deps.memory?.handleCommand(arg.text, {
+      sessionId: node.sessionId,
+      nodeId: node.id,
+      projectId: node.projectId,
+    });
+    if (memoryCommand?.handled) {
+      events.emit(arg.nodeId, "memory", { state: memoryCommand.ok ? "completed" : "failed", message: memoryCommand.message });
+      return { ok: memoryCommand.ok, reason: memoryCommand.message };
+    }
     if (!getApiKey()) {
       events.emit(arg.nodeId, "error", NO_KEY_ERROR);
       return { ok: false };
@@ -1017,6 +1067,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
               ]
             : text;
         const userMessage: AgentMessage = { role: "user", content, timestamp: clock.now() };
+        await refreshMemoryPrompt(node, handle, text);
         await maybeCompactNode(node, "threshold", {
           turnId: activeTurn?.turnId,
           signal: activeTurn?.signal,
@@ -1058,6 +1109,16 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       }
     }
     await maybeCompactNode(node, "threshold", { turnId: result.turnId });
+    void deps.memory?.afterTurn({
+      sessionId: node.sessionId,
+      nodeId: node.id,
+      projectId: node.projectId,
+      userText: arg.text,
+      assistantText: [...node.messages].reverse().find((message) => roleOf(message) === "assistant")
+        ? textOf([...node.messages].reverse().find((message) => roleOf(message) === "assistant")!)
+        : undefined,
+      sourceKey: `${result.turnId}:${arg.text}`,
+    });
     return { ok: true };
   }
 

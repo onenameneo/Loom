@@ -172,6 +172,9 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
       syncMessages: (msgs) => {
         agent.state.messages = [...msgs];
       },
+      setSystemPrompt: (prompt) => {
+        agent.state.systemPrompt = prompt;
+      },
     };
   }
 

@@ -157,7 +157,7 @@ describe("applyToolResultMicroCompact", () => {
   });
 
   it("leaves opt-out tools and non-text payloads unchanged", () => {
-    const skipped = toolResult("tc-skip", "project_read_file", "full file");
+    const skipped = toolResult("tc-skip", "read", "full file");
     const image = {
       ...toolResult("tc-image", "search", "image"),
       content: [{ type: "image", mimeType: "image/png", data: "abc" }],
@@ -168,7 +168,7 @@ describe("applyToolResultMicroCompact", () => {
       now,
       sourceMessages: [assistant(now - 90 * minute)],
       keepRecentToolResults: 1,
-      skipToolNames: ["project_read_file"],
+      skipToolNames: ["read"],
       referenceFor: (message) => `/tmp/${message.toolCallId}.txt`,
     });
 

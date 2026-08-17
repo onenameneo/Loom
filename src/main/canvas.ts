@@ -17,6 +17,7 @@ import { ModelRegistry } from "./modelConfig/registry";
 import { createRuntimeModelsFromRegistry } from "./modelConfig/runtimeModels";
 import { loadScopedModelSettings, resolveStoredModelSelection } from "./modelConfig/scopes";
 import type { ContextModelMetadata } from "./agent/core/budget";
+import type { MemoryRuntimePort } from "./memory/runtime";
 
 // ---------------------------------------------------------------------------
 // 画布引擎接线（主进程）：组装洋葱四圈 + 把 node:* IPC 绑定到 ② runtime。
@@ -30,7 +31,7 @@ import type { ContextModelMetadata } from "./agent/core/budget";
 
 export type { Seed };
 
-export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store: Store; userDataDir?: string }) {
+export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store: Store; userDataDir?: string; memory?: MemoryRuntimePort }) {
   const { getWin, store } = opts;
 
   const events = createIpcEventSink(getWin);
@@ -94,6 +95,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
       } satisfies ContextModelMetadata;
     },
     titleGenerator,
+    memory: opts.memory,
     // 注入 pi 引擎工厂：session 只认端口，pi 收敛在适配器。
     createEngine: (hooks) =>
       createPiEngine({

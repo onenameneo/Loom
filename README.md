@@ -47,5 +47,32 @@ Loom 保留完整的原始 transcript，并以 append-only context checkpoint �
 
 原始消息不会因 compact 被删除；session memory、跨 session recall 和长期事实提取暂不属于当前 compact 流程。
 
+## 跨会话长期记忆
+
+在设置中启用后，Loom 默认将长期记忆保存在 `~/.loom/memory/`。路径由主进程按 Electron home directory 和 Node 原生 path API 解析，macOS、Windows、Linux 使用同一套逻辑 root；也可以在设置中配置自定义绝对根目录。
+
+目录布局如下：
+
+```text
+memory/
+  MEMORY.md                 # 由 Markdown 事实文件生成的可读索引
+  user/<type>/<id>.md       # 全局用户记忆，可跨 Project 检索
+  feedback/<id>.md          # 用户级协作反馈
+  reference/<id>.md         # 用户级外部资源指针
+  projects/<projectId>/<type>/<id>.md
+  candidates/<id>.md        # 待审核候选，只能被批准后成为 active
+  archive/<id>-<timestamp>.md
+```
+
+每个记忆文件都带 YAML frontmatter（`id`、`type`、`scope`、`status`、`confidence`、描述、来源和时间戳），正文保存事实。Markdown 是唯一事实源；`MEMORY.md` 可以删除后由 Loom 重建，备份时应连同整个 memory 根目录一起备份。
+
+主 Agent 使用以下逻辑 root 调用通用 `read`、`write`、`edit` 工具：`memory:user`、`memory:project`、`memory:candidates`、只读的 `memory:archive`；Project source roots 则是 `project:0`、`project:1` 等。工具内部仍执行 traversal、realpath、symlink、schema 和 scope 校验，不能跨 root 写入。用户临时提供的 Project 外部绝对文件路径，在 `danger-full-access` 下可以直接交给 `read`；明确请求并通过 approval 后，`write`/`edit` 也可以操作该绝对路径。
+
+这里有两个独立边界：`danger-full-access` 会允许文件工具处理用户明确提供的外部绝对路径，但不会取消 MemoryStore 校验，也不会让外部路径获得 memory 生命周期写入权限；现有文件的 `write`/`edit` 还必须使用先前 `read` 返回的 `expectedVersion`，新文件也不会自动创建缺失的父目录。受限模式下外部绝对路径仍会被 Project root 拒绝。shell 能力也不会因为 sandbox 全开放而自动获得 memory root 的生命周期写入权限。
+
+明确的“记住”请求由主 Agent 通过成功的 `write`/`edit` 结果确认；普通对话中的长期事实可以写入 candidate。回合结束的后台 LLM 提取只是补漏，设置中默认关闭，开启后也只能处理新增 transcript 并写入 candidates。关闭它不影响显式记忆、主 Agent 主动记忆、跨项目 user memory 检索或 AutoDream。
+
+长期记忆与会话 transcript 分离，不会改写已有会话记忆。检索失败不会阻塞对话；AutoDream 受时间、会话数量、节流和锁门控，并将被替换内容移入 `archive/`。所有文件访问发生在主进程，renderer 只通过 IPC 访问记忆摘要和管理操作。
+
 ## 路线图
 P0 骨架（当前）→ P1 无限画布（分支上下文引擎）→ P2 观察哨 → P3 能力层（工具/记忆）。

@@ -73,6 +73,7 @@ export default function App() {
           writableRoots: [],
           commandOutputLimit: 64_000,
         },
+        memory: { enabled: false, backgroundExtraction: false, autoDream: false },
         sources: { baseUrl: "default", model: "default", key: "none" },
         hasKey: false,
         keyStorage: "local",
@@ -286,6 +287,7 @@ export default function App() {
       else if (action === "settings") setActiveSurface("settings");
       else if (action === "surface:project") setActiveSurface("project");
       else if (action === "surface:observatory") setActiveSurface("observatory");
+      else if (action === "surface:memory") setActiveSurface("memory");
       else if (action === "toggle-sidebar") shellController.requestToggle("menu");
     });
   }, [createSession, openCreateProject, shellController.requestToggle]);

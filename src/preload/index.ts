@@ -58,6 +58,21 @@ type AcpEvent = {
   sessionId?: string;
   [key: string]: unknown;
 };
+type MemoryRecordDto = {
+  id: string;
+  type: "user" | "feedback" | "project" | "reference";
+  scope: { kind: "user" } | { kind: "project"; projectId: string };
+  status: "active" | "candidate" | "rejected" | "archived" | "stale" | "conflicted";
+  confidence: number;
+  description: string;
+  content: string;
+  source: { trigger: string; sessionId?: string; nodeId?: string; excerpt?: string };
+  createdAt: number;
+  updatedAt: number;
+  supersedes?: string[];
+  archivedReason?: string;
+};
+type MemoryEvent = { type: "changed" | "extraction" | "autodream"; [key: string]: unknown };
 
 const api = {
   platform: process.platform,
@@ -169,6 +184,26 @@ const api = {
       const l = (_: unknown, d: ActivityEvent) => cb(d);
       ipcRenderer.on("activity:event", l);
       return () => ipcRenderer.removeListener("activity:event", l);
+    },
+  },
+  memory: {
+    list: (arg?: { projectId?: string; includeArchived?: boolean }): Promise<{ records: MemoryRecordDto[]; issues: Array<{ path: string; message: string }>; stats: any }> =>
+      ipcRenderer.invoke("memory:list", arg),
+    stats: (): Promise<any> => ipcRenderer.invoke("memory:stats"),
+    preview: (id: string): Promise<any> => ipcRenderer.invoke("memory:preview", id),
+    remember: (input: any): Promise<MemoryRecordDto> => ipcRenderer.invoke("memory:remember", input),
+    edit: (arg: { id: string; patch: any }): Promise<MemoryRecordDto | undefined> => ipcRenderer.invoke("memory:edit", arg),
+    archive: (id: string, reason?: string): Promise<MemoryRecordDto | undefined> => ipcRenderer.invoke("memory:archive", { id, reason }),
+    forget: (id: string, reason?: string): Promise<MemoryRecordDto | undefined> => ipcRenderer.invoke("memory:forget", { id, reason }),
+    approve: (id: string, overrides?: any): Promise<MemoryRecordDto | undefined> => ipcRenderer.invoke("memory:approve", { id, overrides }),
+    reject: (id: string, reason?: string): Promise<MemoryRecordDto | undefined> => ipcRenderer.invoke("memory:reject", { id, reason }),
+    autodreamStatus: (): Promise<any> => ipcRenderer.invoke("memory:autodreamStatus"),
+    autodreamRun: (): Promise<any> => ipcRenderer.invoke("memory:autodreamRun"),
+    autodreamCancel: (): Promise<{ ok: boolean }> => ipcRenderer.invoke("memory:autodreamCancel"),
+    onEvent: (cb: (event: MemoryEvent) => void) => {
+      const l = (_: unknown, event: MemoryEvent) => cb(event);
+      ipcRenderer.on("memory:event", l);
+      return () => ipcRenderer.removeListener("memory:event", l);
     },
   },
   acp: {

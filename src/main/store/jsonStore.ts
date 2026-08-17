@@ -3,6 +3,7 @@ import { dirname, join } from "path";
 import {
   DEFAULT_SETTINGS,
   normalizePermissionSettings,
+  normalizeMemorySettings,
   SCHEMA_VERSION,
   type NodeLayout,
   type NodeRecord,
@@ -57,6 +58,7 @@ export class JsonStore implements Store {
             ...(raw.settings ?? {}),
             skills: { ...DEFAULT_SETTINGS.skills, ...(raw.settings?.skills ?? {}) },
             permissions: normalizePermissionSettings(raw.settings?.permissions),
+            memory: normalizeMemorySettings(raw.settings?.memory),
           },
           projects: (Array.isArray(raw.projects) ? raw.projects : [])
             .map((project: any) => this.normalizeProject(project))
@@ -95,6 +97,7 @@ export class JsonStore implements Store {
       activity: { ...this.data.settings.activity, ...(patch.activity ?? {}) },
       skills: { ...this.data.settings.skills, ...(patch.skills ?? {}) },
       permissions: normalizePermissionSettings({ ...this.data.settings.permissions, ...(patch.permissions ?? {}) }),
+      memory: normalizeMemorySettings({ ...this.data.settings.memory, ...(patch.memory ?? {}) }),
     };
     this.flush();
     return this.data.settings;

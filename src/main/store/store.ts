@@ -56,6 +56,23 @@ export interface PermissionSettings {
   commandOutputLimit: number;
 }
 
+export interface MemorySettings {
+  enabled: boolean;
+  backgroundExtraction: boolean;
+  autoDream: boolean;
+  rootDir?: string;
+}
+
+export function normalizeMemorySettings(value: unknown): MemorySettings {
+  const raw = value && typeof value === "object" ? value as Partial<MemorySettings> : {};
+  return {
+    enabled: raw.enabled === true,
+    backgroundExtraction: raw.backgroundExtraction === true,
+    autoDream: raw.autoDream === true,
+    rootDir: typeof raw.rootDir === "string" && raw.rootDir.trim() ? raw.rootDir.trim() : undefined,
+  };
+}
+
 export function normalizePermissionSettings(value: unknown): PermissionSettings {
   const raw = value && typeof value === "object" ? value as Partial<PermissionSettings> : {};
   const commandOutputLimit = typeof raw.commandOutputLimit === "number" && Number.isFinite(raw.commandOutputLimit)
@@ -80,6 +97,7 @@ export interface Settings {
   activity: ActivitySettings;
   skills: SkillsSettings;
   permissions: PermissionSettings;
+  memory: MemorySettings;
   apiKeyEnc?: string; // 本地保存的 API key 载荷；字段名沿用旧 schema，避免迁移。
 }
 
@@ -90,6 +108,7 @@ export type SettingsPatch = Partial<Omit<Settings, "apiKeyEnc" | "access" | "app
   activity?: Partial<ActivitySettings>;
   skills?: Partial<SkillsSettings>;
   permissions?: Partial<PermissionSettings>;
+  memory?: Partial<MemorySettings>;
 };
 
 export interface Project {
@@ -277,6 +296,11 @@ export const DEFAULT_SETTINGS: Settings = {
     networkAccess: false,
     writableRoots: [],
     commandOutputLimit: 64_000,
+  },
+  memory: {
+    enabled: false,
+    backgroundExtraction: false,
+    autoDream: false,
   },
 };
 

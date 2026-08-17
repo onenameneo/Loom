@@ -72,7 +72,7 @@ describe("createToolLifecycleHook", () => {
     hook.onEvent?.("n1", {
       type: "tool_execution_end",
       toolCallId: "tc-write",
-      toolName: "project_write_file",
+      toolName: "write",
       isError: false,
       result: { content: [{ type: "text", text: "Project file created" }], details: { diff: "x".repeat(5000) } },
     } as AgentEvent);
@@ -80,7 +80,7 @@ describe("createToolLifecycleHook", () => {
     expect(emitted[0]).toMatchObject({
       nodeId: "n1",
       type: "tool",
-      payload: expect.objectContaining({ state: "end", toolName: "project_write_file" }),
+      payload: expect.objectContaining({ state: "end", toolName: "write" }),
     });
     expect(JSON.stringify((emitted[0].payload as any).details).length).toBeLessThan(2200);
   });
