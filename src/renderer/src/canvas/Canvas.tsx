@@ -22,7 +22,7 @@ import { CanvasTitlebarActions, CanvasZoomControls } from "./CanvasControls";
 import { useCanvasLayoutPersistence, useCanvasLayoutStore } from "./CanvasLayoutContext";
 import { ChatThreadNode } from "./ChatThreadNode";
 import { BranchContext } from "./branch";
-import { applyTidyPositions, findBranchPlacement, readNodeLayout, resolveNodeLayout } from "./layout";
+import { applyTidyPositions, findBranchPlacement, readNodeLayout, resolveNodeLayout, tidyNodePositions } from "./layout";
 import { finishResizeInteraction, guardResizeNodeChanges } from "./resizeLifecycle";
 import { ResizeSession } from "./resizeSession";
 import { branchTitleFromCandidates, DEFAULT_BRANCH_TITLE, DEFAULT_ROOT_TITLE } from "../../../common/titleDefaults";
@@ -39,6 +39,7 @@ const NODE_H = 440; // 卡片默认高度（更高；可经 NodeResizer 拖拽�
 const GAP_X = 150; // 父子之间的水平间距（子节点在父的右侧，拉开距离）
 const ROW_H = 520; // 兄弟/叶子之间的纵向间距（默认卡片高 440，留出阅读和工具条空间）
 const READABLE_FIT_ZOOM = 0.82;
+const FOCUS_MARGIN = 64;
 
 function viewportDuration() {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : 220;
@@ -427,6 +428,7 @@ function CanvasContent({
 
   const focusNode = useCallback(
     (id: string, opts?: { flash?: boolean; duration?: number }) => {
+      lastFramedRef.current = id;
       const collapsedAncestors = ancestorIds(id).filter((ancestorId) => collapsed.has(ancestorId));
       if (collapsedAncestors.length) {
         setCollapsed((prev) => {
@@ -437,8 +439,11 @@ function CanvasContent({
       }
       const target = nodes.find((node) => node.id === id);
       if (target && flowRef.current) {
-        flowRef.current.setCenter(target.position.x + CARD_W / 2, target.position.y + 120, {
+        flowRef.current.setViewport({
+          x: FOCUS_MARGIN - target.position.x,
+          y: FOCUS_MARGIN - target.position.y,
           zoom: 1,
+        }, {
           duration: opts?.duration ?? 260,
         });
       }
@@ -770,9 +775,10 @@ function CanvasContent({
       layoutStore.enqueue(sessionId, id, initialLayout);
       const label = seedText.length > 14 ? `${seedText.slice(0, 14)}…` : seedText;
       setEdges((eds) => eds.concat({ id: `e-${sourceId}-${id}`, source: sourceId, target: id, label }));
+      onSelectedNode?.(id);
       treeChangeRef.current?.();
     },
-    [sessionId, model, nodes, setNodes, setEdges, actions, layoutStore],
+    [sessionId, model, nodes, setNodes, setEdges, actions, layoutStore, onSelectedNode],
   );
 
   const branchFromMessage = useCallback(
@@ -819,18 +825,18 @@ function CanvasContent({
   messageBranchRef.current = branchFromMessage;
 
   const tidyLayout = useCallback(() => {
-    const dtos = nodes.map((node) => ({
-      id: node.id,
-      sessionId: String((node.data as any)?.sessionId ?? sessionId),
-      projectId: String((node.data as any)?.projectId ?? "project_demo"),
-      parentId: (node.data as any)?.parentId,
-      title: String((node.data as any)?.title ?? ""),
-      seed: (node.data as any)?.seed,
-      systemPrompt: (node.data as any)?.systemPrompt,
-      model: (node.data as any)?.model,
-      messages: ((node.data as any)?.messages ?? []) as CanvasNodeDto["messages"],
-    }));
-    const pos = layout(dtos);
+    const pos = tidyNodePositions(
+      nodes.map((node) => {
+        const current = readNodeLayout(node);
+        return {
+          id: node.id,
+          parentId: (node.data as any)?.parentId,
+          width: current.width,
+          height: current.height,
+        };
+      }),
+      { rootX: ROOT_X, rootY: ROOT_Y, gapX: GAP_X, gapY: ROW_H - NODE_H },
+    );
     setNodes((nds) => {
       const tidied = applyTidyPositions(nds, pos);
       layoutStore.enqueueMany(
@@ -872,12 +878,9 @@ function CanvasContent({
     onSelectedNode?.(null);
   }, [onSelectedNode, setNodes]);
   const onNodeClick = useCallback((_: unknown, node: Node) => {
-    setNodes((current) => current.map((candidate) => ({
-      ...candidate,
-      selected: candidate.id === node.id,
-    })));
+    focusNode(node.id);
     onSelectedNode?.(node.id);
-  }, [onSelectedNode, setNodes]);
+  }, [focusNode, onSelectedNode]);
   const onNodeMouseEnter = useCallback((_: unknown, node: Node) => {
     if (interactionRef.current.kind === "dragging") return;
     setHoverId(node.id);

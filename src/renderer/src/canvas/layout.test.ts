@@ -93,4 +93,20 @@ describe("canvas layout helpers", () => {
       }),
     ).toEqual({ x: 510, y: -500, width: 360, height: 440 });
   });
+
+  it("tidies variable-height trees without overlapping siblings", () => {
+    const tidy = (layoutModule as any).tidyNodePositions;
+    const nodes = [
+      { id: "root", width: 360, height: 900 },
+      { id: "child-a", parentId: "root", width: 360, height: 440 },
+      { id: "child-b", parentId: "root", width: 360, height: 700 },
+    ];
+
+    const result = tidy?.(nodes, { rootX: 240, rootY: 48, gapX: 150, gapY: 80 });
+
+    expect(result?.root).toEqual({ x: 240, y: 208 });
+    expect(result?.["child-a"]).toEqual({ x: 750, y: 48 });
+    expect(result?.["child-b"]).toEqual({ x: 750, y: 568 });
+    expect(result?.["child-b"].y).toBeGreaterThanOrEqual(result?.["child-a"].y + 440 + 80);
+  });
 });

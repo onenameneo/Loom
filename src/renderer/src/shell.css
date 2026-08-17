@@ -715,7 +715,7 @@ body {
   background: transparent;
   transition: opacity 140ms cubic-bezier(0.2, 0, 0, 1), transform 160ms cubic-bezier(0.2, 0, 0, 1);
 }
-.sb-project:hover .project-name { padding-right: 78px; }
+.sb-project:hover .project-name { padding-right: 108px; }
 .sb-project:hover .project-actions {
   visibility: visible;
   opacity: 1;
@@ -724,14 +724,14 @@ body {
   z-index: 20;
 }
 .project-actions button {
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: var(--faint);
+  color: var(--muted);
   cursor: pointer;
   font-size: 11px;
   padding: 0;
@@ -827,12 +827,23 @@ body {
 .sb-session-title {
   flex: 1;
   min-width: 0;
+  box-sizing: border-box;
   padding: 4px 8px 4px 2px;
   overflow: hidden;
   text-align: left;
   font-size: 11px;
 }
-.sb-session-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-session-header:hover .sb-session-title {
+  padding-right: 54px;
+  transition: padding-right 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+.sb-session-title span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .sb-session-header.active .sb-session-title { color: var(--text); font-weight: 500; }
 .session-actions {
   position: absolute;
@@ -849,24 +860,24 @@ body {
   pointer-events: none;
   transform: translate(4px, -50%);
   box-sizing: border-box;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--r-sm);
-  background: var(--surface);
-  box-shadow: var(--shadow-soft);
-  padding: 2px;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
   transition: opacity 140ms cubic-bezier(0.2, 0, 0, 1), transform 160ms cubic-bezier(0.2, 0, 0, 1);
 }
 .project-actions {
   box-sizing: border-box;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--r-sm);
-  background: var(--surface);
-  box-shadow: var(--shadow-soft);
-  padding: 2px;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
 }
 .sb-session-row:hover .session-actions { opacity: 1; visibility: visible; transform: translate(0, -50%); z-index: 20; }
 .sb-session-row:hover .session-actions { pointer-events: auto; }
-.session-actions button { width: 20px; height: 20px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--faint); cursor: pointer; }
+.session-actions button { width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
 .session-actions button:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
 .sb-session-row:hover .sb-root-row { padding-right: 54px; transition: padding-right 160ms cubic-bezier(0.2, 0, 0, 1); }
 .sb-collapse.open > .sb-collapse-inner { overflow: visible; }

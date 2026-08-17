@@ -10,6 +10,7 @@ import { AppTitlebar, TitlebarProvider, useTitlebarActions } from "../titlebar/T
 const flow = vi.hoisted(() => ({
   fitView: vi.fn(),
   setCenter: vi.fn(),
+  setViewport: vi.fn(),
   zoomIn: vi.fn(),
   zoomOut: vi.fn(),
   zoomTo: vi.fn(),
@@ -233,9 +234,10 @@ describe("Canvas titlebar integration", () => {
         },
       },
     });
+    const onSelectedNode = vi.fn();
     render(
       <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
-        <Canvas sessionId="session-1" />
+        <Canvas sessionId="session-1" onSelectedNode={onSelectedNode} />
       </TitlebarProvider>,
     );
 
@@ -255,6 +257,7 @@ describe("Canvas titlebar integration", () => {
       seed: { text: "branch seed", from: "Main", parent: "root" },
     }));
     expect(layoutStore.enqueue).toHaveBeenCalledWith("session-1", "branch-1", expect.any(Object));
+    expect(onSelectedNode).toHaveBeenCalledWith("branch-1");
   });
 
   it("keeps the externally focused canvas node selected after framing it", async () => {
@@ -297,7 +300,60 @@ describe("Canvas titlebar integration", () => {
       </TitlebarProvider>,
     );
 
-    await waitFor(() => expect(flow.setCenter).toHaveBeenCalled());
+    await waitFor(() => expect(flow.setViewport).toHaveBeenCalled());
     expect(onNodeChange).not.toHaveBeenCalledWith(null);
+  });
+
+  it("moves a node selected inside the canvas to the upper-left reading position", async () => {
+    Object.defineProperty(window, "api", {
+      configurable: true,
+      value: {
+        canvas: {
+          open: vi.fn(async () => [
+            {
+              id: "root",
+              sessionId: "session-1",
+              projectId: "project-1",
+              title: "起点",
+              messages: [],
+            },
+            {
+              id: "child",
+              sessionId: "session-1",
+              projectId: "project-1",
+              parentId: "root",
+              title: "新会话",
+              messages: [],
+            },
+          ]),
+        },
+      },
+    });
+
+    render(
+      <TitlebarProvider defaultDescriptor={{ title: "fallback" }}>
+        <Canvas sessionId="session-1" />
+      </TitlebarProvider>,
+    );
+
+    await waitFor(() => expect(reactFlowProps.current?.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "child" }),
+    ])));
+
+    const onNodeClick = reactFlowProps.current?.onNodeClick as ((event: unknown, node: { id: string }) => void);
+    const child = (reactFlowProps.current?.nodes as Array<{ id: string; position: { x: number; y: number } }>).find(
+      (node) => node.id === "child",
+    );
+    expect(child).toBeDefined();
+
+    onNodeClick(null, child!);
+
+    await waitFor(() => expect(flow.setViewport).toHaveBeenCalledWith(
+      expect.objectContaining({ zoom: 1 }),
+      expect.objectContaining({ duration: 260 }),
+    ));
+    const [viewport] = flow.setViewport.mock.calls.at(-1)!;
+    expect(viewport.x).toBe(64 - child!.position.x);
+    expect(viewport.y).toBe(64 - child!.position.y);
   });
 });

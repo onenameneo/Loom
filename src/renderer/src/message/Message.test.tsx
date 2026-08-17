@@ -1,12 +1,21 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Message } from "./Message";
 import "./message.css";
 
+const messageStyles = readFileSync("src/renderer/src/message/message.css", "utf8");
+
 afterEach(() => cleanup());
 
 describe("Message thinking", () => {
+  it("removes collapsed content from layout before recovering the width", () => {
+    expect(messageStyles).not.toMatch(/\.m__thinking\.is-collapsed \.m__thinking-collapse\s*\{[^}]*transition:\s*none;/);
+    expect(messageStyles).not.toMatch(/\.m__thinking\.is-collapsed\s*\{[^}]*transition:\s*none;/);
+    expect(messageStyles).toMatch(/\.m__thinking\.is-collapsed \.m__thinking-body\s*\{[^}]*white-space:\s*nowrap;/);
+  });
+
   it("renders assistant thinking as a collapsed animated section separate from the answer", () => {
     const { container } = render(
       <Message
@@ -17,12 +26,16 @@ describe("Message thinking", () => {
     );
 
     const thinking = container.querySelector(".m__thinking");
+    const collapse = thinking?.querySelector(".m__thinking-collapse");
     expect(thinking?.classList.contains("is-open")).toBe(false);
+    expect(thinking?.classList.contains("is-collapsed")).toBe(true);
+    expect(collapse?.classList.contains("is-collapsed")).toBe(true);
     const toggle = screen.getByRole("button", { name: "Thinking" });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(thinking?.classList.contains("is-open")).toBe(true);
+    expect(collapse?.classList.contains("is-collapsed")).toBe(false);
     expect(screen.getByText("Thinking")).toBeTruthy();
     expect(screen.getByText("Final answer")).toBeTruthy();
     expect(screen.getByText("I should inspect the code path first.")).toBeTruthy();

@@ -107,7 +107,7 @@ function ThinkingView({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className={`m__thinking ${open ? "is-open" : ""}`}>
+    <div className={`m__thinking ${open ? "is-open" : "is-collapsed"}`}>
       <button
         className="m__thinking-toggle"
         type="button"
@@ -117,7 +117,7 @@ function ThinkingView({ text }: { text: string }) {
         <Brain size={13} />
         <span>Thinking</span>
       </button>
-      <div className="m__thinking-collapse" aria-hidden={!open}>
+      <div className={`m__thinking-collapse ${open ? "" : "is-collapsed"}`} aria-hidden={!open}>
         <div className="m__thinking-body">{text}</div>
       </div>
     </div>
