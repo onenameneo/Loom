@@ -26,6 +26,7 @@ import { developmentIconPath, PRODUCT_NAME } from "./appBranding";
 import { createMemoryRuntime, type MemoryRuntimeService } from "./memory/runtime";
 import { createRuntimeMemoryExtractor } from "./memory/llmExtractor";
 import type { MemoryWriteInput } from "./memory/types";
+import { initializeProjectDirectories } from "./projectDirectory";
 
 // ---------------------------------------------------------------------------
 // 主进程：持久化(store) + 设置 + 会话 + 画布引擎(pi 多节点)。
@@ -160,6 +161,7 @@ function registerIpc() {
 
   // ---- projects / sessions ----
   const createProject = (input?: string | { name?: string; sourceRoots?: string[] }) => {
+    initializeProjectDirectories(typeof input === "string" ? [] : input?.sourceRoots ?? []);
     const project = store.createProject(input);
     const session = store.ensureDefaultSession(project.id);
     store.createNode({ sessionId: session.id, title: DEFAULT_ROOT_TITLE, titleState: "default" });

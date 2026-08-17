@@ -42,6 +42,17 @@ describe("main/preload project IPC contracts", () => {
     expect(mainSource).toContain("store.createNode({ sessionId: session.id, title: DEFAULT_ROOT_TITLE, titleState: \"default\" })");
   });
 
+  it("initializes project-local files before persisting a Project", () => {
+    const mainSource = readSource("src/main/index.ts");
+    const initializeAt = mainSource.indexOf("initializeProjectDirectories(");
+    const persistAt = mainSource.indexOf("store.createProject(input)");
+
+    expect(initializeAt).toBeGreaterThanOrEqual(0);
+    expect(persistAt).toBeGreaterThan(initializeAt);
+    expect(mainSource).toContain("typeof input === \"string\" ? [] : input?.sourceRoots ?? []");
+    expect(readSource("src/renderer/src/App.tsx")).not.toContain("initializeProjectDirectories");
+  });
+
   it("exposes context compaction IPC through main, preload, and renderer contracts", () => {
     const canvasSource = readSource("src/main/canvas.ts");
     const preloadSource = readSource("src/preload/index.ts");
