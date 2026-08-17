@@ -263,7 +263,7 @@ describe("ChatView turn and approval controls", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("rejects an unknown slash command before starting a turn", async () => {
+  it("sends slash-prefixed text when no command matches", async () => {
     renderChat();
     await waitFor(() => expect(eventHandler).toBeTruthy());
 
@@ -271,8 +271,7 @@ describe("ChatView turn and approval controls", () => {
     fireEvent.change(input, { target: { value: "/xxxxxx" } });
     fireEvent.click(screen.getByTitle("发送"));
 
-    expect(send).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent).toBe("未知命令：/xxxxxx");
+    expect(send).toHaveBeenCalledWith("n1", "/xxxxxx", [], []);
   });
 
   it("renders current approval and dispatches allow/deny decisions", async () => {

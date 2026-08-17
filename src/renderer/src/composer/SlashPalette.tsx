@@ -20,6 +20,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
   ctx: CmdCtx;
   modelOptions: { id: string; name: string }[];
   onClose?: () => void;
+  onNoMatch?: () => void;
   onUnknownCommand?: (message: string) => void;
 }>(function SlashPalette({
   value,
@@ -27,6 +28,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
   ctx,
   modelOptions,
   onClose,
+  onNoMatch,
   onUnknownCommand,
 }, ref) {
   const [active, setActive] = useState(0);
@@ -111,7 +113,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
       if (modelMode) executeModel(active);
       else if (skillMode) executeSkill(active);
       else if (filtered[active]) executeCommand(filtered[active]);
-      else onUnknownCommand?.(parsed.name ? `未知命令：/${parsed.name}` : "没有匹配命令");
+      else onNoMatch?.();
     } else if (event.key === "Escape") {
       event.preventDefault();
       onClose?.();

@@ -119,11 +119,3 @@ export const commands: Command[] = [
 export function visibleCommands(group: Command["group"], state: CmdState): Command[] {
   return commands.filter((cmd) => cmd.group === group && (!cmd.when || cmd.when(state)));
 }
-
-export function unknownSlashCommand(value: string): string | undefined {
-  const match = value.trim().match(/^\/([^\s]+)/);
-  if (!match) return undefined;
-  const name = match[1];
-  const known = commands.some((cmd) => cmd.group === "action" && cmd.id === name);
-  return known ? undefined : `未知命令：/${name}`;
-}

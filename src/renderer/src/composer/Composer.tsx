@@ -3,7 +3,7 @@ import { BookOpen, Brain, ChevronDown, Square, X } from "lucide-react";
 import { Slider } from "radix-ui";
 import type { ModelListItem, SkillEffectiveDto, ThinkingLevel } from "../env";
 import { IconSend } from "../icons";
-import { unknownSlashCommand, type CmdCtx } from "./commands";
+import type { CmdCtx } from "./commands";
 import { CommandMenu } from "./CommandMenu";
 import { SlashPalette, type SlashPaletteHandle } from "./SlashPalette";
 
@@ -220,12 +220,6 @@ export function Composer({
 
   function submit() {
     const text = value.trim();
-    const slashError = unknownSlashCommand(text);
-    if (slashError) {
-      setCommandError(slashError);
-      setSlashOpen(false);
-      return;
-    }
     if (busy || (!text && images.length === 0)) return;
     onSubmit(text, images, (activeSkills ?? []).map((skill) => skill.id));
     setImages([]);
@@ -249,6 +243,10 @@ export function Composer({
           ctx={ctx}
           modelOptions={modelOptions}
           onClose={() => setSlashOpen(false)}
+          onNoMatch={() => {
+            setSlashOpen(false);
+            submit();
+          }}
           onUnknownCommand={(message) => {
             setCommandError(message);
             setSlashOpen(false);
