@@ -25,14 +25,17 @@ import type { StoredModelSelection } from "../modelConfig/modelRef";
 import type { ThinkingLevel } from "../modelConfig/thinkingLevels";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { FrozenNodeContext } from "../agent/core/context";
+import type { TodoPlanSnapshot } from "../agent/core/todoPlan";
 
 // JSON-file 实现（原子写）。仓储接口的一个后端；之后可换 better-sqlite3，
 // 上层不变。数据落在 app.getPath('userData')/canvas-data.json。
 export class JsonStore implements Store {
   private data: StoreData;
+  private plans = new Map<string, TodoPlanSnapshot>();
   private idSeq = 0;
   constructor(private file: string) {
     this.data = this.load();
+    for (const plan of this.data.plans ?? []) this.plans.set(plan.nodeId, plan);
   }
 
   private normalizeProject(raw: any): Project | undefined {
@@ -66,15 +69,17 @@ export class JsonStore implements Store {
             .map((project: any) => this.normalizeProject(project))
             .filter((project: Project | undefined): project is Project => Boolean(project)),
           sessions: Array.isArray(raw.sessions) ? raw.sessions : [],
+          plans: Array.isArray(raw.plans) ? raw.plans : [],
         };
       } catch {
         // 损坏文件不阻塞启动；退回默认（旧文件保留在磁盘上）
       }
     }
-    return { version: SCHEMA_VERSION, settings: { ...DEFAULT_SETTINGS }, projects: [], sessions: [] };
+    return { version: SCHEMA_VERSION, settings: { ...DEFAULT_SETTINGS }, projects: [], sessions: [], plans: [] };
   }
 
   private flush() {
+    this.data.plans = [...this.plans.values()];
     mkdirSync(dirname(this.file), { recursive: true });
     const tmp = `${this.file}.tmp`;
     writeFileSync(tmp, JSON.stringify(this.data, null, 2), "utf-8");
@@ -146,8 +151,10 @@ export class JsonStore implements Store {
     }
   }
   deleteProject(id: string): void {
+    const sessionIds = new Set((this.data.sessions ?? []).filter((session) => session.projectId === id).map((session) => session.id));
     this.data.projects = this.data.projects.filter((w) => w.id !== id);
     this.data.sessions = (this.data.sessions ?? []).filter((session) => session.projectId !== id);
+    for (const [nodeId, plan] of this.plans) if (sessionIds.has(plan.sessionId)) this.plans.delete(nodeId);
     this.flush();
   }
   setPinned(id: string, pinned: boolean): void {
@@ -197,6 +204,7 @@ export class JsonStore implements Store {
   }
   deleteSession(id: string): void {
     this.data.sessions = (this.data.sessions ?? []).filter((session) => session.id !== id);
+    for (const [nodeId, plan] of this.plans) if (plan.sessionId === id) this.plans.delete(nodeId);
     this.flush();
   }
   updateSessionUi(id: string, patch: SessionUiState): void {
@@ -249,8 +257,14 @@ export class JsonStore implements Store {
     return [];
   }
   getMetricTotals(_scope: { nodeId?: string; sessionId?: string }): AgentMetricTotals {
-    return { turns: 0, llmRequests: 0, toolCalls: 0, compactions: 0, durationMs: 0, ttftMs: 0, outputTokensPerSecond: 0 };
+    return { turns: 0, llmRequests: 0, toolCalls: 0, compactions: 0, durationMs: 0, ttftMs: 0, ttftSamples: 0, outputTokensPerSecond: 0 };
   }
+
+  getNodePlan(nodeId: string): TodoPlanSnapshot | undefined {
+    return this.plans.get(nodeId);
+  }
+  upsertNodePlan(snapshot: TodoPlanSnapshot): void { this.plans.set(snapshot.nodeId, snapshot); this.flush(); }
+  deleteNodePlan(nodeId: string): void { this.plans.delete(nodeId); this.flush(); }
 }
 
 export function storePath(userDataDir: string): string {

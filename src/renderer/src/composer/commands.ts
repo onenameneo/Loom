@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Archive, BookOpen, Code2, Cpu, Eraser, Image, Paperclip, RefreshCw, Settings } from "lucide-react";
+import { Archive, BookOpen, Cpu, Eraser, Image, RefreshCw } from "lucide-react";
 
 export type CmdState = {
   model?: string;
@@ -8,7 +8,6 @@ export type CmdState = {
 
 export type CmdCtx = {
   nodeId: string;
-  insertText: (t: string) => void;
   attachImage: () => void;
   openPersona: () => void;
   clearNode: () => void;
@@ -30,17 +29,7 @@ export type Command = {
   run: (ctx: CmdCtx, arg?: string) => void;
 };
 
-const codeFence = "\n```\n\n```\n";
-
 export const commands: Command[] = [
-  {
-    id: "insert-code",
-    label: "插入代码块",
-    icon: Code2,
-    group: "insert",
-    hint: "插入围栏代码块",
-    run: (ctx) => ctx.insertText(codeFence),
-  },
   {
     id: "insert-image",
     label: "附加图片",
@@ -74,14 +63,6 @@ export const commands: Command[] = [
     },
   },
   {
-    id: "persona",
-    label: "/persona",
-    icon: Settings,
-    group: "action",
-    hint: "打开节点 persona",
-    run: (ctx) => ctx.openPersona(),
-  },
-  {
     id: "clear",
     label: "/clear",
     icon: Eraser,
@@ -105,14 +86,6 @@ export const commands: Command[] = [
     hint: "重答上一轮",
     when: (s) => s.canRegenerate,
     run: (ctx) => ctx.regenerate(),
-  },
-  {
-    id: "attach",
-    label: "/attach",
-    icon: Paperclip,
-    group: "action",
-    hint: "选择图片",
-    run: (ctx) => ctx.attachImage(),
   },
 ];
 

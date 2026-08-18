@@ -122,6 +122,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   // ---- IPC：一一转调 session（channel/入参/出参不变）------------------------
 
   ipcMain.handle("node:list", (_e, sessionId: string) => runtime.list(sessionId));
+  ipcMain.handle("node:plan", (_e, nodeId: string) => runtime.plan(nodeId));
   ipcMain.handle("node:open", (_e, sessionId: string) => runtime.open(sessionId));
   ipcMain.handle("node:create", (_e, arg: { sessionId: string; parentId?: string; seed?: Seed; title?: string; includeParentContext?: boolean }) =>
     runtime.create(arg),

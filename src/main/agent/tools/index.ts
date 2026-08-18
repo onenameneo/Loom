@@ -14,3 +14,4 @@ export { createCalcTool, evaluateArithmetic } from "./calc";
 export { createNowTool } from "./now";
 export { createProjectFileTools, createProjectMutationTools } from "./projectFiles";
 export { createWebFetchTool } from "./webfetch";
+export { createWriteTodosTool } from "./write-todos";

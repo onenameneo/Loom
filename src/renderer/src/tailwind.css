@@ -1,0 +1,17 @@
+@import "tailwindcss/theme.css";
+
+@theme inline {
+  --color-loom-surface: var(--surface);
+  --color-loom-surface-2: var(--surface-2);
+  --color-loom-text: var(--text);
+  --color-loom-muted: var(--muted);
+  --color-loom-faint: var(--faint);
+  --color-loom-border: var(--border);
+  --color-loom-accent: var(--accent);
+  --color-loom-ok: var(--ok);
+  --color-loom-err: var(--err);
+  --font-loom-mono: var(--font-mono);
+  --radius-loom-md: var(--r-md);
+}
+
+@import "tailwindcss/utilities.css";

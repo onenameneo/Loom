@@ -234,16 +234,31 @@
   width: 100%;
   box-sizing: border-box;
 }
+
+.composer-telemetry {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 18px;
+  margin: 0 8px;
+  padding: 0 8px 1px;
+  color: var(--faint);
+  font: 10px/1.4 var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer-telemetry-item { display: inline-flex; align-items: center; min-width: 0; }
+.composer-telemetry-label { color: var(--faint); }
+.composer-telemetry-value { color: var(--muted); font-variant-numeric: tabular-nums; }
+.composer-telemetry-divider { margin-right: 7px; color: var(--border-strong); }
+@media (max-width: 640px) {
+  .composer-telemetry { justify-content: flex-start; overflow-x: auto; }
+}
 .chatview .composer-wrap {
   width: min(720px, 100%);
   margin: 0 auto;
-}
-.budget-line {
-  max-width: 720px;
-  margin: 0 auto;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--faint);
 }
 .chatview .composer .box {
   max-width: 720px;

@@ -80,11 +80,13 @@ describe("isDarwinRenderer", () => {
 
 describe("SettingsPanel model registry", () => {
   it("renders model configuration with connected providers and configured default models only", async () => {
+    const setSettings = vi.fn();
     window.api = {
       platform: "darwin",
       settings: {
-        set: vi.fn(),
+        set: setSettings,
         setGlobalModel: vi.fn(),
+        setPermissions: vi.fn(),
         addProviderModel: vi.fn(async () => ({ ok: true })),
         deleteProviderModel: vi.fn(async () => ({ ok: true })),
         openModelsJson: vi.fn(),
@@ -119,6 +121,7 @@ describe("SettingsPanel model registry", () => {
         access: { provider: "anthropic", baseUrl: "", model: "" },
         appearance: { theme: "system", density: "comfortable" },
         monitor: { notify: true },
+        memory: { enabled: false, backgroundExtraction: false, autoDream: false, rootDir: "/legacy/custom/path" },
         modelRegistry: {
           providers: [
             {
@@ -190,11 +193,19 @@ describe("SettingsPanel model registry", () => {
     expect(screen.getAllByText(/Claude Sonnet 4.5/).length).toBeGreaterThan(0);
     expect(screen.queryByText("Google")).toBeNull();
     expect(screen.queryByRole("button", { name: "打开 models.json" })).toBeNull();
+    expect(screen.queryByText("Markdown 根目录")).toBeNull();
     const user = userEvent.setup();
     await user.click(screen.getByRole("combobox", { name: "默认模型" }));
     expect(screen.getByRole("option", { name: /Claude Sonnet 4.5/ })).toBeTruthy();
     expect(screen.queryByRole("option", { name: /Claude Haiku 4.5/ })).toBeNull();
     expect(screen.queryByLabelText(/API Key/i)).toBeNull();
+    await user.click(screen.getByRole("option", { name: /Claude Sonnet 4.5/ }));
+
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(setSettings).toHaveBeenCalledWith(expect.objectContaining({
+      memory: { enabled: false, backgroundExtraction: false, autoDream: false },
+    }));
+    expect(setSettings.mock.calls[0]?.[0]?.memory).not.toHaveProperty("rootDir");
   });
 
   it("opens an add-model form with provider registry options and submits provider configuration", async () => {

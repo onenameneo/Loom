@@ -84,7 +84,7 @@ describe("Composer thinking level control", () => {
     delete (window as any).api;
   });
 
-  it("defaults the visible thinking level to off when unset", async () => {
+  it("defaults a reasoning model to its first enabled thinking level when unset", async () => {
     (window as any).api = {
       canvas: {
         models: vi.fn(async () => [
@@ -118,7 +118,58 @@ describe("Composer thinking level control", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: /openai\/gpt-5.5 · off/ })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /openai\/gpt-5.5 · low/ })).toBeTruthy();
+  });
+
+  it("selects the first enabled thinking level when switching to a reasoning model", async () => {
+    const setThinkingLevel = vi.fn();
+    const setModel = vi.fn();
+    (window as any).api = {
+      canvas: {
+        models: vi.fn(async () => [
+          {
+            id: "local/fast",
+            name: "Fast",
+            providerId: "local",
+            modelId: "fast",
+            capabilities: { reasoning: false, thinkingLevels: ["off"] },
+          },
+          {
+            id: "openai/gpt-5.5",
+            name: "GPT 5.5",
+            providerId: "openai",
+            modelId: "gpt-5.5",
+            capabilities: { reasoning: true, thinkingLevels: ["off", "low", "medium"] },
+          },
+        ]),
+      },
+    };
+
+    render(
+      <Composer
+        nodeId="node-1"
+        value=""
+        onChange={vi.fn()}
+        busy={false}
+        placeholder="Ask"
+        canRegenerate={false}
+        model="local/fast"
+        onSubmit={vi.fn()}
+        onStop={vi.fn()}
+        onOpenPersona={vi.fn()}
+        onClearNode={vi.fn()}
+        onRegenerate={vi.fn()}
+        onSetModel={setModel}
+        onSetThinkingLevel={setThinkingLevel}
+        onCompact={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /local\/fast · off/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /GPT 5.5/ }));
+
+    expect(setModel).toHaveBeenCalledWith("openai/gpt-5.5");
+    expect(setThinkingLevel).toHaveBeenCalledWith("low");
   });
 
   it("combines model and thinking level in one configuration menu", async () => {

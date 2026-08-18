@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { FileMentionRef } from "../common/fileMentions";
+import type { AgentMetricTotals } from "../common/telemetry";
 
 type CanvasEvent = { nodeId: string; type: string; payload?: unknown };
 type LiveTurnSnapshot = { nodeId: string; sessionId: string; turnId: string; operation: "send" | "regenerate" | "edit-resend"; state: "running" | "awaiting_approval"; revision: number; assistantText: string; approval?: { requestId: string; toolName: string; toolCallId: string; reason?: string; sandboxMode?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "untrusted" | "on-request" | "never" } };
@@ -82,6 +83,7 @@ const api = {
   },
   canvas: {
     list: (sessionId: string): Promise<any[]> => ipcRenderer.invoke("node:list", sessionId),
+    plan: (nodeId: string): Promise<any> => ipcRenderer.invoke("node:plan", nodeId),
     open: (sessionId: string): Promise<any[]> => ipcRenderer.invoke("node:open", sessionId),
     create: (arg: { sessionId: string; parentId?: string; seed?: any; title?: string; includeParentContext?: boolean }): Promise<any> =>
       ipcRenderer.invoke("node:create", arg),
@@ -128,7 +130,7 @@ const api = {
     }> =>
       ipcRenderer.invoke("node:budget", nodeId),
     trace: (nodeId: string): Promise<any> => ipcRenderer.invoke("node:trace", nodeId),
-    metrics: (nodeId: string): Promise<any> => ipcRenderer.invoke("node:metrics", nodeId),
+    metrics: (nodeId: string): Promise<AgentMetricTotals | undefined> => ipcRenderer.invoke("node:metrics", nodeId),
     onTrace: (listener: (snapshot: any) => void): (() => void) => {
       const handler = (_event: Electron.IpcRendererEvent, snapshot: any) => listener(snapshot);
       ipcRenderer.on("node:trace:update", handler);

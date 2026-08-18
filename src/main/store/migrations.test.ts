@@ -22,7 +22,7 @@ describe("database migrations", () => {
       (column) => column.name,
     );
 
-    expect(version).toBe(8);
+    expect(version).toBe(9);
     expect(projectColumns).toEqual(expect.arrayContaining(["id", "name", "order", "meta"]));
     expect(columns).toEqual(
       expect.arrayContaining(["project_id", "session_id", "layout_x", "layout_y", "layout_width", "layout_height"]),
@@ -30,6 +30,8 @@ describe("database migrations", () => {
     expect(columns).not.toContain("workspace_id");
     expect(sessionColumns).toEqual(expect.arrayContaining(["project_id", "title", "order"]));
     expect(approvalColumns).toEqual(expect.arrayContaining(["tool_name", "target", "created_at"]));
+    const planColumns = (db.prepare("PRAGMA table_info(node_plans)").all() as Array<{ name: string }>).map((column) => column.name);
+    expect(planColumns).toEqual(expect.arrayContaining(["node_id", "plan_id", "session_id", "turn_id", "revision", "status", "todos", "updated_at"]));
   });
 
   it("resets a legacy database once instead of migrating old Loom records", () => {
@@ -104,7 +106,7 @@ describe("database migrations", () => {
 
     migrate(db);
 
-    expect(Number(db.pragma("user_version", { simple: true }))).toBe(8);
+    expect(Number(db.pragma("user_version", { simple: true }))).toBe(9);
     expect(db.prepare("SELECT COUNT(*) AS count FROM projects").get()).toEqual({ count: 0 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 0 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM nodes").get()).toEqual({ count: 0 });
@@ -136,7 +138,7 @@ describe("database migrations", () => {
 
     migrate(db);
 
-    expect(Number(db.pragma("user_version", { simple: true }))).toBe(8);
+    expect(Number(db.pragma("user_version", { simple: true }))).toBe(9);
     expect(db.prepare("SELECT id FROM projects").all()).toEqual([{ id: "existing" }]);
   });
 });

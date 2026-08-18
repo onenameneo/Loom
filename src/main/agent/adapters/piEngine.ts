@@ -32,6 +32,7 @@ const SYSTEM_PROMPT = "你是一个冷静、精确、克制的思考助手。回
 const TRACE_TEXT_PREVIEW = 600;
 const TRACE_MESSAGE_HEAD = 8;
 const TRACE_MESSAGE_TAIL = 12;
+const MAX_ENDED_LLM_REQUESTS = 128;
 
 function previewText(value: unknown, max = TRACE_TEXT_PREVIEW): string | undefined {
   if (typeof value === "string") return value.length <= max ? value : `${value.slice(0, max)}...`;
@@ -218,6 +219,11 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
     const endLlm = (requestId: string, message: unknown, status: "ok" | "error" | "aborted") => {
       if (endedLlmRequests.has(requestId)) return;
       endedLlmRequests.add(requestId);
+      while (endedLlmRequests.size > MAX_ENDED_LLM_REQUESTS) {
+        const oldest = endedLlmRequests.values().next().value;
+        if (typeof oldest !== "string") break;
+        endedLlmRequests.delete(oldest);
+      }
       const startedAt = llmStartedAt.get(requestId);
       const firstTokenAt = llmFirstTokenAt.get(requestId);
       const usage = normalizeLlmUsage((message as { usage?: unknown } | undefined)?.usage, { source: "provider", exact: true });
@@ -236,6 +242,8 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
         ...(usage ? { usage } : {}),
         ...(response ? { attributes: { response } } : {}),
       });
+      llmStartedAt.delete(requestId);
+      llmFirstTokenAt.delete(requestId);
       if (activeLlmRequestId === requestId) activeLlmRequestId = undefined;
     };
     const agent = new Agent({
@@ -323,6 +331,7 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
       afterToolCall: ({ toolCall, args, result, isError }: AfterToolCallContext) => {
         const startedAt = toolStartedAt.get(toolCall.id);
         toolStartedAt.delete(toolCall.id);
+        const usage = normalizeLlmUsage(result.usage, { source: "provider", exact: true });
         dispatcher.telemetry({
           type: "tool_end",
           nodeId,
@@ -332,7 +341,7 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
           status: isError ? "error" : "ok",
           at: now(),
           ...(startedAt !== undefined ? { durationMs: Math.max(0, now() - startedAt) } : {}),
-          ...(normalizeLlmUsage(result.usage, { source: "provider", exact: true }) ? { usage: normalizeLlmUsage(result.usage, { source: "provider", exact: true }) } : {}),
+          ...(usage ? { usage } : {}),
           attributes: { arguments: args, result: result.content, details: result.details, isError },
         });
         return dispatcher.toolResult({

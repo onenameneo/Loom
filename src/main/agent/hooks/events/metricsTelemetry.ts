@@ -19,12 +19,8 @@ type MetricDraft = {
   createdAt: number;
 };
 
-function terminalStatus(status: "ok" | "error" | "aborted"): AgentMetricRecord["status"] {
-  return status;
-}
-
 export function createMetricsTelemetryHook(deps: {
-  store: StorePort;
+  store: Pick<StorePort, "appendMetric">;
   getSessionId(nodeId: string): string | undefined;
   now?: () => number;
 }): AgentHook {
@@ -58,6 +54,7 @@ export function createMetricsTelemetryHook(deps: {
     onTelemetry(event: AgentTelemetryEvent) {
       const sessionId = deps.getSessionId(event.nodeId);
       if (!sessionId) return;
+      if (event.type !== "turn_start" && event.type !== "turn_end" && !event.turnId) return;
       switch (event.type) {
         case "turn_start":
           pending.set(draftKey("turn", event.nodeId, event.turnId), { id: `metric:${event.nodeId}:turn:${event.turnId}`, kind: "turn", nodeId: event.nodeId, sessionId, turnId: event.turnId, name: event.operation, startedAt: event.at, createdAt: now() });
@@ -66,7 +63,10 @@ export function createMetricsTelemetryHook(deps: {
           const key = draftKey("turn", event.nodeId, event.turnId);
           const draft = pending.get(key);
           pending.delete(key);
-          if (draft) save(draft, { endedAt: event.at, status: terminalStatus(event.status), durationMs: event.durationMs });
+          if (draft) save(draft, { endedAt: event.at, status: event.status, durationMs: event.durationMs });
+          for (const [pendingKey, child] of pending) {
+            if (child.nodeId === event.nodeId && child.turnId === event.turnId) pending.delete(pendingKey);
+          }
           return;
         }
         case "llm_start":
@@ -83,7 +83,7 @@ export function createMetricsTelemetryHook(deps: {
           pending.delete(key);
           if (draft) {
             if (event.ttftMs !== undefined) draft.ttftMs = event.ttftMs;
-            save(draft, { endedAt: event.at, status: terminalStatus(event.status), durationMs: event.durationMs, usage: event.usage });
+            save(draft, { endedAt: event.at, status: event.status, durationMs: event.durationMs, usage: event.usage });
           }
           return;
         }
@@ -94,7 +94,7 @@ export function createMetricsTelemetryHook(deps: {
           const key = draftKey("tool", event.nodeId, event.toolCallId);
           const draft = pending.get(key);
           pending.delete(key);
-          if (draft) save(draft, { endedAt: event.at, status: terminalStatus(event.status), durationMs: event.durationMs, usage: event.usage });
+          if (draft) save(draft, { endedAt: event.at, status: event.status, durationMs: event.durationMs, usage: event.usage });
           return;
         }
         case "compaction_start":
@@ -104,7 +104,7 @@ export function createMetricsTelemetryHook(deps: {
           const key = draftKey("compaction", event.nodeId, event.compactionId);
           const draft = pending.get(key);
           pending.delete(key);
-          if (draft) save(draft, { endedAt: event.at, status: terminalStatus(event.status), durationMs: event.durationMs, usage: event.usage });
+          if (draft) save(draft, { endedAt: event.at, status: event.status, durationMs: event.durationMs, usage: event.usage });
           return;
         }
       }

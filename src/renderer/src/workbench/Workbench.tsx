@@ -1,6 +1,7 @@
 import { Activity, ChevronRight, Copy, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { readUsageFacts, type AgentMetricTotals, type UsageFacts } from "../../../common/telemetry";
 import {
   applyTraceEvent,
   buildSpanTree,
@@ -70,43 +71,8 @@ function traceSummary(record: TraceRecordDto) {
   const duration = typeof record.startedAt === "number" && typeof record.endedAt === "number"
     ? `${((record.endedAt - record.startedAt) / 1000).toFixed(1)}s`
     : undefined;
-  const usage = llm ? usageSummary(usageFacts((llm.attributes as any)?.usage)) : undefined;
+  const usage = llm ? usageSummary(readUsageFacts((llm.attributes as any)?.usage)) : undefined;
   return [model, duration, usage].filter(Boolean).join(" · ");
-}
-
-type UsageFacts = {
-  input?: number;
-  output?: number;
-  total?: number;
-  cacheRead?: number;
-  cacheWrite?: number;
-  reasoning?: number;
-  cost?: number;
-  exact?: boolean;
-  source?: "provider" | "estimated";
-};
-
-function numberField(value: any, keys: string[]) {
-  for (const key of keys) {
-    const field = value?.[key];
-    if (typeof field === "number" && Number.isFinite(field)) return field;
-  }
-  return undefined;
-}
-
-function usageFacts(usage: any): UsageFacts | undefined {
-  if (!usage || typeof usage !== "object") return undefined;
-  return {
-    input: numberField(usage, ["input", "inputTokens", "promptTokens", "prompt_tokens", "input_tokens"]),
-    output: numberField(usage, ["output", "outputTokens", "completionTokens", "completion_tokens", "output_tokens"]),
-    total: numberField(usage, ["totalTokens", "total_tokens"]),
-    cacheRead: numberField(usage, ["cacheRead", "cachedTokens", "cacheTokens", "cached_tokens", "promptCacheHitTokens", "prompt_cache_hit_tokens"]),
-    cacheWrite: numberField(usage, ["cacheWrite", "cacheWriteTokens"]),
-    reasoning: numberField(usage, ["reasoning", "reasoningTokens", "reasoning_tokens"]),
-    cost: numberField(usage?.cost, ["total"]),
-    exact: usage.exact === true,
-    source: usage.source === "provider" || usage.source === "estimated" ? usage.source : undefined,
-  };
 }
 
 function formatTokenCount(value: number | undefined) {
@@ -128,7 +94,7 @@ function usageSummary(usage: UsageFacts | undefined) {
     typeof usage.output === "number" ? `out ${formatTokenCount(usage.output)}` : undefined,
     typeof usage.cacheRead === "number" ? `cache ${formatTokenCount(usage.cacheRead)}` : undefined,
     typeof usage.total === "number" ? `total ${formatTokenCount(usage.total)}` : undefined,
-    typeof usage.cost === "number" ? `$${usage.cost.toFixed(4)}` : undefined,
+    typeof usage.cost?.total === "number" ? `$${usage.cost.total.toFixed(4)}` : undefined,
   ].filter(Boolean);
   return parts.length > 0 ? `${parts.join(" · ")}${usage.source ? ` · ${usage.source}` : ""} tokens` : undefined;
 }
@@ -274,7 +240,7 @@ function LlmSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) 
   const skills = messages.filter(isSkillMessage);
   const conversation = messages.filter((message: any) => !isSkillMessage(message));
   const tools = Array.isArray(attrs.tools) ? attrs.tools : [];
-  const usage = usageFacts(attrs.usage);
+  const usage = readUsageFacts(attrs.usage);
   const response = attrs.response;
   return <section className="trace-section trace-request trace-timeline-event">
     <div className="trace-section-heading">
@@ -294,7 +260,7 @@ function LlmSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) 
           {typeof usage.cacheRead === "number" && <><dt>Cache read</dt><dd>{tokenValue(usage.cacheRead)}</dd></>}
           {typeof usage.cacheWrite === "number" && <><dt>Cache write</dt><dd>{tokenValue(usage.cacheWrite)}</dd></>}
           {typeof usage.reasoning === "number" && <><dt>Reasoning</dt><dd>{tokenValue(usage.reasoning)}</dd></>}
-          {typeof usage.cost === "number" && <><dt>Cost</dt><dd>${usage.cost.toFixed(4)}</dd></>}
+          {typeof usage.cost?.total === "number" && <><dt>Cost</dt><dd>${usage.cost.total.toFixed(4)}</dd></>}
           {usage.source && <><dt>Accounting</dt><dd>{usage.source}</dd></>}
         </dl>
       </div>
@@ -325,7 +291,7 @@ function LlmSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) 
 
 function ToolSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) {
   const attrs = span.attributes as Record<string, any>;
-  const usage = usageFacts(attrs.usage);
+  const usage = readUsageFacts(attrs.usage);
   return <section className="trace-section trace-tool-section trace-timeline-event">
     <div className="trace-section-heading">
       <h3>Tool {span.name}</h3>
@@ -411,7 +377,7 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [trace, setTrace] = useState<TraceClientState | null>(null);
-  const [metrics, setMetrics] = useState<{ turns: number; llmRequests: number; toolCalls: number; compactions: number; durationMs: number; ttftMs: number; outputTokensPerSecond: number; usage?: any } | null>(null);
+  const [metrics, setMetrics] = useState<AgentMetricTotals | null>(null);
   const [hasNewActivity, setHasNewActivity] = useState(false);
   const addRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -455,7 +421,7 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
       setTrace((current) => applyTraceEvent(current, event, nodeId));
       if (event.type === "turn_end" && typeof window.api.canvas.metrics === "function") {
         window.api.canvas.metrics(nodeId).then((result) => {
-          if (!dead) setMetrics(result?.totals ?? null);
+          if (!dead) setMetrics(result ?? null);
         });
       }
     });
@@ -468,7 +434,7 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
     });
     if (typeof window.api.canvas.metrics === "function") {
       window.api.canvas.metrics(nodeId).then((result) => {
-        if (!dead) setMetrics(result?.totals ?? null);
+        if (!dead) setMetrics(result ?? null);
       });
     }
     return () => { dead = true; off(); };
@@ -502,7 +468,7 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
       {metrics && <section className="trace-section trace-metrics-summary" aria-label="Usage summary">
         <div className="trace-section-heading"><div><h3>Usage summary</h3><p>当前节点的历史累计</p></div><span className="trace-metrics-summary__scope">LIFETIME</span></div>
         <div className="trace-metrics-summary__hero">
-          <div className="trace-metric-card trace-metric-card--primary"><span>Total tokens</span><strong>{formatTokenCount(usageFacts(metrics.usage)?.total)}</strong></div>
+          <div className="trace-metric-card trace-metric-card--primary"><span>Total tokens</span><strong>{formatTokenCount(readUsageFacts(metrics.usage)?.total)}</strong></div>
           {typeof metrics.usage?.cost?.total === "number" && <div className="trace-metric-card"><span>Cost</span><strong>${metrics.usage.cost.total.toFixed(4)}</strong></div>}
         </div>
         <div className="trace-metrics-summary__grid" aria-label="运行指标">
@@ -510,11 +476,11 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
           <div className="trace-metric-card"><span>LLM calls</span><strong>{metrics.llmRequests}</strong></div>
           <div className="trace-metric-card"><span>Tools</span><strong>{metrics.toolCalls}</strong></div>
           <div className="trace-metric-card"><span>Duration</span><strong>{(metrics.durationMs / 1000).toFixed(1)}s</strong></div>
-          <div className="trace-metric-card"><span>TTFT</span><strong>{(metrics.ttftMs / 1000).toFixed(1)}s</strong></div>
-          <div className="trace-metric-card"><span>Output rate</span><strong>{metrics.outputTokensPerSecond.toFixed(1)} <small>tok/s</small></strong></div>
+          <div className="trace-metric-card"><span>TTFT avg</span><strong>{metrics.ttftSamples > 0 ? (metrics.ttftMs / metrics.ttftSamples / 1000).toFixed(1) : "—"} {metrics.ttftSamples > 0 && <small>s</small>}</strong></div>
+          <div className="trace-metric-card"><span>LLM output rate</span><strong>{metrics.outputTokensPerSecond.toFixed(1)} <small>tok/s</small></strong></div>
         </div>
         {(() => {
-          const usage = usageFacts(metrics.usage);
+          const usage = readUsageFacts(metrics.usage);
           if (!usage) return null;
           return <div className="trace-metrics-summary__tokens" aria-label="Token breakdown">
             {typeof usage.input === "number" && <div><span>Input</span><strong>{formatTokenCount(usage.input)}</strong></div>}

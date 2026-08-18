@@ -1,7 +1,7 @@
 import { memo, useCallback, useContext, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Handle, NodeResizeControl, Position, type ResizeParams } from "@xyflow/react";
 import { Check, ChevronDown, MessageSquareText, Pencil, Trash2 } from "lucide-react";
-import type { ApprovalRequestPayload, ModelSelection, NodeBudget, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
+import type { ApprovalRequestPayload, ModelSelection, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
 import type { FileMentionRef } from "../../../common/fileMentions";
 import { Composer, type ComposerImage } from "../composer/Composer";
 import { IconArrowUpRight, IconChevronRight, IconSplit } from "../icons";
@@ -14,6 +14,10 @@ import { useComposerHeightVar } from "./useComposerHeightVar";
 import { ApprovalPrompt, type ApprovalState } from "./ApprovalPrompt";
 import { type NodeUpdate } from "./nodeUpdates";
 import { selectNodeLiveTurn, useWorkspaceStore } from "../workspace/store";
+import { selectNodeTodoPlan } from "../workspace/store";
+import { TodoProgressPanel } from "../composer/TodoProgressPanel";
+import { ComposerTelemetryLine } from "../composer/ComposerTelemetryLine";
+import { useNodeMetrics } from "../composer/useNodeMetrics";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
 type Msg = { id: number; role: Role; text: string; thinking?: string; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
@@ -99,11 +103,13 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   const [busy, setBusy] = useState(false);
   const [stopPending, setStopPending] = useState(false);
   const liveTurn = useWorkspaceStore((state) => selectNodeLiveTurn(state, id));
+  const todoPlan = useWorkspaceStore((state) => selectNodeTodoPlan(state, id));
+  const hydrateTodoPlan = useWorkspaceStore((state) => state.hydrateTodoPlan);
   const [thinking, setThinking] = useState(false);
   const [turn, setTurn] = useState<TurnCanvasEventPayload | null>(null);
   const [approval, setApproval] = useState<ApprovalState | null>(null);
   const [input, setInput] = useState(() => localStorage.getItem(`loom:draft:${id}`) ?? "");
-  const [budget, setBudget] = useState<NodeBudget | null>(null);
+  const { metrics, refresh: refreshMetrics } = useNodeMetrics(id);
   const [tb, setTb] = useState<SelectionToolbar | null>(null);
   useEffect(() => {
     if (!tb) return;
@@ -127,7 +133,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   const [personaOpen, setPersonaOpen] = useState(false);
   const [persona, setPersona] = useState(String(data.systemPrompt ?? ""));
   const [nodeModel, setNodeModel] = useState<string | undefined>(formatModelSelection(data.model));
-  const [thinkingLevel, setThinkingLevelState] = useState<ThinkingLevel>(data.thinkingLevel ?? "off");
+  const [thinkingLevel, setThinkingLevelState] = useState<ThinkingLevel | undefined>(data.thinkingLevel);
   const [draftSkills, setDraftSkills] = useState<SkillEffectiveDto[]>([]);
   const [skillCount, setSkillCount] = useState<number>(Array.isArray(data.skills) ? data.skills.length : 0);
   const [colorOpen, setColorOpen] = useState(false);
@@ -144,7 +150,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     setTitle(String(data.title ?? ""));
     setPersona(String(data.systemPrompt ?? ""));
     setNodeModel(formatModelSelection(data.model));
-    setThinkingLevelState(data.thinkingLevel ?? "off");
+    setThinkingLevelState(data.thinkingLevel);
     setSkillCount(Array.isArray(data.skills) ? data.skills.length : 0);
   }, [data.messages, data.title, data.systemPrompt, data.model, data.thinkingLevel, data.skills, toMsgs]);
 
@@ -171,10 +177,10 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     return () => window.removeEventListener("pointerdown", onDown);
   }, [colorOpen]);
 
-  const refreshBudget = useCallback(async () => {
-    if (!window.api) return;
-    setBudget(await window.api.canvas.budget(id));
-  }, [id]);
+  useEffect(() => {
+    const request = window.api?.canvas?.plan?.(id);
+    if (request) void request.then((snapshot) => hydrateTodoPlan(id, snapshot));
+  }, [hydrateTodoPlan, id]);
 
   const reloadNode = useCallback(async () => {
     if (!window.api || !data.sessionId) return;
@@ -185,7 +191,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
       setTitle(next.title);
       setPersona(next.systemPrompt ?? "");
       setNodeModel(formatModelSelection(next.model));
-      setThinkingLevelState(next.thinkingLevel ?? "off");
+      setThinkingLevelState(next.thinkingLevel);
       setSkillCount(next.skills?.length ?? 0);
       data.onNodeUpdated?.({
         id: next.id,
@@ -229,7 +235,6 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
 
   // 订阅本节点的流式事件
   useEffect(() => {
-    refreshBudget();
     if (!window.api) return;
     return window.api.canvas.onEvent((e) => {
       if (e.nodeId !== id) return;
@@ -261,7 +266,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
               setThinking(false);
               setBusy(false);
               setApproval(null);
-              refreshBudget();
+              void refreshMetrics();
               reloadNode();
             }
           }
@@ -281,7 +286,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
         case "done":
           setThinking(false);
           setBusy(false);
-          refreshBudget();
+          void refreshMetrics();
           reloadNode();
           data.onTreeChange?.();
           break;
@@ -292,7 +297,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           break;
       }
     });
-  }, [id, refreshBudget, reloadNode, upsertToolMessage]);
+  }, [id, refreshMetrics, reloadNode, upsertToolMessage]);
 
   const onMouseUp = useCallback(() => {
     const sel = window.getSelection();
@@ -426,7 +431,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   async function clearNode() {
     setMsgs([]);
     if (window.api) await window.api.canvas.reset(id);
-    refreshBudget();
+    void refreshMetrics();
   }
 
   async function setModel(model: string) {
@@ -455,7 +460,6 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
       const result = await window.api.canvas.compact(id);
       if (result.ok) {
         await reloadNode();
-        await refreshBudget();
       } else if (result.reason !== "not_needed") {
         setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: `压缩失败：${result.error ?? result.reason ?? "unknown"}` }]);
       } else {
@@ -516,9 +520,6 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     : `${frozenContextTokens}`;
   const titleEditUnits = Array.from(title || "标题").reduce((sum, char) => sum + (char.charCodeAt(0) > 255 ? 2 : 1), 0);
   const titleEditWidth = `${Math.min(Math.max(titleEditUnits + 2, 8), 36)}ch`;
-  const tokens = budget ? budget.withAncestors : null;
-  const tokenLabel =
-    tokens == null ? "—" : tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : `${tokens}`;
   const isBusy = busy || Boolean(liveTurn);
   const streaming = isBusy && msgs[msgs.length - 1]?.role === "assistant";
   const awaitingApproval = turn?.state === "awaiting_approval" && approval;
@@ -669,10 +670,6 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           )}
           <div className="head-meta">
             {nodeModel && <span className="model" title={nodeModel}>{nodeModel}</span>}
-            <span className="tokens" title={budget?.estimated ? "将发送的估算 token（字符估算，随节点上下文变化）" : undefined}>
-              {budget?.estimated ? "~" : ""}
-              {tokenLabel} tok
-            </span>
             {skillCount > 0 && <span className="tokens" title="当前分支生效 Skills">skills {skillCount}</span>}
           </div>
         </div>
@@ -837,14 +834,19 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           busy={isBusy}
           stopPending={stopPending}
           placeholder={awaitingApproval ? "等待工具审批…" : isBusy ? "回复中…" : msgs.length ? "继续追问…" : data.seed ? "顺着这个往下问…" : "开始一段思考…"}
-          topAccessory={awaitingApproval ? (
-            <ApprovalPrompt
-              approval={approval}
-              compact
-              onScopeChange={(scope) => setApproval((current) => current ? { ...current, scope } : current)}
-              onDecision={decideApproval}
-            />
-          ) : undefined}
+          topAccessory={(
+            <>
+              <TodoProgressPanel plan={todoPlan} />
+              {awaitingApproval ? (
+                <ApprovalPrompt
+                  approval={approval}
+                  compact
+                  onScopeChange={(scope) => setApproval((current) => current ? { ...current, scope } : current)}
+                  onDecision={decideApproval}
+                />
+              ) : null}
+            </>
+          )}
           activeSkills={draftSkills}
           canRegenerate={msgs.some((m) => m.role === "user") && !isBusy}
           model={nodeModel}
@@ -859,6 +861,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           onCompact={compactNode}
           onEnableSkill={enableSkill}
           onDisableSkill={disableDraftSkill}
+          telemetryLine={<ComposerTelemetryLine metrics={metrics} />}
         />
       </div>
 

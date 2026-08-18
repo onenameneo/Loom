@@ -62,7 +62,8 @@ describe("Workbench", () => {
     localStorage.setItem("loom:workbench:tabs", '["trace"]');
     render(<Workbench nodeId="node-1" />);
 
-    expect(await screen.findByText("openai/gpt-5 · 1.5s · in 30 · out 12 · total 42 tokens")).toBeTruthy();
+    const summary = await screen.findByRole("button", { name: /openai\/gpt-5/ });
+    expect(summary.textContent).toContain("openai/gpt-5 · 1.5s · in 30 · out 12 · cache 0 · total 42 · estimated tokens");
     await openTurn();
     fireEvent.click(screen.getByRole("button", { name: /System prompt/ }));
     expect(screen.getByText((_, element) => element?.tagName === "PRE" && element.textContent === "long prompt\n[TRUNCATED]")).toBeTruthy();
@@ -433,16 +434,19 @@ describe("Workbench", () => {
       canvas: {
         trace: vi.fn(async () => ({ nodeId: "node-1", revision: 1, records: [] })),
         metrics: vi.fn(async () => ({
-          records: [],
-          totals: {
-            turns: 3,
-            llmRequests: 14,
-            toolCalls: 29,
-            compactions: 0,
-            durationMs: 118_100,
-            ttftMs: 14_900,
-            outputTokensPerSecond: 90,
-            usage: { input: 36_178, output: 5_041, totalTokens: 353_155, cost: { total: 0.0073 } },
+          turns: 3,
+          llmRequests: 14,
+          toolCalls: 29,
+          compactions: 0,
+          durationMs: 118_100,
+          ttftMs: 14_900,
+          ttftSamples: 14,
+          outputTokensPerSecond: 90,
+          usage: {
+            input: 36_178,
+            output: 5_041,
+            totalTokens: 353_155,
+            cost: { total: 0.0073 },
           },
         })),
         onTrace: vi.fn(() => () => {}),
@@ -455,6 +459,7 @@ describe("Workbench", () => {
     expect(screen.getByText("36.18K")).toBeTruthy();
     expect(screen.getByText("5.04K")).toBeTruthy();
     expect(screen.getByText("118.1s")).toBeTruthy();
+    expect(screen.getByText("1.1")).toBeTruthy();
   });
 
   it("renders compaction span with bounded diagnostics", async () => {

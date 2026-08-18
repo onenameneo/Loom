@@ -13,7 +13,6 @@ afterEach(() => {
 function ctx(): CmdCtx {
   return {
     nodeId: "node-1",
-    insertText: vi.fn(),
     attachImage: vi.fn(),
     openPersona: vi.fn(),
     clearNode: vi.fn(),
@@ -25,6 +24,20 @@ function ctx(): CmdCtx {
 }
 
 describe("SlashPalette model command", () => {
+  it("does not offer removed persona or attach slash commands", () => {
+    render(
+      React.createElement(SlashPalette, {
+        value: "/",
+        setValue: vi.fn(),
+        ctx: ctx(),
+        modelOptions: [],
+      }),
+    );
+
+    expect(screen.queryByRole("option", { name: /persona/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: /attach/ })).toBeNull();
+  });
+
   it("does not offer arbitrary custom model switching outside configured models", () => {
     render(
       React.createElement(SlashPalette, {

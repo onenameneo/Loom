@@ -44,4 +44,11 @@ describe("piEngine hook contract", () => {
     expect(src).toContain("const response = summarizeAssistantResponse(message)");
     expect(src).toContain("...(response ? { attributes: { response } } : {})");
   });
+
+  it("cleans terminal LLM timing state", () => {
+    const src = readFileSync(join(process.cwd(), "src/main/agent/adapters/piEngine.ts"), "utf-8");
+
+    expect(src).toContain("llmStartedAt.delete(requestId)");
+    expect(src).toContain("llmFirstTokenAt.delete(requestId)");
+  });
 });

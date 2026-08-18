@@ -21,6 +21,7 @@ import {
   useWorkspaceStore,
 } from "./workspace/store";
 import { connectLiveTurnBridge } from "./workspace/liveTurnBridge";
+import { connectTodoPlanBridge } from "./workspace/todoPlanBridge";
 
 export default function App() {
   const [activeSurface, setActiveSurface] = useState("project");
@@ -236,7 +237,9 @@ export default function App() {
 
   useEffect(() => {
     if (!window.api?.canvas) return;
-    return connectLiveTurnBridge(window.api.canvas);
+    const stopLive = connectLiveTurnBridge(window.api.canvas);
+    const stopTodo = connectTodoPlanBridge(window.api.canvas);
+    return () => { stopLive(); stopTodo(); };
   }, []);
 
   const refreshActivityStatus = useCallback(async () => {

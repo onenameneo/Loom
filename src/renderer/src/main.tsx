@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "@xyflow/react/dist/style.css";
 import "./tokens.css";
+import "./tailwind.css";
 import "./shell.css";
 import "./message/message.css";
 import "./canvas/canvas.css";

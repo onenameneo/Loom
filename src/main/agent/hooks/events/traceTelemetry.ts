@@ -38,7 +38,9 @@ export function createTraceTelemetryHook(traces: TraceRepository): AgentHook {
         }
         case "llm_end": {
           if (!event.turnId) return;
-          const spanId = llmSpans.get(key(event.nodeId, event.requestId));
+          const spanKey = key(event.nodeId, event.requestId);
+          const spanId = llmSpans.get(spanKey);
+          llmSpans.delete(spanKey);
           if (!spanId) return;
           traces.endSpan(event.nodeId, event.turnId, spanId, {
             status: event.status,

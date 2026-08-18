@@ -1,3 +1,5 @@
+import type { AgentMetricTotals, LlmUsage } from "../../../common/telemetry";
+
 export {};
 
 export interface ToolCallDto {
@@ -19,17 +21,7 @@ export interface NodeMsg {
   images?: { data: string; mimeType: string }[];
   fileMentions?: FileMentionRef[];
   seq: number;
-  usage?: {
-    input?: number;
-    output?: number;
-    cacheRead?: number;
-    cacheWrite?: number;
-    reasoning?: number;
-    totalTokens?: number;
-    exact?: boolean;
-    source?: "provider" | "estimated";
-    cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; total?: number };
-  };
+  usage?: Partial<LlmUsage>;
   meta?: unknown;
   checkpoint?: {
     id: string;
@@ -110,6 +102,32 @@ export interface CanvasEvent {
   nodeId: string;
   type: string;
   payload?: unknown;
+}
+
+export type TodoItemStatus = "pending" | "in_progress" | "completed" | "blocked";
+export interface TodoItem {
+  id: string;
+  content: string;
+  status: TodoItemStatus;
+  dependsOn?: string[];
+  result?: string;
+}
+export interface TodoPlanSnapshot {
+  planId: string;
+  nodeId: string;
+  sessionId: string;
+  turnId: string;
+  revision: number;
+  status: "active" | "completed" | "blocked" | "cleared";
+  todos: TodoItem[];
+  updatedAt: number;
+}
+export interface TodoPlanEventPayload {
+  nodeId: string;
+  sessionId: string;
+  turnId: string;
+  revision: number;
+  snapshot: TodoPlanSnapshot;
 }
 
 export type TurnOperationKind = "send" | "regenerate" | "edit-resend";
@@ -222,6 +240,7 @@ export type TypedCanvasEvent =
   | { nodeId: string; type: "tool"; payload: ToolCanvasEventPayload }
   | { nodeId: string; type: "turn"; payload: TurnCanvasEventPayload }
   | { nodeId: string; type: "approval"; payload: ApprovalRequestPayload }
+  | { nodeId: string; type: "todo"; payload: TodoPlanEventPayload }
   | { nodeId: string; type: "compaction"; payload: CompactionCanvasEventPayload }
   | CanvasEvent;
 
@@ -519,6 +538,7 @@ declare global {
       };
       canvas: {
         list: (sessionId: string) => Promise<CanvasNodeDto[]>;
+        plan: (nodeId: string) => Promise<TodoPlanSnapshot | undefined>;
         open: (sessionId: string) => Promise<CanvasNodeDto[]>;
         create: (arg: { sessionId: string; parentId?: string; seed?: NodeSeed; title?: string; includeParentContext?: boolean }) => Promise<CanvasNodeDto>;
         branchFromMessage: (arg: { nodeId: string; sourceSeq: number; mode: "new-session" | "canvas-node" }) => Promise<{
@@ -551,10 +571,7 @@ declare global {
         models: () => Promise<ModelListItem[]>;
         budget: (nodeId: string) => Promise<NodeBudget>;
         trace: (nodeId: string) => Promise<import("./workbench/traceState").TraceSnapshotDto>;
-        metrics: (nodeId: string) => Promise<{
-          records: Array<{ kind: "turn" | "llm" | "tool" | "compaction"; durationMs?: number; ttftMs?: number; usage?: NodeMsg["usage"] }>;
-          totals?: { turns: number; llmRequests: number; toolCalls: number; compactions: number; durationMs: number; ttftMs: number; outputTokensPerSecond: number; usage?: NodeMsg["usage"] };
-        }>;
+        metrics: (nodeId: string) => Promise<AgentMetricTotals | undefined>;
         onTrace: (listener: (event: import("./workbench/traceState").TraceEventDto) => void) => () => void;
         liveTurns: () => Promise<LiveTurnSnapshot[]>;
         onLiveTurn: (listener: (event: LiveTurnEvent) => void) => () => void;

@@ -49,7 +49,7 @@ Loom 保留完整的原始 transcript，并以 append-only context checkpoint �
 
 ## 跨会话长期记忆
 
-在设置中启用后，Loom 默认将长期记忆保存在 `~/.loom/memory/`。路径由主进程按 Electron home directory 和 Node 原生 path API 解析，macOS、Windows、Linux 使用同一套逻辑 root；也可以在设置中配置自定义绝对根目录。
+在设置中启用后，Loom 默认将长期记忆保存在 `~/.loom/memory/`。路径由主进程按 Electron home directory 和 Node 原生 path API 解析，macOS、Windows、Linux 使用同一套逻辑 root。
 
 目录布局如下：
 

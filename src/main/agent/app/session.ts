@@ -43,7 +43,8 @@ import { isLoomContextCheckpoint, isLoomFrozenBranchSummary, type LoomBudgetDiag
 import type { AgentTool } from "../core/tool";
 import type { CommandPort } from "../ports";
 import { createHookRegistry, createToolLifecycleHook } from "../hooks";
-import { createCommandTool, createDefaultReadonlyTools, createProjectFileTools, createProjectMutationTools } from "../tools";
+import { createCommandTool, createDefaultReadonlyTools, createProjectFileTools, createProjectMutationTools, createWriteTodosTool } from "../tools";
+import { createTodoPlan, clearTodoPlan, isTodoPlanStale, type TodoItem } from "../core/todoPlan";
 import { createApprovalBroker } from "./approvalBroker";
 import { createApprovalPolicyStore } from "./approvalPolicy";
 import { createToolRegistry } from "./toolRuntime";
@@ -216,6 +217,12 @@ interface CanvasMessageDto {
 
 const NO_KEY_ERROR = "未配置 API key（去设置填写，或设置 ANTHROPIC_API_KEY）。";
 const DEFAULT_SYSTEM_PROMPT = "你是一个冷静、精确、克制的思考助手。回答直接，不啰嗦。";
+const TODO_PLAN_SYSTEM_PROMPT = [
+  "## Execution planning",
+  "- For work with multiple meaningful steps, call write_todos first with a concise ordered plan.",
+  "- Keep exactly one todo in_progress at a time; update the plan as work advances and mark completed or blocked with a short result.",
+  "- Do not use write_todos for trivial one-step replies.",
+].join("\n");
 const FILE_TOOL_PATH_GUIDANCE = [
   "## File tool path contract",
   "- Use absolute paths for Project and external files with read, write, and edit; preserve the exact absolute path supplied by the user or returned by search/command output.",
@@ -229,7 +236,20 @@ const TOOL_RESULT_BUDGET_OPT_OUT_TOOLS = new Set(["read", "skill_read"]);
 export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   const { store, events: eventSink, ids, clock, getApiKey } = deps;
   const liveTurnPublisher = createLiveTurnPublisher();
-  const runtime = createNodeRuntimeStore({ publishLive: (event) => liveTurnPublisher.publish(event) });
+  const runtime = createNodeRuntimeStore({
+    publishLive: (event) => liveTurnPublisher.publish(event),
+    publishTodo: (event) => {
+      if (event.type === "upsert") {
+        eventSink.emit(event.snapshot.nodeId, "todo", {
+          nodeId: event.snapshot.nodeId,
+          sessionId: event.snapshot.sessionId,
+          turnId: event.snapshot.turnId,
+          revision: event.snapshot.revision,
+          snapshot: event.snapshot,
+        });
+      }
+    },
+  });
   const events: EventSinkPort = {
     emit(nodeId, type, payload) {
       if (type === "delta") {
@@ -259,7 +279,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     if (existing) {
       if (!existing.node) runtime.replaceNode(nodeId, node);
     } else {
-      runtime.set(nodeId, { node, pendingSkillIds: [] });
+    const plan = store.getNodePlan?.(nodeId);
+    runtime.set(nodeId, { node, pendingSkillIds: [], ...(plan ? { todoPlan: plan, todoRevision: plan.revision } : {}) });
     }
   }
 
@@ -335,7 +356,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       const current = runtime.get(record.id)?.node;
       if (!current || !queries.state(record.id)) {
         const hydrated = toCanvasNode(record);
-        runtime.replaceNode(hydrated.id, hydrated);
+        const plan = store.getNodePlan?.(hydrated.id);
+        runtime.set(hydrated.id, { node: hydrated, pendingSkillIds: [], ...(plan ? { todoPlan: plan, todoRevision: plan.revision } : {}) });
         return hydrated;
       }
       // A running turn closes over this object. Keep its transcript identity;
@@ -544,7 +566,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   function systemPromptFor(node: CanvasNode): string {
     const skillIndex = compileAvailableSkillsIndex(catalogFor(node.id).skills);
     const memoryPrompt = deps.memory?.memoryPrompt?.(node.projectId);
-    return [node.systemPrompt || DEFAULT_SYSTEM_PROMPT, FILE_TOOL_PATH_GUIDANCE, memoryPrompt, skillIndex].filter(Boolean).join("\n\n");
+    return [node.systemPrompt || DEFAULT_SYSTEM_PROMPT, TODO_PLAN_SYSTEM_PROMPT, FILE_TOOL_PATH_GUIDANCE, memoryPrompt, skillIndex].filter(Boolean).join("\n\n");
   }
 
   async function refreshMemoryPrompt(node: CanvasNode, handle: EngineHandle, text: string, supplementalContext?: string): Promise<void> {
@@ -602,13 +624,51 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
           getPermissionContext: () => ({ ...store.getSettings().permissions }),
         })]
       : [];
-    return [...tools.list(), ...skillTools, ...createProjectFileTools(sourceRoots, {
+    let todoWriteInFlight = false;
+    const todoTool = createWriteTodosTool(async (args, ctx) => {
+      if (todoWriteInFlight) return { content: [{ type: "text" as const, text: "A todo update is already in progress; retry after it completes." }], details: { concurrent: true }, isError: true };
+      todoWriteInFlight = true;
+      try { return await updateTodoPlan(nodeId, args.todos, ctx); }
+      finally { todoWriteInFlight = false; }
+    });
+    return [...tools.list(), todoTool, ...skillTools, ...createProjectFileTools(sourceRoots, {
       memory,
       getSandboxMode: () => store.getSettings().permissions.sandboxMode,
     }), ...createProjectMutationTools(sourceRoots, {
       memory,
       getSandboxMode: () => store.getSettings().permissions.sandboxMode,
     }), ...commandTools];
+  }
+
+  async function updateTodoPlan(nodeId: string, todos: TodoItem[], ctx: Parameters<NonNullable<ReturnType<typeof createWriteTodosTool>["execute"]>>[0]) {
+    const node = loadNode(nodeId);
+    const record = runtime.get(nodeId);
+    const active = record?.activeTurn;
+    if (!node || !active || isTodoPlanStale({ currentTurnId: active.turnId, currentGeneration: record?.generation, turnId: active.turnId, generation: active.generation, settled: active.settled, invalidated: active.invalidated })) {
+      return { content: [{ type: "text" as const, text: "The todo plan is stale because this turn is no longer active." }], details: { stale: true }, isError: true };
+    }
+    const current = record?.todoPlan;
+    const planId = current && current.turnId === active.turnId && current.status !== "cleared" ? current.planId : `plan-${active.turnId}`;
+    const revision = Math.max(record?.todoRevision ?? 0, current?.revision ?? 0) + 1;
+    const result = createTodoPlan({ planId, nodeId, sessionId: node.sessionId, turnId: active.turnId, revision, todos, updatedAt: clock.now() });
+    if (!result.ok) return { content: [{ type: "text" as const, text: result.error }], details: { error: result.error }, isError: true };
+    store.upsertNodePlan?.(result.snapshot);
+    runtime.transition(nodeId, () => ({ todoPlan: result.snapshot, todoRevision: revision }));
+    return { content: [{ type: "text" as const, text: `Todo plan updated: ${todos.filter((todo) => todo.status === "completed").length}/${todos.length} completed.` }], details: { planId, revision, status: result.snapshot.status } };
+  }
+
+  function clearTodoPlanForTurn(nodeId: string, turnId: string) {
+    const node = loadNode(nodeId);
+    const record = runtime.get(nodeId);
+    if (!node) return;
+    const revision = Math.max(record?.todoRevision ?? 0, record?.todoPlan?.revision ?? 0) + 1;
+    const cleared = clearTodoPlan({ planId: record?.todoPlan?.planId, nodeId, sessionId: node.sessionId, turnId, revision, updatedAt: clock.now() });
+    store.deleteNodePlan?.(nodeId);
+    runtime.transition(nodeId, () => ({ todoPlan: cleared, todoRevision: revision }));
+  }
+
+  function plan(nodeId: string) {
+    return runtime.get(nodeId)?.todoPlan ?? store.getNodePlan?.(nodeId);
   }
 
   const tools = createToolRegistry(createDefaultReadonlyTools(clock));
@@ -998,7 +1058,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     const retry = await queries.run({
       nodeId: node.id,
       operation: "send",
-      onTurnStarted: (turn) => { activeTurn = { turnId: turn.turnId, signal: turn.signal }; },
+      onTurnStarted: (turn) => { activeTurn = { turnId: turn.turnId, signal: turn.signal }; clearTodoPlanForTurn(node.id, turn.turnId); },
       prepare: async (handle) => {
         syncTranscript(handle, node);
         return { kind: "continue", from: effectiveMessages(node).length };
@@ -1178,6 +1238,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       operation: "send",
       onTurnStarted: (turn) => {
         activeTurn = { turnId: turn.turnId, signal: turn.signal };
+        clearTodoPlanForTurn(arg.nodeId, turn.turnId);
         startLiveTurn(arg.nodeId, turn);
       },
       prepare: async (handle) => {
@@ -1300,6 +1361,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       operation: "regenerate",
       onTurnStarted: (turn) => {
         activeTurn = { turnId: turn.turnId, signal: turn.signal };
+        clearTodoPlanForTurn(nodeId, turn.turnId);
         startLiveTurn(nodeId, turn);
       },
       prepare: async (handle) => {
@@ -1337,6 +1399,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       operation: "edit-resend",
       onTurnStarted: (turn) => {
         activeTurn = { turnId: turn.turnId, signal: turn.signal };
+        clearTodoPlanForTurn(arg.nodeId, turn.turnId);
         startLiveTurn(arg.nodeId, turn);
       },
       prepare: async (handle) => {
@@ -1557,6 +1620,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     decideApproval,
     listSkills,
     liveTurns: () => runtime.listLive(),
+    plan,
     onLiveTurn: (listener: Parameters<typeof liveTurnPublisher.subscribe>[0]) => liveTurnPublisher.subscribe(listener),
     disposeSession,
     disposeProject,
@@ -1566,10 +1630,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     registerHook: (hook: AgentHook) => hookRegistry.use(hook),
     trace: (nodeId: string) => traces.snapshot(nodeId),
     onTrace: (listener: Parameters<typeof traces.subscribe>[0]) => traces.subscribe(listener),
-    metrics: (nodeId: string) => ({
-      records: store.listMetrics?.({ nodeId }) ?? [],
-      totals: store.getMetricTotals?.({ nodeId }),
-    }),
+    metrics: (nodeId: string) => store.getMetricTotals?.({ nodeId }),
   };
 }
 

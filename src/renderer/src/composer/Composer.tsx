@@ -12,6 +12,14 @@ import { findFileMentionTrigger } from "./fileMentionParser";
 export type ComposerImage = { data: string; mimeType: string };
 type ComposerSubmitResult = { ok: boolean; reason?: string; errors?: Array<{ path: string; message: string }> };
 
+function defaultThinkingLevel(model: ModelListItem): ThinkingLevel {
+  const configured = model.capabilities?.thinkingLevels?.filter((level): level is ThinkingLevel =>
+    ["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(level),
+  );
+  if (configured?.length) return configured.find((level) => level !== "off") ?? "off";
+  return model.capabilities?.reasoning ? "minimal" : "off";
+}
+
 export function Composer({
   nodeId,
   value,
@@ -21,8 +29,8 @@ export function Composer({
   placeholder,
   canRegenerate,
   model,
-  thinkingLevel = "off",
-  budgetLine,
+  thinkingLevel,
+  telemetryLine,
   activeSkills,
   topAccessory,
   onSubmit,
@@ -45,7 +53,7 @@ export function Composer({
   canRegenerate: boolean;
   model?: string;
   thinkingLevel?: ThinkingLevel;
-  budgetLine?: string;
+  telemetryLine?: ReactNode;
   activeSkills?: SkillEffectiveDto[];
   topAccessory?: ReactNode;
   onSubmit: (text: string, images: ComposerImage[], skillIds: string[], mentions: FileMentionRef[]) => void | Promise<ComposerSubmitResult>;
@@ -125,25 +133,6 @@ export function Composer({
     return () => window.clearTimeout(timer);
   }, [fileMentionOpen, fileMentionTrigger, nodeId]);
 
-  const insertText = useCallback(
-    (text: string) => {
-      const el = textareaRef.current;
-      const start = el?.selectionStart ?? value.length;
-      const end = el?.selectionEnd ?? value.length;
-      const next = `${value.slice(0, start)}${text}${value.slice(end)}`;
-      onChange(next);
-      requestAnimationFrame(() => {
-        const target = textareaRef.current;
-        if (!target) return;
-        const innerOffset = text === "\n```\n\n```\n" ? 5 : text.length;
-        const pos = start + innerOffset;
-        target.focus();
-        target.setSelectionRange(pos, pos);
-      });
-    },
-    [onChange, value],
-  );
-
   const attachImage = useCallback(() => {
     fileRef.current?.click();
   }, []);
@@ -151,7 +140,6 @@ export function Composer({
   const ctx = useMemo<CmdCtx>(
     () => ({
       nodeId,
-      insertText,
       attachImage,
       openPersona: onOpenPersona,
       clearNode: onClearNode,
@@ -161,7 +149,7 @@ export function Composer({
       enableSkill: onEnableSkill,
       getState: () => ({ canRegenerate }),
     }),
-    [attachImage, canRegenerate, insertText, nodeId, onClearNode, onCompact, onEnableSkill, onOpenPersona, onRegenerate, onSetModel],
+    [attachImage, canRegenerate, nodeId, onClearNode, onCompact, onEnableSkill, onOpenPersona, onRegenerate, onSetModel],
   );
 
   useEffect(() => {
@@ -244,6 +232,7 @@ export function Composer({
 
   function selectModel(model: ModelListItem) {
     onSetModel(model.id);
+    onSetThinkingLevel(defaultThinkingLevel(model));
   }
 
   const currentModel = useMemo(() => {
@@ -260,7 +249,8 @@ export function Composer({
     return ["off"];
   }, [currentModel]);
 
-  const effectiveThinkingLevel = thinkingOptions.includes(thinkingLevel) ? thinkingLevel : thinkingOptions[0] ?? "off";
+  const defaultLevel = thinkingOptions.find((level) => level !== "off") ?? "off";
+  const effectiveThinkingLevel = thinkingLevel && thinkingOptions.includes(thinkingLevel) ? thinkingLevel : defaultLevel;
   const thinkingDisabled = thinkingOptions.length <= 1;
   const modelLabel = model ?? "选择模型";
   const thinkingActiveIndex = Math.max(0, thinkingOptions.indexOf(effectiveThinkingLevel));
@@ -273,6 +263,10 @@ export function Composer({
     const level = thinkingOptions[index];
     if (level) selectThinkingLevel(level);
   }
+
+  useEffect(() => {
+    if (currentModel && thinkingLevel === undefined && defaultLevel !== "off") onSetThinkingLevel(defaultLevel);
+  }, [currentModel, defaultLevel, onSetThinkingLevel, thinkingLevel]);
 
   function submit() {
     const text = value.trim();
@@ -349,7 +343,6 @@ export function Composer({
 
   return (
     <div className="composer-wrap nodrag">
-      {budgetLine && <div className="budget-line">{budgetLine}</div>}
       {topAccessory}
       <div className="composer-box">
         <SlashPalette
@@ -673,6 +666,7 @@ export function Composer({
           </button>
         </div>
       </div>
+      {telemetryLine}
     </div>
   );
 }

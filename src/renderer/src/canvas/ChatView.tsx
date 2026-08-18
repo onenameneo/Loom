@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import type { ApprovalRequestPayload, BranchSource, ModelSelection, NodeBudget, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
+import type { ApprovalRequestPayload, BranchSource, ModelSelection, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
 import type { FileMentionRef } from "../../../common/fileMentions";
 import { IconSplit, IconProject } from "../icons";
 import { Message } from "../message/Message";
@@ -11,7 +11,10 @@ import { ToolCallTimeline } from "./ToolCallTimeline";
 import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
 import { useComposerHeightVar } from "./useComposerHeightVar";
 import { ApprovalPrompt, type ApprovalState } from "./ApprovalPrompt";
-import { selectNodeLiveTurn, useWorkspaceStore } from "../workspace/store";
+import { selectNodeLiveTurn, selectNodeTodoPlan, useWorkspaceStore } from "../workspace/store";
+import { TodoProgressPanel } from "../composer/TodoProgressPanel";
+import { ComposerTelemetryLine } from "../composer/ComposerTelemetryLine";
+import { useNodeMetrics } from "../composer/useNodeMetrics";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
 type Msg = { id: number; role: Role; text: string; thinking?: string; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
@@ -88,11 +91,13 @@ export default function ChatView({
   const [turn, setTurn] = useState<TurnCanvasEventPayload | null>(null);
   const [approval, setApproval] = useState<ApprovalState | null>(null);
   const [input, setInput] = useState(() => localStorage.getItem(`loom:draft:${nodeId}`) ?? "");
+  const todoPlan = useWorkspaceStore((state) => selectNodeTodoPlan(state, nodeId));
+  const hydrateTodoPlan = useWorkspaceStore((state) => state.hydrateTodoPlan);
   const [personaOpen, setPersonaOpen] = useState(false);
   const [persona, setPersona] = useState(systemPrompt ?? "");
   const [nodeModel, setNodeModel] = useState<string | undefined>(formatModelSelection(model));
-  const [thinkingLevel, setThinkingLevelState] = useState<ThinkingLevel>(initialThinkingLevel ?? "off");
-  const [budget, setBudget] = useState<NodeBudget | null>(null);
+  const [thinkingLevel, setThinkingLevelState] = useState<ThinkingLevel | undefined>(initialThinkingLevel);
+  const { metrics, refresh: refreshMetrics } = useNodeMetrics(nodeId);
   const [autoScroll, setAutoScroll] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -101,6 +106,13 @@ export default function ChatView({
   const composerRef = useRef<HTMLDivElement>(null);
   const [tb, setTb] = useState<{ text: string; x: number; y: number; includeParentContext: boolean } | null>(null);
   const liveTurn = useWorkspaceStore((state) => selectNodeLiveTurn(state, nodeId));
+
+  useEffect(() => {
+    let active = true;
+    const request = window.api?.canvas?.plan?.(nodeId);
+    if (request) void request.then((snapshot) => { if (active) hydrateTodoPlan(nodeId, snapshot); });
+    return () => { active = false; };
+  }, [hydrateTodoPlan, nodeId]);
 
   useEffect(() => {
     if (!tb) return;
@@ -173,10 +185,6 @@ export default function ChatView({
     })));
   }, []);
 
-  const refreshBudget = useCallback(async () => {
-    if (window.api) setBudget(await window.api.canvas.budget(nodeId));
-  }, [nodeId]);
-
   useEffect(() => {
     const previous = initialMessagesRef.current;
     if (previous.nodeId === nodeId && previous.messages === initialMessages) return;
@@ -209,9 +217,8 @@ export default function ChatView({
     setApproval(null);
     setPersona(systemPrompt ?? "");
     setNodeModel(formatModelSelection(model));
-    setThinkingLevelState(initialThinkingLevel ?? "off");
-    refreshBudget();
-  }, [initialThinkingLevel, model, nodeId, refreshBudget, systemPrompt]);
+    setThinkingLevelState(initialThinkingLevel);
+  }, [initialThinkingLevel, model, nodeId, systemPrompt]);
 
   useEffect(() => {
     if (typeof focusMessageSeq !== "number") return;
@@ -255,6 +262,7 @@ export default function ChatView({
               setBusy(false);
               setThinking(false);
               setApproval(null);
+              void refreshMetrics();
             }
           }
           break;
@@ -271,7 +279,7 @@ export default function ChatView({
         case "done":
           setThinking(false);
           setBusy(false);
-          refreshBudget();
+          void refreshMetrics();
           onTreeChange?.();
           break;
         case "error":
@@ -281,7 +289,7 @@ export default function ChatView({
           break;
       }
     });
-  }, [nodeId, onTreeChange, refreshBudget, upsertToolMessage]);
+  }, [nodeId, onTreeChange, refreshMetrics, upsertToolMessage]);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -397,7 +405,7 @@ export default function ChatView({
   async function clearNode() {
     setMsgs([]);
     if (window.api) await window.api.canvas.reset(nodeId);
-    refreshBudget();
+    void refreshMetrics();
   }
 
   async function savePersona() {
@@ -431,7 +439,7 @@ export default function ChatView({
       } else {
         setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: `压缩失败：${result.error ?? result.reason ?? "unknown"}` }]);
       }
-      refreshBudget();
+      void refreshMetrics();
     } finally {
       setBusy(false);
       setThinking(false);
@@ -594,18 +602,23 @@ export default function ChatView({
           busy={isBusy}
           stopPending={stopPending}
           placeholder={awaitingApproval ? "等待工具审批…" : isBusy ? "生成中…" : "随心输入…（Enter 发送，Shift+Enter 换行）"}
-          topAccessory={awaitingApproval ? (
-            <ApprovalPrompt
-              approval={approval}
-              onScopeChange={(scope) => setApproval((current) => current ? { ...current, scope } : current)}
-              onDecision={decideApproval}
-            />
-          ) : undefined}
+          topAccessory={(
+            <>
+              <TodoProgressPanel plan={todoPlan} />
+              {awaitingApproval ? (
+                <ApprovalPrompt
+                  approval={approval}
+                  onScopeChange={(scope) => setApproval((current) => current ? { ...current, scope } : current)}
+                  onDecision={decideApproval}
+                />
+              ) : null}
+            </>
+          )}
           activeSkills={draftSkills}
           canRegenerate={msgs.some((m) => m.role === "user") && !isBusy}
           model={nodeModel}
           thinkingLevel={thinkingLevel}
-          budgetLine={`将发送 ~${(hasFrozenContext ? budget?.withAncestors : budget?.withoutAncestors) ?? 0} tokens`}
+          telemetryLine={<ComposerTelemetryLine metrics={metrics} />}
           onSubmit={submit}
           onStop={stop}
           onOpenPersona={() => setPersonaOpen(true)}

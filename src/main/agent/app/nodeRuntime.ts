@@ -4,6 +4,7 @@ import type { ToolResultMicroCompactState } from "../core/toolResultMicroCompact
 import type { LiveTurnEvent, LiveTurnSnapshot } from "./liveTurns";
 import type { CanvasNode } from "./session";
 import type { ActiveTurn } from "./turnRunner";
+import type { TodoPlanSnapshot } from "../core/todoPlan";
 
 /**
  * 每节点可变的运行期状态——主进程唯一 per-node 状态。
@@ -25,6 +26,8 @@ export interface NodeRuntime {
   toolResultBudget?: ToolResultBudgetState;
   /** 模型上下文投影用的 stale tool result microCompact 决策状态。 */
   toolResultMicroCompact?: ToolResultMicroCompactState;
+  todoPlan?: TodoPlanSnapshot;
+  todoRevision?: number;
   /** tombstone：dispose/删除后拒绝后续 transition，等 in-flight turn settle 后清理。 */
   disposed?: boolean;
 }
@@ -48,6 +51,7 @@ export interface NodeRuntimeStore {
 export interface NodeRuntimeStoreDeps {
   /** liveSnapshot 变化时发布 revisioned 事件（revision 门控在此盖章）。 */
   publishLive(event: LiveTurnEvent): void;
+  publishTodo?(event: { type: "upsert"; snapshot: TodoPlanSnapshot } | { type: "remove"; nodeId: string; revision: number }): void;
   /** 记录过渡，供 trace 断言。 */
   onTransition?(info: { nodeId: string; kind: "live" | "patch" }): void;
 }
@@ -92,6 +96,9 @@ export function createNodeRuntimeStore(deps: NodeRuntimeStoreDeps): NodeRuntimeS
       } else {
         deps.publishLive({ type: "remove", nodeId, revision: rev });
       }
+    }
+    if (next.todoPlan !== cur.todoPlan && next.todoPlan) {
+      try { deps.publishTodo?.({ type: "upsert", snapshot: next.todoPlan }); } catch { /* projection failures never break the turn */ }
     }
     deps.onTransition?.({ nodeId, kind });
     records.set(nodeId, next);

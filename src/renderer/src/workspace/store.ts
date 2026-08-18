@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CanvasNodeDto, LiveTurnEvent, LiveTurnSnapshot, ProjectMeta, SessionMeta } from "../env";
+import type { CanvasNodeDto, LiveTurnEvent, LiveTurnSnapshot, ProjectMeta, SessionMeta, TodoPlanEventPayload, TodoPlanSnapshot } from "../env";
 
 export type WorkspaceStore = {
   projectIds: string[];
@@ -13,6 +13,8 @@ export type WorkspaceStore = {
   activeNodeId: string | null;
   turnsByNodeId: Record<string, LiveTurnSnapshot>;
   latestLiveRevisionByNodeId: Record<string, number>;
+  plansByNodeId: Record<string, TodoPlanSnapshot>;
+  latestTodoRevisionByNodeId: Record<string, number>;
   hydrateProjects: (projects: ProjectMeta[]) => void;
   hydrateSessions: (projectId: string, sessions: SessionMeta[]) => void;
   hydrateNodes: (sessionId: string, nodes: CanvasNodeDto[]) => void;
@@ -21,10 +23,12 @@ export type WorkspaceStore = {
   selectSession: (sessionId: string | null) => void;
   selectNode: (nodeId: string | null) => void;
   applyLiveTurn: (event: LiveTurnEvent) => void;
+  applyTodoPlan: (payload: TodoPlanEventPayload) => void;
+  hydrateTodoPlan: (nodeId: string, snapshot?: TodoPlanSnapshot) => void;
 };
 
 type WorkspaceData = Omit<WorkspaceStore,
-  "hydrateProjects" | "hydrateSessions" | "hydrateNodes" | "patchNode" | "selectProject" | "selectSession" | "selectNode" | "applyLiveTurn"
+  "hydrateProjects" | "hydrateSessions" | "hydrateNodes" | "patchNode" | "selectProject" | "selectSession" | "selectNode" | "applyLiveTurn" | "applyTodoPlan" | "hydrateTodoPlan"
 >;
 
 const emptyWorkspace = (): WorkspaceData => ({
@@ -39,6 +43,8 @@ const emptyWorkspace = (): WorkspaceData => ({
   activeNodeId: null,
   turnsByNodeId: {},
   latestLiveRevisionByNodeId: {},
+  plansByNodeId: {},
+  latestTodoRevisionByNodeId: {},
 });
 
 function replaceEntities<T extends { id: string }>(
@@ -123,6 +129,26 @@ export const useWorkspaceStore = create<WorkspaceStore>()((set) => ({
       };
     });
   },
+  applyTodoPlan(payload) {
+    set((state) => {
+      const revision = payload.revision ?? payload.snapshot.revision;
+      if (revision <= (state.latestTodoRevisionByNodeId[payload.nodeId] ?? 0)) return state;
+      const plansByNodeId = { ...state.plansByNodeId };
+      if (payload.snapshot.status === "cleared") delete plansByNodeId[payload.nodeId];
+      else plansByNodeId[payload.nodeId] = payload.snapshot;
+      return { plansByNodeId, latestTodoRevisionByNodeId: { ...state.latestTodoRevisionByNodeId, [payload.nodeId]: revision } };
+    });
+  },
+  hydrateTodoPlan(nodeId, snapshot) {
+    set((state) => {
+      const revision = snapshot?.revision ?? 0;
+      if (revision < (state.latestTodoRevisionByNodeId[nodeId] ?? 0)) return state;
+      const plansByNodeId = { ...state.plansByNodeId };
+      if (snapshot && snapshot.status !== "cleared") plansByNodeId[nodeId] = snapshot;
+      else delete plansByNodeId[nodeId];
+      return { plansByNodeId, latestTodoRevisionByNodeId: { ...state.latestTodoRevisionByNodeId, [nodeId]: revision } };
+    });
+  },
 }));
 
 export function resetWorkspaceStore() {
@@ -139,6 +165,17 @@ export const selectNodesForSession = (state: WorkspaceStore, sessionId: string |
   sessionId ? (state.nodeIdsBySessionId[sessionId] ?? []).flatMap((id) => state.nodesById[id] ? [state.nodesById[id]] : []) : [];
 
 export const selectNodeLiveTurn = (state: WorkspaceStore, nodeId: string): LiveTurnSnapshot | undefined => state.turnsByNodeId[nodeId];
+export const selectNodeTodoPlan = (state: WorkspaceStore, nodeId: string): TodoPlanSnapshot | undefined => state.plansByNodeId[nodeId];
+export const selectTodoProgress = (state: WorkspaceStore, nodeId: string) => {
+  const plan = state.plansByNodeId[nodeId];
+  if (!plan) return { total: 0, completed: 0, active: 0, blocked: 0 };
+  return {
+    total: plan.todos.length,
+    completed: plan.todos.filter((todo) => todo.status === "completed").length,
+    active: plan.todos.filter((todo) => todo.status === "in_progress").length,
+    blocked: plan.todos.filter((todo) => todo.status === "blocked").length,
+  };
+};
 
 export const selectRunningNodeCount = (state: WorkspaceStore, sessionId: string): number =>
   Object.values(state.turnsByNodeId).filter((turn) => turn.sessionId === sessionId).length;

@@ -23,12 +23,13 @@ import {
   type AgentMetricRecord,
   type AgentMetricTotals,
 } from "./store";
-import { mergeLlmUsage } from "../agent/core/usage";
+import { summarizeMetricRecords } from "../agent/core/metrics";
 import { DEFAULT_SESSION_TITLE, type DefaultTitleState } from "../../common/titleDefaults";
 import { parseStoredModelRef, type StoredModelSelection } from "../modelConfig/modelRef";
 import { isThinkingLevel, type ThinkingLevel } from "../modelConfig/thinkingLevels";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { FrozenNodeContext } from "../agent/core/context";
+import type { TodoPlanSnapshot } from "../agent/core/todoPlan";
 
 type ProjectRow = {
   id: string;
@@ -90,6 +91,17 @@ type AgentMetricRow = {
   status: AgentMetricRecord["status"];
   usage: string | null;
   created_at: number;
+};
+
+type NodePlanRow = {
+  node_id: string;
+  plan_id: string;
+  session_id: string;
+  turn_id: string;
+  revision: number;
+  status: TodoPlanSnapshot["status"];
+  todos: string;
+  updated_at: number;
 };
 
 function id(prefix: string): string {
@@ -572,6 +584,40 @@ export class SqliteStore implements Store {
     }));
   }
 
+  getNodePlan(nodeId: string): TodoPlanSnapshot | undefined {
+    const row = this.db.prepare("SELECT node_id, plan_id, session_id, turn_id, revision, status, todos, updated_at FROM node_plans WHERE node_id = ?").get(nodeId) as NodePlanRow | undefined;
+    if (!row) return undefined;
+    return {
+      nodeId: row.node_id,
+      planId: row.plan_id,
+      sessionId: row.session_id,
+      turnId: row.turn_id,
+      revision: row.revision,
+      status: row.status,
+      todos: decode(row.todos, []),
+      updatedAt: row.updated_at,
+    };
+  }
+
+  upsertNodePlan(snapshot: TodoPlanSnapshot): void {
+    this.db.prepare(`
+      INSERT INTO node_plans(node_id, plan_id, session_id, turn_id, revision, status, todos, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(node_id) DO UPDATE SET
+        plan_id = excluded.plan_id,
+        session_id = excluded.session_id,
+        turn_id = excluded.turn_id,
+        revision = excluded.revision,
+        status = excluded.status,
+        todos = excluded.todos,
+        updated_at = excluded.updated_at
+    `).run(snapshot.nodeId, snapshot.planId, snapshot.sessionId, snapshot.turnId, snapshot.revision, snapshot.status, encode(snapshot.todos), snapshot.updatedAt);
+  }
+
+  deleteNodePlan(nodeId: string): void {
+    this.db.prepare("DELETE FROM node_plans WHERE node_id = ?").run(nodeId);
+  }
+
   appendMetric(metric: AgentMetricRecord): void {
     this.db.prepare(`
       INSERT OR REPLACE INTO agent_metrics(
@@ -629,19 +675,7 @@ export class SqliteStore implements Store {
   }
 
   getMetricTotals(scope: { nodeId?: string; sessionId?: string }): AgentMetricTotals {
-    const metrics = this.listMetrics(scope);
-    const llmDurationMs = metrics.filter((metric) => metric.kind === "llm").reduce((sum, metric) => sum + (metric.durationMs ?? 0), 0);
-    const outputTokens = metrics.filter((metric) => metric.kind === "llm").reduce((sum, metric) => sum + (metric.usage?.output ?? 0), 0);
-    return {
-      turns: metrics.filter((metric) => metric.kind === "turn").length,
-      llmRequests: metrics.filter((metric) => metric.kind === "llm").length,
-      toolCalls: metrics.filter((metric) => metric.kind === "tool").length,
-      compactions: metrics.filter((metric) => metric.kind === "compaction").length,
-      durationMs: metrics.reduce((sum, metric) => sum + (metric.durationMs ?? 0), 0),
-      ttftMs: metrics.reduce((sum, metric) => sum + (metric.ttftMs ?? 0), 0),
-      outputTokensPerSecond: llmDurationMs > 0 ? outputTokens / (llmDurationMs / 1000) : 0,
-      usage: mergeLlmUsage(metrics.map((metric) => metric.usage)),
-    };
+    return summarizeMetricRecords(this.listMetrics(scope));
   }
 
   isApprovalPolicyAllowed(toolName: string, target: string): boolean {

@@ -3,7 +3,9 @@ import type { FrozenNodeContext } from "../agent/core/context";
 import type { DefaultTitleState } from "../../common/titleDefaults";
 import type { StoredModelSelection } from "../modelConfig/modelRef";
 import type { ThinkingLevel } from "../modelConfig/thinkingLevels";
-import type { LlmUsage } from "../agent/core/usage";
+import type { TodoPlanSnapshot } from "../agent/core/todoPlan";
+import type { AgentMetricKind, AgentMetricRecord, AgentMetricTotals } from "../../common/telemetry";
+export type { AgentMetricKind, AgentMetricRecord, AgentMetricTotals } from "../../common/telemetry";
 import {
   isApprovalPolicy,
   isApprovalsReviewer,
@@ -157,6 +159,7 @@ export interface StoreData {
   settings: Settings;
   projects: Project[];
   sessions?: SessionRecord[];
+  plans?: TodoPlanSnapshot[];
 }
 
 export interface PersistedMessage {
@@ -165,39 +168,6 @@ export interface PersistedMessage {
   role: string;
   content: AgentMessage;
   meta?: unknown;
-}
-
-export type AgentMetricKind = "turn" | "llm" | "tool" | "compaction";
-
-export interface AgentMetricRecord {
-  id: string;
-  nodeId: string;
-  sessionId: string;
-  turnId?: string;
-  requestId?: string;
-  toolCallId?: string;
-  kind: AgentMetricKind;
-  providerId?: string;
-  modelId?: string;
-  name?: string;
-  startedAt?: number;
-  endedAt?: number;
-  durationMs?: number;
-  ttftMs?: number;
-  status: "ok" | "error" | "aborted";
-  usage?: LlmUsage;
-  createdAt: number;
-}
-
-export interface AgentMetricTotals {
-  turns: number;
-  llmRequests: number;
-  toolCalls: number;
-  compactions: number;
-  durationMs: number;
-  ttftMs: number;
-  outputTokensPerSecond: number;
-  usage?: LlmUsage;
 }
 
 export const MIN_NODE_WIDTH = 288;
@@ -293,6 +263,9 @@ export interface Store {
   appendMetric?(metric: AgentMetricRecord): void;
   listMetrics?(scope: { nodeId?: string; sessionId?: string }): AgentMetricRecord[];
   getMetricTotals?(scope: { nodeId?: string; sessionId?: string }): AgentMetricTotals;
+  getNodePlan?(nodeId: string): TodoPlanSnapshot | undefined;
+  upsertNodePlan?(snapshot: TodoPlanSnapshot): void;
+  deleteNodePlan?(nodeId: string): void;
 
   isApprovalPolicyAllowed?(toolName: string, target: string): boolean;
   grantApprovalPolicy?(toolName: string, target: string): void;

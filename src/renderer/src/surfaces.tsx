@@ -610,7 +610,6 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [memoryEnabled, setMemoryEnabled] = useState(false);
   const [backgroundExtraction, setBackgroundExtraction] = useState(false);
   const [autoDream, setAutoDream] = useState(false);
-  const [memoryRoot, setMemoryRoot] = useState("");
   const [saved, setSaved] = useState(false);
   const [skillCatalog, setSkillCatalog] = useState<SkillCatalogDto | null>(null);
   const [skillSourceDraft, setSkillSourceDraft] = useState("");
@@ -643,7 +642,6 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
     setMemoryEnabled(s.memory?.enabled ?? false);
     setBackgroundExtraction(s.memory?.backgroundExtraction ?? false);
     setAutoDream(s.memory?.autoDream ?? false);
-    setMemoryRoot(s.memory?.rootDir ?? "");
   }, [s]);
 
   const reloadSkills = useCallback(async () => {
@@ -667,7 +665,6 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
         enabled: memoryEnabled,
         backgroundExtraction,
         autoDream,
-        ...(memoryRoot.trim() ? { rootDir: memoryRoot.trim() } : { rootDir: undefined }),
       },
     });
     await window.api.settings.setPermissions({ sandboxMode, approvalPolicy, approvalsReviewer, networkAccess });
@@ -1164,10 +1161,6 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
           />
           <LoomCheckboxField checked={autoDream} onCheckedChange={setAutoDream} disabled={!memoryEnabled} label="允许 AutoDream 后台整理" />
         </div>
-        <label className="field settings-grid__wide">
-          <span>Markdown 根目录 <em className="src">留空 = ~/.loom/memory</em></span>
-          <input value={memoryRoot} onChange={(e) => setMemoryRoot(e.target.value)} placeholder="~/.loom/memory" />
-        </label>
       </section>
 
       <div className="settings-foot settings-actions">
