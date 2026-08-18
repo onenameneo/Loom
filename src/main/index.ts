@@ -304,6 +304,19 @@ function createWindow() {
   });
   const windowRef = win;
   markRendererNotReady(windowRef);
+  const editableContextMenu = Menu.buildFromTemplate([
+    { role: "cut" },
+    { role: "copy" },
+    { role: "paste" },
+    { role: "selectAll" },
+  ]);
+  windowRef.webContents.on("context-menu", (event, params) => {
+    const inputFieldType = (params as typeof params & { inputFieldType?: string }).inputFieldType;
+    const isTextEditor = params.isEditable || inputFieldType === "plainText" || inputFieldType === "password";
+    if (!isTextEditor) return;
+    event.preventDefault();
+    editableContextMenu.popup({ window: windowRef, frame: params.frame ?? undefined });
+  });
   if (store && !monitor) monitor = registerMonitor({ getWin: () => win, store });
   if (store && !acp) acp = registerAcp({ getWin: () => win, store });
   if (store && !collector) collector = registerCollector({ getWin: () => win, store });

@@ -118,4 +118,18 @@ describe("main/preload project IPC contracts", () => {
     expect(envSource).toContain("approvalPolicy");
     expect(envSource).toContain("normalizedTarget");
   });
+
+  it("registers a native editable context menu for Electron text controls", () => {
+    const mainSource = readSource("src/main/index.ts");
+
+    expect(mainSource).toContain("webContents.on(\"context-menu\"");
+    expect(mainSource).toContain("params.isEditable");
+    expect(mainSource).toContain('role: "cut"');
+    expect(mainSource).toContain('role: "copy"');
+    expect(mainSource).toContain('role: "paste"');
+    expect(mainSource).toContain('role: "selectAll"');
+    expect(mainSource).toContain("event.preventDefault()");
+    expect(mainSource).toContain('inputFieldType === "plainText"');
+    expect(mainSource).toContain("frame: params.frame");
+  });
 });

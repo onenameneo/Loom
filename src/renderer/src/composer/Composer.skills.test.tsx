@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "./Composer";
@@ -7,6 +7,31 @@ import { Composer } from "./Composer";
 afterEach(() => cleanup());
 
 describe("Composer active skills", () => {
+  it("requests a draft-aware context preview for the current attachments and skills", async () => {
+    const budget = vi.fn(async () => ({ safeInputBudget: 1_000, projectedInputTokens: 100, status: "ok", source: "estimated" }));
+    (window as any).api = { canvas: { budget, models: vi.fn(async () => []) } };
+    render(
+      <Composer
+        nodeId="node-1"
+        value="draft prompt"
+        onChange={vi.fn()}
+        busy={false}
+        placeholder="Ask"
+        canRegenerate={false}
+        onSubmit={vi.fn()}
+        onStop={vi.fn()}
+        onOpenPersona={vi.fn()}
+        onClearNode={vi.fn()}
+        onRegenerate={vi.fn()}
+        onSetModel={vi.fn()}
+        onCompact={vi.fn()}
+        activeSkills={[{ id: "skill-a", name: "Skill A", description: "A", sourceScope: "global", sourcePath: "/a", hash: "a", diagnostics: [] }]}
+      />,
+    );
+
+    await waitFor(() => expect(budget).toHaveBeenCalledWith("node-1", expect.objectContaining({ text: "draft prompt", skillIds: ["skill-a"] })));
+  });
+
   it("shows enabled skills inside the composer surface", () => {
     render(
       <Composer

@@ -1,4 +1,5 @@
 import type { AgentMetricTotals, LlmUsage } from "../../../common/telemetry";
+import type { ComposerBudgetPreviewInput } from "../../../common/composerBudget";
 
 export {};
 
@@ -97,6 +98,8 @@ export interface NodeBudget {
   overflowTokens?: number;
   status?: "ok" | "needs-compaction" | "fixed-context-overflow" | "model-unavailable";
   source?: "exact" | "mixed" | "estimated";
+  diagnostic?: string;
+  preview?: { files: number; images: number; skills: number; errors?: Array<{ root: string; path: string; code: string; message: string }> };
 }
 export interface CanvasEvent {
   nodeId: string;
@@ -569,7 +572,7 @@ declare global {
         setModel: (nodeId: string, model: string | { providerId: string; modelId: string }) => Promise<{ ok: boolean }>;
         setThinkingLevel: (nodeId: string, thinkingLevel: ThinkingLevel) => Promise<{ ok: boolean }>;
         models: () => Promise<ModelListItem[]>;
-        budget: (nodeId: string) => Promise<NodeBudget>;
+        budget: (nodeId: string, preview?: ComposerBudgetPreviewInput) => Promise<NodeBudget>;
         trace: (nodeId: string) => Promise<import("./workbench/traceState").TraceSnapshotDto>;
         metrics: (nodeId: string) => Promise<AgentMetricTotals | undefined>;
         onTrace: (listener: (event: import("./workbench/traceState").TraceEventDto) => void) => () => void;

@@ -54,6 +54,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  min-width: 0;
   flex: 1;
   position: relative;
 }
@@ -206,11 +207,14 @@
    只有输入框本体接管交互。ChatView 与画布节点卡片（.card__foot）共用。 */
 .chatview .composer,
 .card__foot {
+  box-sizing: border-box;
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   pointer-events: none;
+  container-type: inline-size;
+  container-name: composer;
 }
 .chatview .composer .composer-wrap,
 .card__foot > * {
@@ -249,12 +253,55 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.composer-telemetry-item { display: inline-flex; align-items: center; min-width: 0; }
+.composer-telemetry-item {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
 .composer-telemetry-label { color: var(--faint); }
 .composer-telemetry-value { color: var(--muted); font-variant-numeric: tabular-nums; }
 .composer-telemetry-divider { margin-right: 7px; color: var(--border-strong); }
 @media (max-width: 640px) {
   .composer-telemetry { justify-content: flex-start; overflow-x: auto; }
+}
+@container composer (max-width: 560px) {
+  .chatview .composer .composer-box {
+    padding: 8px;
+    border-radius: var(--r-md);
+  }
+  .composer-bar {
+    gap: 6px;
+  }
+  .model-switcher-root {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+  }
+  .model-switcher {
+    width: 100%;
+    min-width: 0;
+  }
+  .model-switcher__label {
+    flex: 1 1 auto;
+  }
+  .context-budget-indicator {
+    margin-left: 0;
+  }
+  .composer-telemetry {
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .composer-telemetry::-webkit-scrollbar {
+    display: none;
+  }
+}
+@container composer (max-width: 450px) {
+  /* 窄聊天列优先保留输入、上下文和发送；模型仍可通过设置/默认配置管理。 */
+  .model-switcher-root {
+    display: none;
+  }
 }
 .chatview .composer-wrap {
   width: min(720px, 100%);
@@ -288,6 +335,7 @@
   line-height: 1.5;
   field-sizing: content;
   max-height: 160px;
+  min-height: 48px;
   padding: 4px 0;
 }
 .chatview .composer textarea::placeholder {
@@ -1213,6 +1261,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 .composer-file {
   display: none;
@@ -1801,7 +1850,7 @@
 
 /* 圆形 accent 发送键（同 ChatView，内嵌输入框右下）；忙时变停止 */
 .round-send {
-  margin-left: auto;
+  margin-left: 0;
   width: 26px;
   height: 26px;
   flex: none;
@@ -1812,6 +1861,154 @@
   cursor: pointer;
   display: grid;
   place-items: center;
+}
+.context-budget-indicator {
+  position: relative;
+  margin-left: auto;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: 8px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.context-budget-indicator:hover,
+.context-budget-indicator:focus-visible {
+  color: var(--text);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.context-budget-indicator::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-pill);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.72);
+  transition:
+    opacity 180ms var(--motion-curve, cubic-bezier(0.2, 0, 0, 1)),
+    transform 240ms var(--motion-curve, cubic-bezier(0.2, 0, 0, 1));
+}
+.context-budget-indicator:hover::before,
+.context-budget-indicator:focus-visible::before {
+  opacity: 1;
+  transform: scale(1);
+}
+.context-budget-indicator.is-warning { color: var(--warn); }
+.context-budget-indicator.is-critical { color: var(--err); }
+.context-budget-indicator.is-model-unavailable { color: var(--faint); }
+.context-budget-indicator__ring {
+  position: absolute;
+  inset: 2px;
+  width: 26px;
+  height: 26px;
+  transform: rotate(-90deg);
+  transition: transform 240ms var(--motion-curve, cubic-bezier(0.2, 0, 0, 1));
+}
+.context-budget-indicator:hover .context-budget-indicator__ring,
+.context-budget-indicator:focus-visible .context-budget-indicator__ring {
+  transform: rotate(-90deg) scale(1.06);
+}
+.context-budget-indicator__track,
+.context-budget-indicator__progress {
+  fill: none;
+  stroke-width: 1.8;
+}
+.context-budget-indicator__track { stroke: var(--border); }
+.context-budget-indicator__progress {
+  stroke: currentColor;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 320ms var(--motion-curve, cubic-bezier(0.2, 0, 0, 1));
+}
+.context-budget-indicator__value {
+  position: relative;
+  z-index: 1;
+  max-width: 25px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.context-budget-popover {
+  width: min(300px, calc(100vw - 32px));
+  padding: 10px;
+}
+.context-budget-popover__title {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.context-budget-popover__status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.context-budget-popover__status[data-status="warning"] { color: var(--warn); }
+.context-budget-popover__status[data-status="critical"] { color: var(--err); }
+.context-budget-popover__status[data-status="model-unavailable"] { color: var(--faint); }
+.context-budget-popover__status small,
+.context-budget-popover__attachments {
+  color: var(--faint);
+  font: 10px/1.4 var(--font-mono);
+}
+.context-budget-popover__grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 5px 10px;
+  margin: 0;
+  font: 10px/1.4 var(--font-mono);
+}
+.context-budget-popover__grid dt { color: var(--faint); }
+.context-budget-popover__grid dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+.context-budget-popover__diagnostic {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--warn);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.context-budget-popover__attachments { margin-top: 8px; }
+.context-budget-popover__compact {
+  width: 100%;
+  min-height: 28px;
+  margin-top: 10px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+  font: 11px var(--font-ui);
+}
+.context-budget-popover__compact:hover,
+.context-budget-popover__compact:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+@media (prefers-reduced-motion: reduce) {
+  .context-budget-indicator::before,
+  .context-budget-indicator__ring,
+  .context-budget-indicator__progress { transition: none; }
 }
 .round-send svg {
   width: 16px;

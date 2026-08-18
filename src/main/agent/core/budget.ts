@@ -26,6 +26,13 @@ export interface Budget {
   overflowTokens?: number;
   status?: ContextBudgetStatus;
   source?: TokenAccountingSource;
+  diagnostic?: string;
+  preview?: {
+    files: number;
+    images: number;
+    skills: number;
+    errors?: Array<{ root: string; path: string; code: string; message: string }>;
+  };
 }
 
 export type TokenAccountingSource = "exact" | "mixed" | "estimated";

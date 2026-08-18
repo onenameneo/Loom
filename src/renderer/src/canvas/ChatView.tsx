@@ -627,6 +627,7 @@ export default function ChatView({
           onSetModel={setModel}
           onSetThinkingLevel={setThinkingLevel}
           onCompact={compactNode}
+          budgetRefreshKey={msgs.length}
           onEnableSkill={enableSkill}
           onDisableSkill={disableDraftSkill}
         />

@@ -1350,6 +1350,54 @@ describe("createAgentSession turn runner integration", () => {
     }
   });
 
+  it("includes pending composer text and images in a budget preview without persisting them", async () => {
+    const store = new MemoryStore([user("short")]);
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "budget-preview" },
+      clock: { now: () => 261 },
+      getApiKey: () => "key",
+      resolveContextModel: contextModel,
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    const before = await session.budget("n1");
+    const preview = await (session as any).budget("n1", {
+      text: "preview text " + "x".repeat(4_000),
+      images: [{ data: "aGVsbG8=", mimeType: "image/png" }],
+    });
+
+    expect(preview.projectedInputTokens).toBeGreaterThan(before.projectedInputTokens ?? 0);
+    expect(store.listMessages("n1")).toHaveLength(1);
+  });
+
+  it("returns bounded file mention diagnostics in a preview without authorizing the send", async () => {
+    const root = mkdtempSync(join(tmpdir(), "loom-budget-preview-mention-"));
+    const store = new MemoryStore([user("short")]);
+    store.projects[0]!.sourceRoots = [root];
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "budget-preview-mention" },
+      clock: { now: () => 262 },
+      getApiKey: () => "key",
+      resolveContextModel: contextModel,
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    try {
+      const preview = await (session as any).budget("n1", {
+        text: "inspect this",
+        mentions: [{ root: "project:0", path: "missing.ts" }],
+      });
+      expect(preview.preview).toMatchObject({ files: 0, errors: [{ path: "missing.ts" }] });
+      expect(store.listMessages("n1")).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("lets manual compaction bypass the automatic threshold gate", async () => {
     const store = new MemoryStore([user("manual old question " + "x".repeat(20_000)), assistant("manual old answer " + "x".repeat(20_000))]);
     const session = createAgentSession({

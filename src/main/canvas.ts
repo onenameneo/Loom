@@ -19,6 +19,7 @@ import { loadScopedModelSettings, resolveStoredModelSelection } from "./modelCon
 import type { ContextModelMetadata } from "./agent/core/budget";
 import type { MemoryRuntimePort } from "./memory/runtime";
 import type { FileMentionRef } from "../common/fileMentions";
+import type { ComposerBudgetPreviewInput } from "../common/composerBudget";
 
 // ---------------------------------------------------------------------------
 // 画布引擎接线（主进程）：组装洋葱四圈 + 把 node:* IPC 绑定到 ② runtime。
@@ -145,7 +146,9 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     runtime.updateLayouts(items),
   );
   ipcMain.handle("node:delete", (_e, nodeId: string) => runtime.deleteNode(nodeId));
-  ipcMain.handle("node:budget", (_e, nodeId: string) => runtime.budget(nodeId));
+  ipcMain.handle("node:budget", (_e, arg: string | { nodeId: string; preview?: ComposerBudgetPreviewInput }) =>
+    typeof arg === "string" ? runtime.budget(arg) : runtime.budget(arg.nodeId, arg.preview),
+  );
   ipcMain.handle("node:trace", (_e, nodeId: string) => runtime.trace(nodeId));
   ipcMain.handle("node:metrics", (_e, nodeId: string) => runtime.metrics(nodeId));
   ipcMain.handle("node:models", () => runtime.models());

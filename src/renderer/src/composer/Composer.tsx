@@ -8,6 +8,8 @@ import type { CmdCtx } from "./commands";
 import { CommandMenu } from "./CommandMenu";
 import { SlashPalette, type SlashPaletteHandle } from "./SlashPalette";
 import { findFileMentionTrigger } from "./fileMentionParser";
+import { ContextBudgetIndicator } from "./ContextBudgetIndicator";
+import { useComposerBudget } from "./useComposerBudget";
 
 export type ComposerImage = { data: string; mimeType: string };
 type ComposerSubmitResult = { ok: boolean; reason?: string; errors?: Array<{ path: string; message: string }> };
@@ -43,6 +45,7 @@ export function Composer({
   onCompact,
   onEnableSkill,
   onDisableSkill,
+  budgetRefreshKey,
 }: {
   nodeId: string;
   value: string;
@@ -66,6 +69,7 @@ export function Composer({
   onCompact: () => void;
   onEnableSkill?: (skillId: string) => void;
   onDisableSkill?: (skillId: string) => void;
+  budgetRefreshKey?: string | number;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -258,6 +262,14 @@ export function Composer({
   function selectThinkingLevel(level: ThinkingLevel) {
     onSetThinkingLevel(level);
   }
+
+  const budgetPreview = useMemo(() => ({
+    text: value,
+    images,
+    skillIds: (activeSkills ?? []).map((skill) => skill.id),
+    mentions,
+  }), [activeSkills, images, mentions, value]);
+  const { budget } = useComposerBudget(nodeId, budgetPreview, `${model ?? ""}:${busy ? "busy" : "idle"}:${budgetRefreshKey ?? ""}`);
 
   function selectThinkingIndex(index: number) {
     const level = thinkingOptions[index];
@@ -655,6 +667,7 @@ export function Composer({
               </div>
             )}
           </div>
+          <ContextBudgetIndicator budget={budget} onCompact={onCompact} compactBusy={busy} />
           <button
             type="button"
             className={`round-send ${busy ? "is-stop" : ""}`}

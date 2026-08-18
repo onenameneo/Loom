@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { FileMentionRef } from "../common/fileMentions";
+import type { ComposerBudgetPreviewInput } from "../common/composerBudget";
 import type { AgentMetricTotals } from "../common/telemetry";
 
 type CanvasEvent = { nodeId: string; type: string; payload?: unknown };
@@ -113,7 +114,7 @@ const api = {
     setThinkingLevel: (nodeId: string, thinkingLevel: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("node:setThinkingLevel", { nodeId, thinkingLevel }),
     models: (): Promise<{ id: string; name: string }[]> => ipcRenderer.invoke("node:models"),
-    budget: (nodeId: string): Promise<{
+    budget: (nodeId: string, preview?: ComposerBudgetPreviewInput): Promise<{
       withoutAncestors: number;
       withAncestors: number;
       estimated: boolean;
@@ -127,8 +128,10 @@ const api = {
       overflowTokens?: number;
       status?: "ok" | "needs-compaction" | "fixed-context-overflow" | "model-unavailable";
       source?: "exact" | "mixed" | "estimated";
+      diagnostic?: string;
+      preview?: { files: number; images: number; skills: number; errors?: Array<{ root: string; path: string; code: string; message: string }> };
     }> =>
-      ipcRenderer.invoke("node:budget", nodeId),
+      ipcRenderer.invoke("node:budget", preview ? { nodeId, preview } : nodeId),
     trace: (nodeId: string): Promise<any> => ipcRenderer.invoke("node:trace", nodeId),
     metrics: (nodeId: string): Promise<AgentMetricTotals | undefined> => ipcRenderer.invoke("node:metrics", nodeId),
     onTrace: (listener: (snapshot: any) => void): (() => void) => {

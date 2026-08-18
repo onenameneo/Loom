@@ -859,6 +859,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           onSetModel={setModel}
           onSetThinkingLevel={setThinkingLevel}
           onCompact={compactNode}
+          budgetRefreshKey={msgs.length}
           onEnableSkill={enableSkill}
           onDisableSkill={disableDraftSkill}
           telemetryLine={<ComposerTelemetryLine metrics={metrics} />}

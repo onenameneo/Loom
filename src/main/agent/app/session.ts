@@ -74,6 +74,7 @@ import {
 import { createNodeRuntimeStore } from "./nodeRuntime";
 import type { FileCandidate, FileMentionRef } from "../../../common/fileMentions";
 import { findProjectFileCandidates, resolveProjectFileMentions } from "../tools/projectFiles/fileMentions";
+import type { ComposerBudgetPreviewInput } from "../../../common/composerBudget";
 import type { RetrievalQuery } from "../../memory/retrieval";
 import type { MemoryFileAccess } from "../../memory/fileAccess";
 import {
@@ -469,10 +470,10 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     });
   }
 
-  async function budgetOf(nodeId: string): Promise<Budget> {
+  async function budgetOf(nodeId: string, pendingUserInput?: AgentMessage): Promise<Budget> {
     const node = loadNode(nodeId);
     if (!node) return { withoutAncestors: 0, withAncestors: 0, estimated: true };
-    const contextBudget = await contextBudgetOf(nodeId);
+    const contextBudget = await contextBudgetOf(nodeId, pendingUserInput);
     if (!contextBudget) {
       const projectedTokens = (messages: Message[]) => estTokens(messages.reduce((sum, msg) => sum + textOf(msg as AgentMessage).length, 0));
       const skillIndex = compileAvailableSkillsIndex(catalogFor(nodeId).skills);
@@ -501,6 +502,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       overflowTokens: contextBudget.overflowTokens,
       status: contextBudget.status,
       source: contextBudget.source,
+      diagnostic: contextBudget.model?.diagnostic,
     };
   }
 
@@ -1505,8 +1507,52 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     for (const session of store.listSessions(projectId)) disposeSession(session.id);
   }
 
-  async function budget(nodeId: string) {
-    return budgetOf(nodeId);
+  async function budget(nodeId: string, preview?: ComposerBudgetPreviewInput) {
+    if (!preview) return budgetOf(nodeId);
+    const node = loadNode(nodeId);
+    if (!node) return budgetOf(nodeId);
+    const roots = sourceRootsFor(nodeId);
+    const mentionResolution = preview.mentions?.length
+      ? await resolveProjectFileMentions(roots, preview.mentions)
+      : { files: [], errors: [], metadata: { requested: 0, resolved: 0, rejected: 0, totalBytes: 0 } };
+    const selectedSkills = [...new Set((preview.skillIds ?? []).map((id) => id.trim()).filter(Boolean))]
+      .map((id) => catalogFor(nodeId).activeSkills.find((skill) => skill.id === id))
+      .filter((skill): skill is NonNullable<typeof skill> => Boolean(skill));
+    const imageHints = (preview.images ?? [])
+      .filter((image) => image.data && image.mimeType)
+      .map((image) => `[attached image ${image.mimeType}, ${Math.min(image.data.length, 2_000_000)} base64 chars]`);
+    const fileContext = mentionResolution.files.length
+      ? [
+          "<loom-file-context>",
+          ...mentionResolution.files.map((file) => `### @${file.path}\n${file.content}`),
+          "</loom-file-context>",
+        ].join("\n\n")
+      : "";
+    const skillContext = selectedSkills.length
+      ? [
+          "<loom-pending-skills>",
+          ...selectedSkills.map((skill) => `${skill.name} (${skill.id})\n${skill.description}`),
+          "</loom-pending-skills>",
+        ].join("\n\n")
+      : "";
+    const text = [preview.text?.trim() ?? "", fileContext, skillContext, ...imageHints].filter(Boolean).join("\n\n");
+    const images = (preview.images ?? []).filter((image) => image.data && image.mimeType);
+    const content = images.length
+      ? [
+          ...(text ? [{ type: "text", text } satisfies TextContent] : []),
+          ...images.map((image) => ({ type: "image", data: image.data, mimeType: image.mimeType }) satisfies ImageContent),
+        ]
+      : text;
+    const result = await budgetOf(nodeId, { role: "user", content, timestamp: clock.now() } as AgentMessage);
+    return {
+      ...result,
+      preview: {
+        files: mentionResolution.files.length,
+        images: images.length,
+        skills: selectedSkills.length,
+        errors: mentionResolution.errors.length > 0 ? mentionResolution.errors : undefined,
+      },
+    };
   }
 
   function models() {
