@@ -80,7 +80,7 @@ export function WindowControlsChrome({
       )}
       <button
         ref={toggleRef}
-        className="titlebar-button window-sidebar-toggle chrome-no-drag"
+        className="titlebar-button window-sidebar-toggle chrome-no-drag grid size-7 place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/7 hover:text-loom-text"
         type="button"
         onClick={() => {
           if (!transitioning) onToggleSidebar();
@@ -266,7 +266,7 @@ export function AppChrome({
         </aside>
       )}
       <section className="content-column">
-        <AppTitlebar collapsed={shell.phase === "collapsed"} platform={platform} trailing={onToggleWorkbench && <button className="titlebar-button workbench-toggle" type="button" aria-label={workbenchOpen ? "关闭工作台" : "打开工作台"} aria-expanded={workbenchOpen} onClick={onToggleWorkbench}><PanelRight size={16} /></button>} />
+        <AppTitlebar collapsed={shell.phase === "collapsed"} platform={platform} trailing={onToggleWorkbench && <button className="titlebar-button workbench-toggle grid size-7 place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/7 hover:text-loom-text" type="button" aria-label={workbenchOpen ? "关闭工作台" : "打开工作台"} aria-expanded={workbenchOpen} onClick={onToggleWorkbench}><PanelRight size={16} /></button>} />
         <main className="main">{main}</main>
       </section>
       {workbenchMounted && (

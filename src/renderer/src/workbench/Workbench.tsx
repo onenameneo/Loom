@@ -2,6 +2,7 @@ import { Activity, ChevronRight, Copy, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { readUsageFacts, type AgentMetricTotals, type UsageFacts } from "../../../common/telemetry";
+import { cn } from "../ui/styles";
 import {
   applyTraceEvent,
   buildSpanTree,
@@ -439,32 +440,32 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
     }
     return () => { dead = true; off(); };
   }, [nodeId, tabs]);
-  if (!tabs.length) return <div className="workbench-empty"><div className="workbench-choices" role="menu" aria-label="打开工作台页面"><button role="menuitem" onClick={() => open()}><Activity size={18} /><span>Trace</span><kbd>⌘R</kbd></button></div></div>;
+  if (!tabs.length) return <div className="grid h-full place-items-center p-loom-4"><div className="grid w-[min(100%,360px)] gap-loom-1" role="menu" aria-label="打开工作台页面"><button className="flex w-full cursor-pointer items-center gap-loom-3 rounded-loom-md border-0 bg-transparent p-loom-3 text-left text-[13px] font-medium text-loom-text hover:bg-loom-surface-2" role="menuitem" onClick={() => open()}><Activity size={18} /><span className="flex-1">Trace</span><kbd className="rounded-loom-pill bg-loom-surface-2 px-[7px] py-[2px] font-loom-mono text-[10px] text-loom-muted">⌘R</kbd></button></div></div>;
   const menu = menuOpen && menuPosition ? createPortal(
-    <div ref={menuRef} className="workbench-menu" role="menu" tabIndex={-1} style={menuPosition} onKeyDown={(event) => { if (event.key === "Escape") { setMenuOpen(false); addRef.current?.focus(); } }}>
+    <div ref={menuRef} className="fixed z-[2] w-40 rounded-loom-md border border-loom-border bg-loom-surface p-loom-1 shadow-loom-float" role="menu" tabIndex={-1} style={menuPosition} onKeyDown={(event) => { if (event.key === "Escape") { setMenuOpen(false); addRef.current?.focus(); } }}>
       {(Object.keys(WORKBENCH_PAGES) as WorkbenchPageId[]).map((page) => {
         const PageIcon = WORKBENCH_PAGES[page].icon;
-        return <button key={page} role="menuitem" onClick={() => open(page)}><PageIcon size={14} />{WORKBENCH_PAGES[page].label}</button>;
+        return <button className="flex w-full cursor-pointer items-center gap-loom-2 rounded-loom-sm border-0 bg-transparent p-loom-2 text-left text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text focus-visible:outline-2 focus-visible:outline-loom-accent focus-visible:outline-offset-1" key={page} role="menuitem" onClick={() => open(page)}><PageIcon size={14} />{WORKBENCH_PAGES[page].label}</button>;
       })}
     </div>,
     document.getElementById("app-overlay-root") ?? document.body,
   ) : null;
-  return <div className="workbench-page">
-    <div className="workbench-tabs" role="tablist">
+  return <div className="flex h-full min-w-0 flex-col">
+    <div className="flex min-h-11 flex-none items-center gap-loom-2 overflow-x-auto border-b border-loom-border p-loom-2" role="tablist">
       {tabs.map((page) => {
         const PageIcon = WORKBENCH_PAGES[page].icon;
-        return <div className={`workbench-tab ${selectedTab === page ? "active" : ""}`} role="tab" tabIndex={0} aria-selected={selectedTab === page} key={page} onClick={() => setSelectedTab(page)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedTab(page); } }}><PageIcon size={14} /><span>{WORKBENCH_PAGES[page].label}</span><button aria-label={`关闭 ${WORKBENCH_PAGES[page].label}`} onClick={(event) => { event.stopPropagation(); close(page); }}><X size={13} /></button></div>;
+        return <div className={cn("inline-flex min-w-0 max-w-[180px] cursor-pointer items-center gap-loom-2 rounded-loom-md border border-transparent bg-loom-surface-2 px-2 py-1.5 text-[12px] text-loom-text focus-visible:outline focus-visible:outline-loom-accent focus-visible:outline-offset-2", selectedTab === page && "border-loom-border bg-loom-surface")} role="tab" tabIndex={0} aria-selected={selectedTab === page} key={page} onClick={() => setSelectedTab(page)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedTab(page); } }}><PageIcon size={14} /><span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{WORKBENCH_PAGES[page].label}</span><button className="rounded-loom-sm border-0 bg-transparent p-[2px] text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text focus-visible:outline focus-visible:outline-loom-accent" aria-label={`关闭 ${WORKBENCH_PAGES[page].label}`} onClick={(event) => { event.stopPropagation(); close(page); }}><X size={13} /></button></div>;
       })}
-      <div className="workbench-add-wrap"><button ref={addRef} className="workbench-add" aria-label="打开页面" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => { const rect = addRef.current?.getBoundingClientRect(); setMenuPosition(rect ? { top: rect.bottom + 4, left: Math.max(8, rect.right - 160) } : null); setMenuOpen((open) => !open); }}><Plus size={16} /></button></div>
+      <div className="relative"><button ref={addRef} className="grid h-7 w-7 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-[2px] text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text focus-visible:outline focus-visible:outline-loom-accent" aria-label="打开页面" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => { const rect = addRef.current?.getBoundingClientRect(); setMenuPosition(rect ? { top: rect.bottom + 4, left: Math.max(8, rect.right - 160) } : null); setMenuOpen((open) => !open); }}><Plus size={16} /></button></div>
     </div>
     {menu}
-    {selectedTab === "trace" && <div ref={inspectorRef} className="trace-inspector" role="tabpanel" aria-label="Trace" onScroll={(event) => {
+    {selectedTab === "trace" && <div ref={inspectorRef} className="min-h-0 min-w-0 flex-1 overflow-auto p-loom-3 [&_p]:text-[12px] [&_p]:leading-[1.6] [&_p]:text-loom-muted" role="tabpanel" aria-label="Trace" onScroll={(event) => {
       const element = event.currentTarget;
       const atNewest = element.scrollTop <= 24;
       readingHistoryRef.current = !atNewest;
       if (atNewest) setHasNewActivity(false);
     }}>
-      {hasNewActivity && <button className="trace-new-activity" onClick={() => { inspectorRef.current?.scrollTo({ top: 0, behavior: "smooth" }); readingHistoryRef.current = false; setHasNewActivity(false); }}>有新的 Trace 活动</button>}
+      {hasNewActivity && <button className="sticky top-0 z-[1] mb-loom-2 cursor-pointer rounded-loom-sm border border-loom-border bg-loom-surface px-loom-2 py-loom-1 font-loom-ui text-[10px] text-loom-text focus-visible:outline focus-visible:outline-loom-accent" onClick={() => { inspectorRef.current?.scrollTo({ top: 0, behavior: "smooth" }); readingHistoryRef.current = false; setHasNewActivity(false); }}>有新的 Trace 活动</button>}
       {metrics && <section className="trace-section trace-metrics-summary" aria-label="Usage summary">
         <div className="trace-section-heading"><div><h3>Usage summary</h3><p>当前节点的历史累计</p></div><span className="trace-metrics-summary__scope">LIFETIME</span></div>
         <div className="trace-metrics-summary__hero">

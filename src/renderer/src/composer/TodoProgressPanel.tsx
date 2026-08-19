@@ -33,7 +33,7 @@ export function TodoProgressPanel({ plan }: { plan?: TodoPlanSnapshot }) {
   };
   return (
     <Collapsible.Root
-      className="todo-progress-panel group box-border w-full overflow-hidden rounded-loom-md border border-loom-border bg-loom-surface transition-[border-color] duration-[160ms] ease-[cubic-bezier(0.2,0,0,1)]"
+      className="todo-progress-panel group box-border w-full overflow-hidden rounded-loom-md border border-loom-border bg-loom-surface transition-[border-color] duration-150 ease-loom"
       role="region"
       aria-label="执行计划"
       open={expanded}
@@ -41,7 +41,7 @@ export function TodoProgressPanel({ plan }: { plan?: TodoPlanSnapshot }) {
     >
       <Collapsible.Trigger asChild>
         <button
-          className="todo-progress-header flex min-h-[38px] w-full cursor-pointer items-center gap-2 border-0 bg-transparent px-[10px] py-[7px] text-left font-[inherit] text-loom-muted hover:bg-loom-surface-2 active:bg-loom-surface-2 focus-visible:outline-2 focus-visible:outline-loom-accent focus-visible:outline-offset-[-2px]"
+          className="todo-progress-header flex min-h-[38px] w-full cursor-pointer items-center gap-loom-2 border-0 bg-transparent px-[10px] py-[7px] text-left font-[inherit] text-loom-muted hover:bg-loom-surface-2 active:bg-loom-surface-2 focus-visible:outline-2 focus-visible:outline-loom-accent focus-visible:outline-offset-[-2px]"
           type="button"
           aria-label="展开或折叠执行计划"
         >
@@ -54,7 +54,7 @@ export function TodoProgressPanel({ plan }: { plan?: TodoPlanSnapshot }) {
         <div className="todo-progress-clip max-h-[360px] overflow-hidden opacity-100 transition-[max-height,opacity] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none group-data-[state=closed]:max-h-0 group-data-[state=closed]:opacity-0">
           <div className="todo-progress-list max-h-[180px] min-h-0 overflow-y-auto px-[10px] pb-[9px]" role="list" aria-live="polite">
             {plan.todos.map((todo) => (
-              <div className={`todo-progress-item flex items-start gap-[7px] py-[3px] text-[11px] leading-[1.35] ${itemClasses[todo.status]}`} role="listitem" key={todo.id}>
+              <div className={`todo-progress-item flex items-start gap-loom-2 py-[3px] text-[11px] leading-[1.35] ${itemClasses[todo.status]}`} role="listitem" key={todo.id}>
                 <span className="todo-progress-status inline-flex shrink-0 text-loom-faint" aria-hidden="true">{icon(todo.status)}</span>
                 <span className="todo-progress-item-text min-w-0 break-words [overflow-wrap:anywhere]">{todo.content}</span>
               </div>

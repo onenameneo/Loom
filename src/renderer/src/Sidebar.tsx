@@ -21,6 +21,7 @@ import {
   type SurfaceCtx,
 } from "./surfaces";
 import { ConfirmDialog, RenameDialog, Tip } from "./ui/dialogs";
+import { cn } from "./ui/styles";
 import { selectProjects, selectSessionsForProject, useWorkspaceStore } from "./workspace/store";
 
 const SIDEBAR_PROJECT_EXPANSION_KEY = "loom:sidebar:expanded-projects";
@@ -120,13 +121,13 @@ function SidebarSessionRow({
   return (
     <div className={`sb-session-row sb-session-header ${active ? "active" : ""}`}>
       <button
-        className="sb-session-toggle"
+        className="sb-session-toggle grid h-7 w-5 shrink-0 cursor-pointer place-items-center border-0 bg-transparent p-0 text-loom-faint"
         aria-label={`${expanded ? "折叠" : "展开"}${session.title}`}
         onClick={onToggle}
       >
         {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
       </button>
-      <button className="sb-session-title" onClick={onClick} aria-label={session.title}>
+      <button className="sb-session-title min-w-0 flex-1 cursor-pointer overflow-hidden border-0 bg-transparent px-[2px] py-1 text-left text-[11px] text-loom-muted" onClick={onClick} aria-label={session.title}>
         <span>{session.title}</span>
       </button>
       {actions}
@@ -359,7 +360,7 @@ export default function Sidebar({
     // 两组固定常显，让「有哪些工具」的结构一目了然；空组给一行提示。
     return (
       <Fragment key={tool}>
-        <button className="sb-label sb-agent-label" onClick={() => toggleExpand(groupId)}>
+        <button className="sb-label sb-agent-label flex cursor-pointer items-center gap-loom-2 border-0 bg-transparent px-[9px] pb-[6px] pt-loom-4 text-[10px] font-medium uppercase tracking-[0.6px] text-loom-faint" onClick={() => toggleExpand(groupId)}>
           {isExp ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
           <ToolIcon size={13} />
           <span>{TOOL_SHORT_LABEL[tool]}</span>
@@ -423,7 +424,11 @@ export default function Sidebar({
     return (
       <Fragment key={w.id}>
         <div
-          className={`sb-project ${isProjectSelected ? "active" : ""}`}
+          className={cn(
+            "sb-project relative flex min-h-[38px] w-full min-w-0 items-center gap-[7px] rounded-loom-sm px-[9px] py-[6px] text-[12.5px] text-loom-muted",
+            "cursor-pointer hover:bg-loom-text/6 hover:text-loom-text",
+            isProjectSelected && "active bg-loom-text/9 text-loom-text",
+          )}
           onClick={() => {
             toggleProject(w.id);
           }}
@@ -438,6 +443,7 @@ export default function Sidebar({
           <span className="project-actions">
             <Tip label="新建起点">
               <button
+                className="grid size-6 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/8 hover:text-loom-text"
                 aria-label="新建起点"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -449,6 +455,7 @@ export default function Sidebar({
             </Tip>
             <Tip label={w.pinned ? "取消置顶" : "置顶"}>
               <button
+                className="grid size-6 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/8 hover:text-loom-text"
                 aria-label={w.pinned ? "取消置顶" : "置顶"}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -460,6 +467,7 @@ export default function Sidebar({
             </Tip>
             <Tip label="重命名">
               <button
+                className="grid size-6 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/8 hover:text-loom-text"
                 aria-label="重命名"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -471,6 +479,7 @@ export default function Sidebar({
             </Tip>
             <Tip label="删除">
               <button
+                className="grid size-6 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/8 hover:text-loom-text"
                 aria-label="删除"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -485,7 +494,7 @@ export default function Sidebar({
         <div className={`sb-collapse ${isProjectExpanded ? "open" : ""}`} aria-hidden={!isProjectExpanded}>
           <div className="sb-collapse-inner sb-project-children">
             {ctx.activeProjectId === w.id && projectSessions.length === 0 && (
-              <div className="sb-hint">一个会话 = 一张可分支的画布</div>
+              <div className="sb-hint px-[9px] pb-[6px] pt-[2px] text-[11px] text-loom-faint">一个会话 = 一张可分支的画布</div>
             )}
             {projectSessions.map((session) => {
               const rows = outlineRows((nodeIdsBySessionId[session.id] ?? [])
@@ -544,30 +553,30 @@ export default function Sidebar({
     return (
       <Tip label={`折叠${label}中的项目`}>
       <button
-        className="sb-section-toggle"
+        className="sb-section-toggle grid size-5 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/8 hover:text-loom-text [&>svg]:h-[15px] [&>svg]:w-[15px] [&>svg]:stroke-[1.5]"
         aria-label={`折叠${label}中的项目`}
         onClick={() => {
           setProjectExpanded((current) => new Set([...current].filter((id) => !projectIds.has(id))));
           setSessionColorOpen(null);
         }}
       >
-        <PanelTopClose />
+        <PanelTopClose size={15} strokeWidth={1.5} />
       </button>
     </Tip>
     );
   };
 
   return (
-    <div className="sidebar">
-      <div className="sb-head">
-        <span className="sb-mark">
-          <img src={loomIconUrl} alt="Loom" draggable={false} />
+    <div className="sidebar flex h-full min-w-0 flex-1 flex-col gap-[2px] overflow-hidden px-[10px] pb-[10px] pt-[6px]">
+      <div className="sb-head flex flex-none items-center gap-[9px] px-loom-2 pb-loom-3 pt-loom-2">
+        <span className="sb-mark grid size-7 flex-none place-items-center overflow-hidden rounded-loom-md border border-loom-border bg-loom-surface/80">
+          <img className="block size-[23px] object-contain" src={loomIconUrl} alt="Loom" draggable={false} />
         </span>
-        <span className="sb-word">
-          Loom<small>一起思考</small>
+        <span className="sb-word text-[13.5px] font-semibold">
+          Loom<small className="ml-[5px] text-[11px] font-normal text-loom-faint">一起思考</small>
         </span>
         <Tip label="切换明暗">
-          <button className="theme-toggle" onClick={toggleTheme}>
+          <button className="theme-toggle ml-auto grid size-[26px] flex-none cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-faint hover:bg-loom-text/8 hover:text-loom-text" onClick={toggleTheme}>
             {theme === "light" ? <IconMoon /> : <IconSun />}
           </button>
         </Tip>
@@ -578,41 +587,44 @@ export default function Sidebar({
         return (
           <div
             key={s.id}
-            className={`sb-item ${activeSurface === s.id ? "active" : ""}`}
+            className={cn(
+              "sb-item flex cursor-pointer select-none items-center gap-loom-2 rounded-loom-sm px-[9px] py-[7px] text-[12.5px] text-loom-muted hover:bg-loom-text/6 hover:text-loom-text [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0 [&>svg]:stroke-current",
+              activeSurface === s.id && "active bg-loom-text/8 font-medium text-loom-text",
+            )}
             onClick={() => setSurface(s.id)}
           >
             <s.icon />
             {s.label}
-            {badge != null && <span className="badge-num">{badge}</span>}
+            {badge != null && <span className="badge-num ml-auto font-loom-mono text-[10px] text-loom-accent">{badge}</span>}
           </div>
         );
       })}
 
       {activeSurface === "project" && (
-        <div className="sb-tree-scroll" data-testid="project-tree-scroll">
+        <div className="sb-tree-scroll min-h-0 min-w-0 w-full flex-1 overflow-auto pb-loom-2" data-testid="project-tree-scroll">
           {pinnedProjects.length > 0 && (
             <>
-              <div className="sb-label">
+              <div className="sb-label flex items-center px-[9px] pb-2 pt-loom-4 text-[12.5px] font-semibold text-loom-faint">
                 置顶
-                <span className="sb-section-actions">
+                <span className="sb-section-actions ml-auto inline-flex items-center gap-loom-1">
                   {collapseProjectsButton(pinnedProjects, "置顶")}
                 </span>
               </div>
               {pinnedProjects.map(renderProject)}
             </>
           )}
-          <div className="sb-label">
+          <div className="sb-label flex items-center px-[9px] pb-2 pt-loom-4 text-[12.5px] font-semibold text-loom-faint">
             项目
-            <span className="sb-section-actions">
+            <span className="sb-section-actions ml-auto inline-flex items-center gap-loom-1">
               {collapseProjectsButton(regularProjects, "普通项目")}
               <Tip label="新建项目">
-                <button className="sb-add" aria-label="新建项目" onClick={onOpenCreateProject}>
-                  <IconPlus />
+                <button className="sb-add ml-0 grid size-5 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/8 hover:text-loom-text [&>svg]:h-4 [&>svg]:w-4" aria-label="新建项目" onClick={onOpenCreateProject}>
+                  <IconPlus size={16} strokeWidth={1.5} />
                 </button>
               </Tip>
             </span>
           </div>
-          {projects.length === 0 && <div className="sb-hint">（还没有，点 + 新建）</div>}
+          {projects.length === 0 && <div className="sb-hint px-[9px] pb-[6px] pt-[2px] text-[11px] text-loom-faint">（还没有，点 + 新建）</div>}
           {regularProjects.map(renderProject)}
         </div>
       )}
@@ -621,7 +633,7 @@ export default function Sidebar({
         <>
           {agentTools.map(renderAgentGroup)}
           {sessionViews.length === 0 && unconnectedAgents.length === 0 && (
-            <div className="sb-hint">暂无活动。启用后会显示本地 agent 会话。</div>
+            <div className="sb-hint px-[9px] pb-[6px] pt-[2px] text-[11px] text-loom-faint">暂无活动。启用后会显示本地 agent 会话。</div>
           )}
         </>
       )}

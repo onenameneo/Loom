@@ -20,17 +20,17 @@ export function CodeBlock({ code, lang }: { code: string; lang?: string }) {
   };
 
   return (
-    <div className="codeblock">
-      <div className="codeblock__bar nodrag">
-        <span className="codeblock__lang">{lang || "text"}</span>
-        <button className="codeblock__copy" onClick={copy} title="复制代码">
+    <div className="codeblock my-4 overflow-hidden rounded-loom-md border border-loom-code-border bg-loom-code-bg">
+      <div className="codeblock__bar nodrag flex items-center justify-between border-b border-loom-code-border bg-loom-code-text/5 px-loom-3 py-loom-1">
+        <span className="codeblock__lang font-loom-mono text-[10.5px] tracking-[0.3px] text-loom-muted">{lang || "text"}</span>
+        <button className="codeblock__copy inline-flex items-center gap-loom-1 rounded-loom-sm border border-transparent bg-transparent px-[7px] py-[3px] text-[11px] text-loom-muted hover:bg-loom-code-text/8 hover:text-loom-text" onClick={copy} title="复制代码">
           {copied ? <Check size={13} strokeWidth={2} /> : <Copy size={13} strokeWidth={1.75} />}
           {copied ? "已复制" : "复制"}
         </button>
       </div>
       <Highlight theme={tokenTheme} code={code} language={language}>
         {({ tokens, getLineProps, getTokenProps }) => (
-          <pre className="codeblock__pre">
+          <pre className="codeblock__pre m-0 overflow-x-auto px-[14px] py-loom-3 font-loom-mono text-[12px] leading-[1.6] text-loom-code-text [tab-size:2]">
             {tokens.map((line, i) => (
               <div key={i} {...getLineProps({ line })}>
                 {line.map((token, k) => (

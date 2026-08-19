@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } fr
 import { AlertDialog, Dialog, Popover, Tooltip } from "radix-ui";
 import { Folder, FolderPlus, GitBranch, MessageSquarePlus, X } from "lucide-react";
 import { IconProject } from "../icons";
+import { buttonClassName, cn, dialogActionsClassName, dialogDescriptionClassName, dialogTitleClassName, fieldClassName } from "./styles";
 
 // Radix Primitives（无样式、可访问）+ DESIGN.md token 样式。见 shell.css .dlg-*/.tip。
 
@@ -30,14 +31,14 @@ export function ConfirmDialog({
       <AlertDialog.Portal>
         <AlertDialog.Overlay forceMount className="dlg-overlay" aria-hidden={!open} />
         <AlertDialog.Content forceMount className="dlg-content" aria-hidden={!open}>
-          <AlertDialog.Title className="dlg-title">{title}</AlertDialog.Title>
-          {displayDescription && <AlertDialog.Description className="dlg-desc">{displayDescription}</AlertDialog.Description>}
-          <div className="dlg-actions">
+          <AlertDialog.Title className={cn("dlg-title", dialogTitleClassName)}>{title}</AlertDialog.Title>
+          {displayDescription && <AlertDialog.Description className={cn("dlg-desc", dialogDescriptionClassName)}>{displayDescription}</AlertDialog.Description>}
+          <div className={cn("dlg-actions", dialogActionsClassName)}>
             <AlertDialog.Cancel asChild>
-              <button className="btn" onClick={() => onOpenChange(false)}>取消</button>
+              <button className={buttonClassName()} onClick={() => onOpenChange(false)}>取消</button>
             </AlertDialog.Cancel>
             <AlertDialog.Action asChild>
-              <button className="btn danger" onClick={onConfirm}>{confirmLabel}</button>
+              <button className={buttonClassName("danger")} onClick={onConfirm}>{confirmLabel}</button>
             </AlertDialog.Action>
           </div>
         </AlertDialog.Content>
@@ -132,8 +133,8 @@ export function MessageBranchDialog({
             if (busyRef.current) event.preventDefault();
           }}
         >
-          <Dialog.Title className="dlg-title">从这里创建聊天分支</Dialog.Title>
-          <Dialog.Description className="dlg-desc">
+          <Dialog.Title className={cn("dlg-title", dialogTitleClassName)}>从这里创建聊天分支</Dialog.Title>
+          <Dialog.Description className={cn("dlg-desc", dialogDescriptionClassName)}>
             保留当前聊天窗口，并选择分支继续的位置。
           </Dialog.Description>
           <div className="branch-dialog-options">
@@ -200,9 +201,9 @@ export function RenameDialog({
       <Dialog.Portal>
         <Dialog.Overlay forceMount className="dlg-overlay" aria-hidden={!open} />
         <Dialog.Content forceMount className="dlg-content" aria-hidden={!open}>
-          <Dialog.Title className="dlg-title">{title}</Dialog.Title>
+          <Dialog.Title className={cn("dlg-title", dialogTitleClassName)}>{title}</Dialog.Title>
           <input
-            className="dlg-input"
+            className={cn("dlg-input", fieldClassName)}
             autoFocus
             value={v}
             onChange={(e) => setV(e.target.value)}
@@ -210,11 +211,11 @@ export function RenameDialog({
               if (e.key === "Enter") submit();
             }}
           />
-          <div className="dlg-actions">
+          <div className={cn("dlg-actions", dialogActionsClassName)}>
             <Dialog.Close asChild>
-              <button className="btn">取消</button>
+              <button className={buttonClassName()}>取消</button>
             </Dialog.Close>
-            <button className="btn primary" onClick={submit}>保存</button>
+            <button className={buttonClassName("primary")} onClick={submit}>保存</button>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
@@ -347,8 +348,8 @@ export function CreateProjectDialog({
               <IconProject size={17} />
             </span>
             <div className="project-dialog-heading">
-              <Dialog.Title className="dlg-title">创建项目</Dialog.Title>
-              <Dialog.Description className="dlg-desc project-dialog-description">
+              <Dialog.Title className={cn("dlg-title", dialogTitleClassName)}>创建项目</Dialog.Title>
+              <Dialog.Description className={cn("dlg-desc", dialogDescriptionClassName, "project-dialog-description")}>
                 为工作内容命名，并按需授权 Loom 访问项目目录。
               </Dialog.Description>
             </div>
@@ -410,12 +411,12 @@ export function CreateProjectDialog({
               </section>
               {submitError && <div className="project-submit-error" id={submitErrorId} role="alert">{submitError}</div>}
             </div>
-            <div className="dlg-actions project-dialog-actions">
+            <div className={cn("dlg-actions", dialogActionsClassName, "project-dialog-actions")}>
               <Dialog.Close asChild>
-                <button className="btn" type="button" disabled={busy}>取消</button>
+                <button className={buttonClassName("default", "min-w-[84px] h-9 justify-center py-0")} type="button" disabled={busy}>取消</button>
               </Dialog.Close>
               <button
-                className="btn primary"
+                className={buttonClassName("primary", "min-w-[84px] h-9 justify-center py-0")}
                 type="submit"
                 aria-describedby={submitError ? submitErrorId : undefined}
                 disabled={!name.trim() || busy || picking}

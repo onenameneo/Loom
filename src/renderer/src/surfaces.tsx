@@ -37,7 +37,8 @@ import { IconEye, IconPlus, IconSettings, IconProject } from "./icons";
 import SessionCanvas from "./canvas/SessionCanvas";
 import { useTitlebarActions, useTitlebarContext } from "./titlebar/Titlebar";
 import { ConfirmDialog, Modal } from "./ui/dialogs";
-import { LoomCheckboxField, LoomSelect, LoomSelectGroup, LoomSelectItem } from "./ui/controls";
+import { LoomCheckbox, LoomCheckboxField, LoomSelect, LoomSelectGroup, LoomSelectItem } from "./ui/controls";
+import { buttonClassName, iconButtonClassName } from "./ui/styles";
 import MemoryPanel from "./memory/MemoryPanel";
 
 export interface SurfaceCtx {
@@ -94,7 +95,7 @@ function CreationEmptyState({
     <div className="surface-empty" data-testid="creation-empty-state">
       <div className="big">{title}</div>
       <div className="sub">{description}</div>
-      <button className="btn" onClick={() => void onAction()}>
+      <button className={buttonClassName()} onClick={() => void onAction()}>
         <IconPlus /> {actionLabel}
       </button>
     </div>
@@ -442,7 +443,7 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
           </span>
         )}
         <button
-          className="icon-btn"
+          className={iconButtonClassName()}
           type="button"
           onClick={() => copyPath(activeCwd)}
           aria-label="复制 cwd"
@@ -451,7 +452,7 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
           <Copy size={15} />
         </button>
         <button
-          className="icon-btn monitor-config-btn"
+          className={iconButtonClassName("default", "monitor-config-btn")}
           type="button"
           onClick={openConfig}
           aria-label="活动流配置"
@@ -466,9 +467,9 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
   useTitlebarActions(titlebarActions);
 
   return (
-    <div className="surface-fill monitor-surface">
-      <div className="monitor">
-        <div className="monitor-telemetry" aria-label="活动遥测">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="mx-auto w-full max-w-[980px] flex-1 overflow-y-auto px-loom-5 pb-[52px] pt-loom-5">
+        <div className="mb-loom-4 flex min-w-0 items-center gap-loom-1" aria-label="活动遥测">
           {(["active", "waiting", "idle", "ended"] as LivenessState[]).map((state) => (
             <span className={`telemetry-chip ${state}`} key={state}>
               <span className={`state-dot ${state}`} />
@@ -535,7 +536,7 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
         <div className="settings-modal__panel activity-config-panel">
           <div className="settings-modal__head">
             <h3>活动流接入</h3>
-            <button className="icon-btn" type="button" onClick={() => setConfigOpen(false)} aria-label="关闭" title="关闭">
+            <button className={iconButtonClassName()} type="button" onClick={() => setConfigOpen(false)} aria-label="关闭" title="关闭">
               <X size={16} />
             </button>
           </div>
@@ -553,11 +554,11 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
                 {st?.actionRequired && <p className="activity-note">{st.actionRequired}</p>}
                 <div className="activity-tool-actions">
                   {state === "off" ? (
-                    <button className="btn primary" disabled={busyTool === tool} onClick={() => runConfig("enable", tool)}>
+                    <button className={buttonClassName("primary")} disabled={busyTool === tool} onClick={() => runConfig("enable", tool)}>
                       <Power size={15} /> 启用
                     </button>
                   ) : (
-                    <button className="btn" disabled={busyTool === tool} onClick={() => runConfig("disable", tool)}>
+                    <button className={buttonClassName()} disabled={busyTool === tool} onClick={() => runConfig("disable", tool)}>
                       <PowerOff size={15} /> 断开接入
                     </button>
                   )}
@@ -830,22 +831,22 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const canSaveModel = providerOptions.length > 0 && Boolean(providerId.trim()) && Boolean(baseUrl.trim()) && (useRegistryModel ? selectedModelIds.length > 0 : Boolean(modelId.trim()));
 
   return (
-    <div className="surface-fill settings-surface">
-      <div className="settings">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto">
+      <div className="settings mx-auto min-h-0 w-full max-w-[760px] overflow-visible px-8 pb-16 pt-8">
       <section className="model-config skills-config">
         <div className="model-config__head">
           <div>
             <h3>Skills</h3>
             <p>管理全局与当前项目可用的 Agent Skills。</p>
           </div>
-          <button className="icon-btn" type="button" onClick={reloadSkills} aria-label="重新扫描 Skills" title="重新扫描 Skills"><RefreshCw size={16} /></button>
+          <button className={iconButtonClassName()} type="button" onClick={reloadSkills} aria-label="重新扫描 Skills" title="重新扫描 Skills"><RefreshCw size={16} /></button>
         </div>
         <div className="settings-grid">
           <label className="field settings-grid__wide">
             <span>添加全局来源 <em className="src">不会复制或删除原目录</em></span>
             <div className="settings-inline">
               <input value={skillSourceDraft} onChange={(e) => setSkillSourceDraft(e.target.value)} placeholder="/path/to/skills" />
-              <button className="icon-btn" type="button" onClick={addSkillSource} aria-label="添加 Skill 来源" title="添加 Skill 来源"><Plus size={16} /></button>
+              <button className={iconButtonClassName()} type="button" onClick={addSkillSource} aria-label="添加 Skill 来源" title="添加 Skill 来源"><Plus size={16} /></button>
             </div>
           </label>
         </div>
@@ -863,9 +864,9 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                   </div>
                 </div>
               </div>
-              <button className="icon-btn" type="button" aria-label="查看 Skills" title="查看 Skills" onClick={() => { setSelectedSkillSource(source); setSkillModalOpen(true); }}><Eye size={15} /></button>
-              <button className="icon-btn" type="button" aria-label="打开目录" title="打开目录" onClick={() => window.api.settings.openSkillSource(source.rootPath)}><FolderOpen size={15} /></button>
-              {source.registered && <button className="icon-btn danger" type="button" onClick={() => removeSkillSource(source.rootPath)} aria-label={`移除 ${source.rootPath}`} title="移除来源"><Trash2 size={15} /></button>}
+              <button className={iconButtonClassName()} type="button" aria-label="查看 Skills" title="查看 Skills" onClick={() => { setSelectedSkillSource(source); setSkillModalOpen(true); }}><Eye size={15} /></button>
+              <button className={iconButtonClassName()} type="button" aria-label="打开目录" title="打开目录" onClick={() => window.api.settings.openSkillSource(source.rootPath)}><FolderOpen size={15} /></button>
+              {source.registered && <button className={iconButtonClassName("danger")} type="button" onClick={() => removeSkillSource(source.rootPath)} aria-label={`移除 ${source.rootPath}`} title="移除来源"><Trash2 size={15} /></button>}
             </div>
           ))}
           {(skillCatalog?.sources.length ?? 0) === 0 && <div className="empty-state compact"><div className="empty-state__title">暂无 Skill 来源</div></div>}
@@ -878,7 +879,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
             <h3>模型配置</h3>
             <p>管理已连接 Provider 的模型，并设置全局默认模型。</p>
           </div>
-          <button className="icon-btn primary" type="button" onClick={openAddForm} aria-label="添加模型" title="添加模型"><Plus size={17} /></button>
+          <button className={iconButtonClassName("primary")} type="button" onClick={openAddForm} aria-label="添加模型" title="添加模型"><Plus size={17} /></button>
         </div>
 
         <div className="model-config__block">
@@ -902,8 +903,8 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                       {configuredModels.map((model) => (
                         <span key={model.id} className={`model-chip ${model.available ? "" : "empty"}`}>
                           <span>{model.name}</span>
-                          <button className="icon-btn" type="button" onClick={() => editProviderModel(provider, model)} aria-label="编辑" title={`编辑 ${model.name}`}><Pencil size={13} /></button>
-                          <button className="icon-btn danger" type="button" onClick={() => setPendingDeleteModel({ providerId: provider.id, modelId: model.id, name: model.name })} aria-label="删除" title={`删除 ${model.name}`}><Trash2 size={13} /></button>
+                          <button className={iconButtonClassName()} type="button" onClick={() => editProviderModel(provider, model)} aria-label="编辑" title={`编辑 ${model.name}`}><Pencil size={13} /></button>
+                          <button className={iconButtonClassName("danger")} type="button" onClick={() => setPendingDeleteModel({ providerId: provider.id, modelId: model.id, name: model.name })} aria-label="删除" title={`删除 ${model.name}`}><Trash2 size={13} /></button>
                         </span>
                       ))}
                     </div>
@@ -950,7 +951,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
           <div className="settings-modal__panel">
             <div className="settings-modal__head">
               <h3>{editingModel ? "编辑模型" : "添加模型"}</h3>
-              <button className="icon-btn" type="button" onClick={() => setAddOpen(false)} aria-label="关闭" title="关闭"><X size={16} /></button>
+              <button className={iconButtonClassName()} type="button" onClick={() => setAddOpen(false)} aria-label="关闭" title="关闭"><X size={16} /></button>
             </div>
             {providerOptions.length === 0 && (
               <div className="empty-state compact">
@@ -1000,7 +1001,12 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                             const checked = selectedModelIds.includes(model.id);
                             return (
                               <label key={model.id} className={`model-option ${checked ? "selected" : ""}`}>
-                                <input type="checkbox" checked={checked} onChange={() => toggleRegistryModel(model.id)} />
+                                <LoomCheckbox
+                                  id={`model-option-${model.id}`}
+                                  checked={checked}
+                                  onCheckedChange={() => toggleRegistryModel(model.id)}
+                                  ariaLabel={model.name}
+                                />
                                 <span className="model-option__main">
                                   <strong>{model.name}</strong>
                                   <em>{model.id}</em>
@@ -1072,18 +1078,12 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
             </div>
             {!useRegistryModel && (
               <div className="settings-checks">
-                <label className="check-field">
-                  <input type="checkbox" checked={reasoning} onChange={(e) => setReasoning(e.target.checked)} />
-                  <span>支持推理</span>
-                </label>
-                <label className="check-field">
-                  <input type="checkbox" checked={images} onChange={(e) => setImages(e.target.checked)} />
-                  <span>支持图片输入</span>
-                </label>
+                <LoomCheckboxField checked={reasoning} onCheckedChange={setReasoning} label="支持推理" />
+                <LoomCheckboxField checked={images} onCheckedChange={setImages} label="支持图片输入" />
               </div>
             )}
             <div className="settings-foot">
-              <button className="icon-btn primary" type="button" onClick={addProviderModel} disabled={!canSaveModel} aria-label="保存模型" title="保存模型"><Check size={16} /></button>
+              <button className={iconButtonClassName("primary")} type="button" onClick={addProviderModel} disabled={!canSaveModel} aria-label="保存模型" title="保存模型"><Check size={16} /></button>
             </div>
           </div>
         </Modal>
@@ -1116,10 +1116,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
             </LoomSelect>
           </label>
         </div>
-        <label className="check-field">
-          <input type="checkbox" checked={networkAccess} onChange={(e) => setNetworkAccess(e.target.checked)} />
-          <span>允许命令联网（默认关闭）</span>
-        </label>
+        <LoomCheckboxField checked={networkAccess} onCheckedChange={setNetworkAccess} label="允许命令联网（默认关闭）" />
         <div className="ok-note">推荐：修改当前项目 · 越界时询问 · 我 · 网络关闭。</div>
       </section>
 
@@ -1137,14 +1134,11 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
 
       <section>
         <h3>工作站</h3>
-        <label className="check-field">
-          <input
-            type="checkbox"
-            checked={monitorNotify}
-            onChange={(e) => setMonitorNotify(e.target.checked)}
-          />
-          <span>工作站桌面通知（agent 回合完成 / 需要输入时响声提醒）</span>
-        </label>
+        <LoomCheckboxField
+          checked={monitorNotify}
+          onCheckedChange={setMonitorNotify}
+          label="工作站桌面通知（agent 回合完成 / 需要输入时响声提醒）"
+        />
       </section>
 
       <section className="settings-memory-section">
@@ -1164,7 +1158,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
       </section>
 
       <div className="settings-foot settings-actions">
-        <button className="btn primary" onClick={save}>保存</button>
+        <button className={buttonClassName("primary")} onClick={save}>保存</button>
         {saved && <span className="saved">已保存</span>}
       </div>
       </div>
@@ -1175,7 +1169,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                 <h3>{selectedSkillSource?.scope === "project" ? (selectedSkillSource.projectName ?? "项目来源") : "全局来源"} · Skills</h3>
                 <div className="connection-meta">{selectedSkillSource?.rootPath ?? ""} · {selectedSkillSource?.trusted ? "trusted" : "untrusted"}</div>
               </div>
-              <button className="icon-btn" type="button" onClick={() => setSkillModalOpen(false)} aria-label="关闭 Skills 列表" title="关闭"><X size={16} /></button>
+              <button className={iconButtonClassName()} type="button" onClick={() => setSkillModalOpen(false)} aria-label="关闭 Skills 列表" title="关闭"><X size={16} /></button>
             </div>
             <div className="skills-list skill-detail__list">
               {(skillCatalog?.skills ?? []).filter((skill) => selectedSkillSource && (skill.sourceId === selectedSkillSource.id || skill.rootPath === selectedSkillSource.rootPath)).map((skill) => (

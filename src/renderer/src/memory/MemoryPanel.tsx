@@ -3,6 +3,7 @@ import { Brain, Check, RefreshCw, Trash2, X } from "lucide-react";
 import type { ProjectMeta } from "../env";
 import { ConfirmDialog, Modal, Tip } from "../ui/dialogs";
 import { LoomSelect, LoomSelectItem } from "../ui/controls";
+import { buttonClassName, cn, fieldClassName, iconButtonClassName } from "../ui/styles";
 
 type MemoryRecord = {
   id: string;
@@ -53,6 +54,24 @@ const STATUS_LABEL: Record<MemoryRecord["status"], string> = {
   archived: "archived",
   stale: "stale",
   conflicted: "conflict",
+};
+
+const STATUS_DOT_CLASS: Record<MemoryRecord["status"], string> = {
+  active: "bg-loom-ok",
+  candidate: "bg-loom-warn",
+  rejected: "bg-loom-err",
+  archived: "bg-loom-muted",
+  stale: "bg-loom-warn",
+  conflicted: "bg-loom-err",
+};
+
+const STATUS_PILL_CLASS: Record<MemoryRecord["status"], string> = {
+  active: "text-loom-ok",
+  candidate: "text-loom-warn",
+  rejected: "text-loom-faint",
+  archived: "text-loom-faint",
+  stale: "text-loom-warn",
+  conflicted: "text-loom-err",
 };
 
 export default function MemoryPanel({ project }: { project?: ProjectMeta }) {
@@ -223,99 +242,99 @@ export default function MemoryPanel({ project }: { project?: ProjectMeta }) {
   const autoDreamDisabled = dreaming || dreamStatus.status === "checking" || Boolean(dreamStatus.gate && !dreamStatus.gate.eligible);
 
   return (
-    <div className="memory-page">
-      <header className="memory-page__header">
+    <div className="h-full min-w-0 overflow-auto bg-loom-bg p-loom-6 max-[820px]:p-loom-4">
+      <header className="mx-auto mb-loom-4 flex max-w-[1100px] items-start justify-between gap-loom-5 max-[820px]:flex-col max-[820px]:gap-loom-4">
         <div>
-          <div className="eyebrow"><Brain size={13} /> CROSS-SESSION MEMORY</div>
-          <h1>长期记忆</h1>
-          <p>Markdown 是事实源。候选记忆先观察，再决定是否留下。</p>
+          <div className="inline-flex items-center gap-[6px] font-loom-mono text-[10px] tracking-[.04em] text-loom-muted"><Brain size={13} /> CROSS-SESSION MEMORY</div>
+          <h1 className="mb-loom-1 mt-loom-2 text-[22px] font-semibold tracking-[-.02em]">长期记忆</h1>
+          <p className="m-0 text-[12px] text-loom-muted">Markdown 是事实源。候选记忆先观察，再决定是否留下。</p>
         </div>
-        <div className="memory-page__actions">
-          <button className="icon-btn" type="button" onClick={() => void reload()} disabled={loading} title="刷新" aria-label="刷新记忆"><RefreshCw size={16} /></button>
-          <button className="btn primary" type="button" onClick={() => { setRememberError(null); setAddOpen(true); }}>新增记忆</button>
-          <div className="memory-dream-control">
-            <div className="memory-dream-control__actions">
+        <div className="flex items-start gap-loom-2 max-[820px]:w-full max-[820px]:flex-wrap">
+          <button className={iconButtonClassName("default", "h-10 w-10")} type="button" onClick={() => void reload()} disabled={loading} title="刷新" aria-label="刷新记忆"><RefreshCw size={16} /></button>
+          <button className={buttonClassName("primary", "min-h-10")} type="button" onClick={() => { setRememberError(null); setAddOpen(true); }}>新增记忆</button>
+          <div className="grid min-w-0 gap-loom-1 max-[820px]:order-3 max-[820px]:min-w-full">
+            <div className="flex gap-loom-2">
               <Tip label={dreamStatusText()}>
-                <span className="memory-dream-control__trigger">
-                  <button className="btn" type="button" onClick={() => void runAutoDream()} disabled={autoDreamDisabled}>{dreaming ? "整理中…" : "运行 AutoDream"}</button>
+                <span className="inline-flex">
+                  <button className={buttonClassName("default", "justify-center whitespace-nowrap min-h-10")} type="button" onClick={() => void runAutoDream()} disabled={autoDreamDisabled}>{dreaming ? "整理中…" : "运行 AutoDream"}</button>
                 </span>
               </Tip>
-              {dreaming && <button className="btn" type="button" onClick={() => void cancelAutoDream()}>取消</button>}
+              {dreaming && <button className={buttonClassName("default", "min-h-10")} type="button" onClick={() => void cancelAutoDream()}>取消</button>}
             </div>
-            {dreaming && <div className="memory-dream-progress" aria-hidden="true"><span style={{ width: `${Math.max(4, Math.round((dreamStatus.progress ?? 0) * 100))}%` }} /></div>}
+            {dreaming && <div className="h-[3px] overflow-hidden rounded-loom-pill bg-loom-surface-2" aria-hidden="true"><span className="block h-full rounded-[inherit] bg-loom-accent transition-[width] duration-200 ease-loom" style={{ width: `${Math.max(4, Math.round((dreamStatus.progress ?? 0) * 100))}%` }} /></div>}
           </div>
         </div>
       </header>
 
-      <div className="memory-stats" aria-label="记忆统计">
-        <span><strong>{stats.active}</strong> active</span>
-        <span className={stats.candidates ? "is-warn" : ""}><strong>{stats.candidates}</strong> candidates</span>
-        <span><strong>{stats.archived}</strong> archived</span>
-        {stats.issues > 0 && <span className="is-err"><strong>{stats.issues}</strong> 文件问题</span>}
+      <div className="mx-auto flex max-w-[1100px] gap-loom-4 border-y border-loom-border py-loom-3 font-loom-mono text-[11px] text-loom-muted" aria-label="记忆统计">
+        <span><strong className="font-semibold text-loom-text">{stats.active}</strong> active</span>
+        <span className={stats.candidates ? "text-loom-warn" : ""}><strong className="font-semibold text-loom-text">{stats.candidates}</strong> candidates</span>
+        <span><strong className="font-semibold text-loom-text">{stats.archived}</strong> archived</span>
+        {stats.issues > 0 && <span className="text-loom-err"><strong className="font-semibold text-loom-text">{stats.issues}</strong> 文件问题</span>}
       </div>
 
-      <div className="memory-toolbar">
-        <div className="memory-filters" role="tablist" aria-label="记忆状态">
-          {(["all", "candidate", "active", "archived"] as const).map((item) => <button key={item} className={filter === item ? "active" : ""} type="button" onClick={() => setFilter(item)}>{item === "all" ? "全部" : item}</button>)}
+      <div className="mx-auto mt-loom-5 flex max-w-[1100px] items-center justify-between pb-loom-2">
+        <div className="flex gap-loom-1" role="tablist" aria-label="记忆状态">
+          {(["all", "candidate", "active", "archived"] as const).map((item) => <button key={item} className={cn("inline-flex h-8 items-center rounded-loom-sm border-0 bg-transparent px-[10px] font-loom-mono text-[11px] text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text", filter === item && "bg-loom-surface-2 text-loom-text")} type="button" onClick={() => setFilter(item)}>{item === "all" ? "全部" : item}</button>)}
         </div>
-        <span className="memory-scope">{project ? `当前项目 · ${project.name}` : "用户级"}</span>
+        <span className="font-loom-mono text-[10px] text-loom-faint">{project ? `当前项目 · ${project.name}` : "用户级"}</span>
       </div>
 
-      <div className="memory-layout">
-        <div className="memory-list" aria-live="polite">
+      <div className="mx-auto grid min-h-[320px] max-w-[1100px] grid-cols-[minmax(0,1fr)] gap-loom-3">
+        <div className="min-h-[320px] min-w-0 self-start overflow-hidden rounded-loom-lg border border-loom-border bg-loom-surface" aria-live="polite">
           {visible.map((record) => (
-            <button key={record.id} type="button" className={`memory-card ${record.id === selectedId ? "selected" : ""}`} onClick={() => setSelectedId(record.id)}>
-              <span className={`memory-card__dot status-${record.status}`} />
-              <span className="memory-card__main"><strong>{record.description}</strong><small>{TYPE_LABEL[record.type]} · {record.scope.kind === "project" ? "项目" : "用户"} · {record.id}</small></span>
-              <span className={`status-pill ${record.status === "active" ? "available" : record.status === "candidate" ? "pending" : "unavailable"}`}>{STATUS_LABEL[record.status]}</span>
+            <button key={record.id} type="button" className={cn("flex min-h-16 w-full items-center gap-loom-3 border-0 border-b border-loom-border bg-transparent px-loom-4 py-loom-3 text-left text-loom-text hover:bg-loom-surface-2", record.id === selectedId && "bg-loom-surface-2", visible.at(-1)?.id === record.id && "border-b-0")} onClick={() => setSelectedId(record.id)}>
+              <span className={cn("h-[7px] w-[7px] shrink-0 rounded-full", STATUS_DOT_CLASS[record.status])} />
+              <span className="grid min-w-0 flex-1 gap-[3px]"><strong className="overflow-hidden text-ellipsis whitespace-nowrap text-[12px] font-medium">{record.description}</strong><small className="overflow-hidden text-ellipsis whitespace-nowrap font-loom-mono text-[10px] text-loom-faint">{TYPE_LABEL[record.type]} · {record.scope.kind === "project" ? "项目" : "用户"} · {record.id}</small></span>
+              <span className={cn("shrink-0 rounded-loom-pill bg-loom-surface-2 px-[6px] py-[3px] font-loom-mono text-[9px]", STATUS_PILL_CLASS[record.status])}>{STATUS_LABEL[record.status]}</span>
             </button>
           ))}
-          {visible.length === 0 && <div className="memory-empty">还没有符合条件的记忆。</div>}
+          {visible.length === 0 && <div className="p-loom-6 text-center text-[12px] text-loom-muted">还没有符合条件的记忆。</div>}
         </div>
       </div>
       <Modal open={addOpen} onOpenChange={setAddOpen} ariaLabel="新增记忆">
-        <form className="settings-modal__panel memory-add-dialog" onSubmit={(event) => void submitRemember(event)}>
-          <div className="memory-add-dialog__head">
+        <form className="settings-modal__panel memory-add-dialog w-[min(560px,calc(100vw-48px))] p-loom-6 max-[820px]:p-loom-5" onSubmit={(event) => void submitRemember(event)}>
+          <div className="mb-loom-5 flex items-start justify-between gap-loom-4">
             <div>
-              <h2>新增记忆</h2>
-              <p>写下一条希望 Loom 在后续会话中记住的内容。</p>
+              <h2 className="m-0 text-[20px] leading-[1.4]">新增记忆</h2>
+              <p className="mt-loom-1 mb-0 max-w-[420px] text-[12.5px] leading-[1.6] text-loom-muted">写下一条希望 Loom 在后续会话中记住的内容。</p>
             </div>
-            <button className="icon-btn" type="button" onClick={() => setAddOpen(false)} aria-label="关闭新增记忆" title="关闭"><X size={16} /></button>
+            <button className={iconButtonClassName()} type="button" onClick={() => setAddOpen(false)} aria-label="关闭新增记忆" title="关闭"><X size={16} /></button>
           </div>
-          <div className="memory-add-dialog__body">
-            <label className="field">
+          <div className="grid gap-loom-4">
+            <label className="mb-0 flex flex-col gap-[6px]">
               <span>记忆类型</span>
               <LoomSelect value={quickType} onValueChange={(value) => setQuickType(value as MemoryRecord["type"])} placeholder="选择类型" ariaLabel="记忆类型">
                 {(Object.keys(TYPE_LABEL) as MemoryRecord["type"][]).map((type) => <LoomSelectItem key={type} value={type}>{TYPE_LABEL[type]}</LoomSelectItem>)}
               </LoomSelect>
             </label>
-            <label className="field memory-content-field">
+            <label className="mb-0 flex flex-col gap-[6px]">
               <span>记忆内容</span>
-              <textarea autoFocus value={quickContent} onChange={(event) => setQuickContent(event.target.value)} placeholder="例如：默认使用中文回答，除非我另有说明。" rows={6} />
-              <small>尽量写成稳定、可复用的事实或偏好。</small>
+              <textarea className={cn(fieldClassName, "min-h-[144px] resize-y px-3 py-[11px] leading-[1.65]")} autoFocus value={quickContent} onChange={(event) => setQuickContent(event.target.value)} placeholder="例如：默认使用中文回答，除非我另有说明。" rows={6} />
+              <small className="font-loom-mono text-[10.5px] leading-[1.5] text-loom-faint">尽量写成稳定、可复用的事实或偏好。</small>
             </label>
-            {rememberError && <div className="memory-add-dialog__error" role="alert">{rememberError}</div>}
+            {rememberError && <div className="rounded-loom-sm border border-loom-err/30 bg-loom-err/10 px-loom-3 py-loom-2 text-[12px] text-loom-err" role="alert">{rememberError}</div>}
           </div>
-          <div className="memory-add-dialog__actions">
-            <button className="btn" type="button" onClick={() => setAddOpen(false)}>取消</button>
-            <button className="btn primary" type="submit" disabled={remembering || !quickContent.trim()}>{remembering ? "保存中…" : "添加记忆"}</button>
+          <div className="mt-loom-6 flex justify-end gap-loom-2 border-t border-loom-border pt-loom-4">
+            <button className={buttonClassName()} type="button" onClick={() => setAddOpen(false)}>取消</button>
+            <button className={buttonClassName("primary")} type="submit" disabled={remembering || !quickContent.trim()}>{remembering ? "保存中…" : "添加记忆"}</button>
           </div>
         </form>
       </Modal>
       <Modal open={Boolean(selected)} onOpenChange={(open) => { if (!open) setSelectedId(null); }} ariaLabel="记忆详情">
         {selected && (
-          <div className="settings-modal__panel memory-detail-dialog">
-            <div className="memory-detail__head">
-              <div><span className="eyebrow">{TYPE_LABEL[selected.type]} · {selected.status}</span><h2>{selected.description}</h2></div>
-              <button className="icon-btn" type="button" onClick={() => setSelectedId(null)} aria-label="关闭详情" title="关闭详情"><X size={16} /></button>
+          <div className="settings-modal__panel memory-detail-dialog w-[min(640px,calc(100vw-48px))] p-loom-4">
+            <div className="flex justify-between gap-loom-3">
+              <div><span className="inline-flex items-center gap-[6px] font-loom-mono text-[10px] tracking-[.04em] text-loom-muted">{TYPE_LABEL[selected.type]} · {selected.status}</span><h2 className="mt-loom-2 mb-0 text-[18px] font-semibold leading-[1.45]">{selected.description}</h2></div>
+              <button className={iconButtonClassName()} type="button" onClick={() => setSelectedId(null)} aria-label="关闭详情" title="关闭详情"><X size={16} /></button>
             </div>
-            <p className="memory-detail__content">{selected.content}</p>
-            <dl className="memory-meta"><div><dt>confidence</dt><dd>{Math.round(selected.confidence * 100)}%</dd></div><div><dt>source</dt><dd>{selected.source.trigger}</dd></div><div><dt>updated</dt><dd>{new Date(selected.updatedAt).toLocaleString()}</dd></div></dl>
-            {selected.source.excerpt && <blockquote>{selected.source.excerpt}</blockquote>}
-            <div className="memory-detail__actions">
-              {selected.status === "candidate" && <><button className="btn primary" type="button" onClick={() => void approve(selected)}><Check size={14} /> 批准</button><button className="btn" type="button" onClick={() => void reject(selected)}>拒绝</button></>}
-              {selected.status !== "archived" && selected.status !== "rejected" && <button className="icon-btn danger" type="button" onClick={() => setForgetting(selected)} aria-label="遗忘" title="遗忘"><Trash2 size={16} /></button>}
-              {selected.status === "archived" && <span className="memory-recover">可在 Markdown archive 中恢复</span>}
+            <p className="my-loom-5 whitespace-pre-wrap text-[13px] leading-[1.7] text-loom-text">{selected.content}</p>
+            <dl className="grid grid-cols-3 gap-loom-2 m-0"><div className="rounded-loom-sm border border-loom-border p-loom-2"><dt className="font-loom-mono text-[9px] text-loom-faint">confidence</dt><dd className="m-0 mt-1 font-loom-mono text-[10px] text-loom-text">{Math.round(selected.confidence * 100)}%</dd></div><div className="rounded-loom-sm border border-loom-border p-loom-2"><dt className="font-loom-mono text-[9px] text-loom-faint">source</dt><dd className="m-0 mt-1 font-loom-mono text-[10px] text-loom-text">{selected.source.trigger}</dd></div><div className="rounded-loom-sm border border-loom-border p-loom-2"><dt className="font-loom-mono text-[9px] text-loom-faint">updated</dt><dd className="m-0 mt-1 font-loom-mono text-[10px] text-loom-text">{new Date(selected.updatedAt).toLocaleString()}</dd></div></dl>
+            {selected.source.excerpt && <blockquote className="my-loom-4 border-l-2 border-loom-accent pl-loom-3 text-[11px] leading-[1.6] text-loom-muted">{selected.source.excerpt}</blockquote>}
+            <div className="mt-loom-5 flex items-center gap-loom-2">
+              {selected.status === "candidate" && <><button className={buttonClassName("primary")} type="button" onClick={() => void approve(selected)}><Check size={14} /> 批准</button><button className={buttonClassName()} type="button" onClick={() => void reject(selected)}>拒绝</button></>}
+              {selected.status !== "archived" && selected.status !== "rejected" && <button className={iconButtonClassName("danger")} type="button" onClick={() => setForgetting(selected)} aria-label="遗忘" title="遗忘"><Trash2 size={16} /></button>}
+              {selected.status === "archived" && <span className="text-[11px] text-loom-muted">可在 Markdown archive 中恢复</span>}
             </div>
           </div>
         )}

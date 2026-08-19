@@ -194,6 +194,9 @@ describe("SettingsPanel model registry", () => {
     expect(screen.queryByText("Google")).toBeNull();
     expect(screen.queryByRole("button", { name: "打开 models.json" })).toBeNull();
     expect(screen.queryByText("Markdown 根目录")).toBeNull();
+    const settingsCheckboxes = screen.getAllByRole("checkbox");
+    expect(settingsCheckboxes).toHaveLength(5);
+    expect(settingsCheckboxes.every((checkbox) => checkbox.tagName === "BUTTON")).toBe(true);
     const user = userEvent.setup();
     await user.click(screen.getByRole("combobox", { name: "默认模型" }));
     expect(screen.getByRole("option", { name: /Claude Sonnet 4.5/ })).toBeTruthy();
@@ -319,10 +322,10 @@ describe("SettingsPanel model registry", () => {
     expect(screen.getByRole("option", { name: /Google/ })).toBeTruthy();
     await user.click(screen.getByRole("option", { name: /Anthropic/ }));
     expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
-    const sonnet = screen.getByRole("checkbox", { name: /Claude Sonnet 4.5/ }) as HTMLInputElement;
-    const haiku = screen.getByRole("checkbox", { name: /Claude Haiku 4.5/ }) as HTMLInputElement;
-    expect(sonnet.checked).toBe(true);
-    expect(haiku.checked).toBe(false);
+    const sonnet = screen.getByRole("checkbox", { name: /Claude Sonnet 4.5/ });
+    const haiku = screen.getByRole("checkbox", { name: /Claude Haiku 4.5/ });
+    expect(sonnet.getAttribute("aria-checked")).toBe("true");
+    expect(haiku.getAttribute("aria-checked")).toBe("false");
     await user.click(haiku);
     expect(screen.queryByLabelText("Model name")).toBeNull();
     expect(screen.queryByLabelText("Context window")).toBeNull();

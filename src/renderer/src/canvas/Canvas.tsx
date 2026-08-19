@@ -905,14 +905,14 @@ function CanvasContent({
     <BranchContext.Provider value={branchContext}>
       {layoutPersistence.error && (
         <div
-          className="canvas-layout-notice nodrag"
+          className="canvas-layout-notice nodrag absolute left-1/2 top-loom-3 z-30 flex -translate-x-1/2 items-center gap-loom-2 rounded-loom-md border border-loom-border-strong bg-loom-surface px-loom-2 py-loom-2 text-[11.5px] text-loom-muted shadow-loom-float"
           role="status"
           aria-label="布局保存状态"
         >
           <span>布局尚未保存</span>
           <button
             type="button"
-            className="canvas-layout-retry"
+            className="canvas-layout-retry cursor-pointer border-0 bg-transparent p-0 font-inherit font-medium text-loom-accent outline-none focus-visible:outline-1 focus-visible:outline-loom-accent focus-visible:outline-offset-2"
             onClick={() => void layoutPersistence.retry()}
             aria-label="重试保存布局"
           >

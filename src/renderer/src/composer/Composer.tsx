@@ -354,9 +354,9 @@ export function Composer({
   }
 
   return (
-    <div className="composer-wrap nodrag">
+    <div className="composer-wrap nodrag flex w-full flex-col gap-loom-1 box-border">
       {topAccessory}
-      <div className="composer-box">
+      <div className="composer-box relative flex w-full flex-col gap-loom-1 box-border rounded-loom-lg border border-loom-border bg-loom-surface px-3 py-loom-1 shadow-loom-composer focus-within:border-loom-accent focus-within:shadow-[0_0_0_1px_var(--accent-soft),var(--shadow-composer)]">
         <SlashPalette
           ref={slashRef}
           value={slashOpen ? value : ""}
@@ -562,9 +562,9 @@ export function Composer({
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
-        <div className="composer-hint">输入 / 打开命令</div>
-        {commandError && <div className="composer-command-error" role="alert">{commandError}</div>}
-        <div className="composer-bar">
+        <div className="composer-hint mt-[-2px] select-none font-loom-mono text-[10px] text-loom-faint">输入 / 打开命令</div>
+        {commandError && <div className="composer-command-error text-[11px] leading-[1.35] text-loom-err" role="alert">{commandError}</div>}
+        <div className="composer-bar flex min-w-0 items-center gap-loom-2">
           <input
             ref={fileRef}
             className="composer-file"

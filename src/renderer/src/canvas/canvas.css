@@ -1,6 +1,11 @@
 /* =====================================================================
    画布 · 节点卡片样式 —— 「索引卡片」：发丝描边、mono 呼号、青蓝选中环。
    全部引用 tokens.css 的语义 token，绝不写死色值。外壳/侧栏见 shell.css。
+
+   Retained CSS boundary: React Flow selectors, node positions/sizes, handles,
+   edges, minimap/background, resize affordances, pseudo-elements, streaming
+   geometry, and container-query overrides stay here. Stable internal layout
+   and typography can use Tailwind utilities in the owning TSX component.
    ===================================================================== */
 
 .canvas-wrap {
@@ -11,39 +16,6 @@
 }
 .react-flow {
   background: transparent;
-}
-
-.canvas-layout-notice {
-  position: absolute;
-  z-index: 30;
-  top: var(--s3);
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  padding: var(--s2) var(--s3);
-  color: var(--muted);
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-float);
-  font-size: 11.5px;
-}
-
-.canvas-layout-retry {
-  padding: 0;
-  color: var(--accent);
-  background: transparent;
-  border: 0;
-  font: inherit;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.canvas-layout-retry:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: 2px;
 }
 
 /* =====================================================================
@@ -231,14 +203,6 @@
 .card__foot:has(.composer-popover) {
   z-index: 60;
 }
-.composer-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-  box-sizing: border-box;
-}
-
 .composer-telemetry {
   display: flex;
   align-items: center;
@@ -1240,43 +1204,8 @@
   background: linear-gradient(to top, var(--surface) 60%, transparent);
   z-index: 5;
 }
-.composer-box {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-  box-sizing: border-box;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  padding: 8px 8px 8px 12px;
-  box-shadow: var(--shadow-composer);
-}
-.composer-box:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent-soft), var(--shadow-composer);
-}
-.composer-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
 .composer-file {
   display: none;
-}
-.composer-hint {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--faint);
-  margin-top: -2px;
-  user-select: none;
-}
-.composer-command-error {
-  color: var(--err);
-  font-size: 11px;
-  line-height: 1.35;
 }
 .composer-skills {
   display: flex;
@@ -2133,58 +2062,6 @@
   background: var(--minimap-bg);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-}
-.canvas-control-group {
-  position: absolute;
-  z-index: 8;
-  display: inline-flex;
-  align-items: center;
-  padding: 3px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-soft);
-}
-.canvas-zoom {
-  bottom: 16px;
-  left: 16px;
-}
-.canvas-control-group button {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-.canvas-control-group button svg {
-  stroke: currentColor;
-}
-.canvas-control-group button:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-.canvas-control-group button:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--accent);
-  color: var(--accent);
-}
-.canvas-zoom-value {
-  min-width: 44px;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  text-align: center;
-}
-.canvas-control-group .canvas-zoom-reset {
-  width: 38px;
-  border-left: 1px solid var(--border);
-  border-radius: 0 var(--r-sm) var(--r-sm) 0;
-  font-family: var(--font-mono);
-  font-size: 10px;
 }
 @media (prefers-reduced-motion: reduce) {
   .loom-canvas *,

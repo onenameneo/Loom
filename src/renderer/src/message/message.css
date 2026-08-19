@@ -628,53 +628,6 @@
 }
 
 /* ---- 代码块 ---- */
-.codeblock {
-  margin: 1em 0;
-  border: 1px solid var(--code-border);
-  border-radius: var(--r-md);
-  background: var(--code-bg);
-  overflow: hidden;
-}
-.codeblock__bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 6px 4px 12px;
-  border-bottom: 1px solid var(--code-border);
-  background: color-mix(in srgb, var(--code-text) 5%, transparent);
-}
-.codeblock__lang {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--muted);
-  letter-spacing: 0.3px;
-}
-.codeblock__copy {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--muted);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  padding: 3px 7px;
-  cursor: pointer;
-}
-.codeblock__copy:hover {
-  color: var(--text);
-  background: color-mix(in srgb, var(--code-text) 8%, transparent);
-}
-.codeblock__pre {
-  margin: 0;
-  padding: 12px 14px;
-  overflow-x: auto;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--code-text);
-  tab-size: 2;
-}
 /* 紧凑密度（画布节点）：代码块限高，内部滚动，避免撑爆节点 */
 .m--compact .codeblock__pre {
   max-height: 240px;
