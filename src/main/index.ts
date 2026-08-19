@@ -75,6 +75,7 @@ function registerIpc() {
     const s = store.getSettings();
     const registry = await ModelRegistry.load();
     const scoped = loadScopedModelSettings({ homeDir: app.getPath("home") });
+    const selected = resolveSelectedModel({ registry, scoped });
     return {
       access: s.access,
       appearance: s.appearance,
@@ -86,14 +87,9 @@ function registerIpc() {
       globalDefaultModel: scoped.globalSettings.defaults?.model,
       // 左上角模型名必须与实际运行模型一致：buildModel 走 resolveSelectedModel
       //（解析 models.json 全局默认），故此处复用同一解析，不再取 resolveModelConfig/env。
-      resolvedModel: (() => {
-        const selected = resolveSelectedModel({ registry, scoped });
-        return selected.model
-          ? `${selected.ref.providerId}/${selected.ref.modelId}`
-          : resolveModelConfig(store).model;
-      })(),
+      resolvedModel: selected.model ? `${selected.ref.providerId}/${selected.ref.modelId}` : resolveModelConfig(store).model,
       sources: accessSources(store),
-      hasKey: Boolean(process.env.ANTHROPIC_API_KEY),
+      hasKey: selected.available,
       legacyKeyPresent: Boolean(store.getApiKeyEnc()),
       keyStorage: keyStorageKind(),
       resolvedTheme: resolvedTheme(),

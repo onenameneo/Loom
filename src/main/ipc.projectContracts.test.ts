@@ -132,4 +132,11 @@ describe("main/preload project IPC contracts", () => {
     expect(mainSource).toContain('inputFieldType === "plainText"');
     expect(mainSource).toContain("frame: params.frame");
   });
+
+  it("derives the API-key warning from the selected models.json model", () => {
+    const mainSource = readSource("src/main/index.ts");
+
+    expect(mainSource).toContain("hasKey: selected.available");
+    expect(mainSource).not.toContain("hasKey: Boolean(process.env.ANTHROPIC_API_KEY)");
+  });
 });
