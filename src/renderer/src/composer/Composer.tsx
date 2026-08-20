@@ -10,6 +10,7 @@ import { SlashPalette, type SlashPaletteHandle } from "./SlashPalette";
 import { findFileMentionTrigger } from "./fileMentionParser";
 import { ContextBudgetIndicator } from "./ContextBudgetIndicator";
 import { useComposerBudget } from "./useComposerBudget";
+import { useI18n } from "../i18n/I18nProvider";
 
 export type ComposerImage = { data: string; mimeType: string };
 type ComposerSubmitResult = { ok: boolean; reason?: string; errors?: Array<{ path: string; message: string }> };
@@ -71,6 +72,7 @@ export function Composer({
   onDisableSkill?: (skillId: string) => void;
   budgetRefreshKey?: string | number;
 }) {
+  const { t } = useI18n();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const slashRef = useRef<SlashPaletteHandle>(null);
@@ -100,7 +102,7 @@ export function Composer({
     for (const candidate of fileCandidates) {
       const root = roots.get(candidate.root) ?? { root: candidate.root, rootName: candidate.rootName, directories: new Map() };
       const parts = candidate.path.split("/");
-      const directory = parts.length > 1 ? parts.slice(0, -1).join("/") : "项目根目录";
+      const directory = parts.length > 1 ? parts.slice(0, -1).join("/") : t("composer.projectRoot");
       const files = root.directories.get(directory) ?? [];
       files.push(candidate);
       root.directories.set(directory, files);
@@ -110,7 +112,7 @@ export function Composer({
       ...root,
       directories: [...root.directories.entries()].map(([directory, candidates]) => ({ directory, candidates })),
     }));
-  }, [fileCandidates]);
+      }, [fileCandidates, t]);
 
   useEffect(() => {
     if (!fileMentionOpen || !fileMentionTrigger || !window.api) {
@@ -126,12 +128,12 @@ export function Composer({
     setFileCandidatesUnavailable(false);
     const timer = window.setTimeout(() => {
       window.api.canvas.fileCandidates(nodeId, fileMentionTrigger.query).then((result) => {
-        if (!result.ok) throw new Error(result.reason || "无法搜索项目文件。");
+        if (!result.ok) throw new Error(result.reason || t("composer.searchFilesFailed"));
         setFileCandidates(result.candidates ?? []);
         setFileCandidatesUnavailable(result.reason === "no-source-roots");
       }).catch((error) => {
         setFileCandidates([]);
-        setFileCandidatesError(error instanceof Error ? error.message : "无法搜索项目文件。");
+        setFileCandidatesError(error instanceof Error ? error.message : t("composer.searchFilesFailed"));
       }).finally(() => setFileCandidatesLoading(false));
     }, 150);
     return () => window.clearTimeout(timer);
@@ -256,7 +258,7 @@ export function Composer({
   const defaultLevel = thinkingOptions.find((level) => level !== "off") ?? "off";
   const effectiveThinkingLevel = thinkingLevel && thinkingOptions.includes(thinkingLevel) ? thinkingLevel : defaultLevel;
   const thinkingDisabled = thinkingOptions.length <= 1;
-  const modelLabel = model ?? "选择模型";
+  const modelLabel = model ?? t("composer.noModels");
   const thinkingActiveIndex = Math.max(0, thinkingOptions.indexOf(effectiveThinkingLevel));
 
   function selectThinkingLevel(level: ThinkingLevel) {
@@ -377,7 +379,7 @@ export function Composer({
           }}
         />
         {activeSkills && activeSkills.length > 0 && (
-          <div className="composer-skills" aria-label="已启用 Skills">
+          <div className="composer-skills" aria-label={t("composer.enabledSkills")}>
             {activeSkills.map((skill) => (
               <span className="composer-skill" key={`${skill.sourcePath}:${skill.id}`} title={`${skill.name} · ${skill.hash}`}>
                 <BookOpen size={13} />
@@ -386,8 +388,8 @@ export function Composer({
                   <button
                     type="button"
                     className="composer-skill__remove"
-                    aria-label={`停用 Skill ${skill.name}`}
-                    title="停用 Skill"
+                    aria-label={`${t("composer.disableSkill")} ${skill.name}`}
+                    title={t("composer.disableSkill")}
                     onClick={() => onDisableSkill(skill.id)}
                   >
                     <X size={12} />
@@ -402,7 +404,7 @@ export function Composer({
             {images.map((image, index) => (
               <span className="composer-image" key={`${image.mimeType}-${index}`}>
                 <img src={`data:${image.mimeType};base64,${image.data}`} alt="" />
-                <button type="button" title="移除图片" onClick={() => setImages((items) => items.filter((_, i) => i !== index))}>
+                <button type="button" title={t("composer.removeImage")} onClick={() => setImages((items) => items.filter((_, i) => i !== index))}>
                   <X size={12} />
                 </button>
               </span>
@@ -410,7 +412,7 @@ export function Composer({
           </div>
         )}
         {mentions.length > 0 && (
-          <div className="composer-file-mentions" aria-label="已引用文件">
+          <div className="composer-file-mentions" aria-label={t("composer.referencedFiles")}>
             {mentions.map((mention) => {
               const fileName = mention.path.split("/").pop() || mention.path;
               return (
@@ -419,8 +421,8 @@ export function Composer({
                   <span className="composer-file-mention__path" title={`@${mention.path}`}>@{fileName}</span>
                   <button
                     type="button"
-                    aria-label={`移除文件引用 ${mention.path}`}
-                    title="移除文件引用"
+                    aria-label={`${t("composer.removeFile")} ${mention.path}`}
+                    title={t("composer.removeFile")}
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => removeFileMention(mention)}
                   >
@@ -497,7 +499,7 @@ export function Composer({
             <Popover.Content
               id={fileMentionListId}
               role="listbox"
-              aria-label="项目文件"
+              aria-label={t("composer.projectFiles")}
               className="composer-popover file-mention-popover nodrag"
               side="top"
               align="start"
@@ -508,18 +510,18 @@ export function Composer({
                 if (target instanceof Node && textareaRef.current?.contains(target)) event.preventDefault();
               }}
             >
-              <div className="file-mention-title">项目文件</div>
-              {fileCandidatesLoading && <div className="cmd-empty">搜索中…</div>}
+              <div className="file-mention-title">{t("composer.projectFiles")}</div>
+              {fileCandidatesLoading && <div className="cmd-empty">{t("composer.searching")}</div>}
               {!fileCandidatesLoading && fileCandidatesError && <div className="cmd-empty file-mention-error">{fileCandidatesError}</div>}
               {!fileCandidatesLoading && !fileCandidatesError && fileCandidatesUnavailable && (
                 <div className="file-mention-unavailable">
                   <FolderOpen size={16} aria-hidden="true" />
-                  <strong>当前项目未关联本地目录</strong>
-                  <span>@ 文件只支持当前项目目录中的文件。</span>
-                  <small>请先为项目关联本地目录，再重新使用 @。</small>
+                  <strong>{t("composer.noProjectDirectory")}</strong>
+                  <span>{t("composer.projectFilesOnly")}</span>
+                  <small>{t("composer.linkDirectoryFirst")}</small>
                 </div>
               )}
-              {!fileCandidatesLoading && !fileCandidatesError && !fileCandidatesUnavailable && fileCandidates.length === 0 && <div className="cmd-empty">没有匹配的项目文件</div>}
+              {!fileCandidatesLoading && !fileCandidatesError && !fileCandidatesUnavailable && fileCandidates.length === 0 && <div className="cmd-empty">{t("composer.noMatchingFiles")}</div>}
               {!fileCandidatesLoading && !fileCandidatesError && !fileCandidatesUnavailable && fileCandidateGroups.map((root) => (
                 <div className="file-mention-root" key={root.root}>
                   <div className="file-mention-root__header">
@@ -562,7 +564,7 @@ export function Composer({
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
-        <div className="composer-hint mt-[-2px] select-none font-loom-mono text-[10px] text-loom-faint">输入 / 打开命令</div>
+        <div className="composer-hint mt-[-2px] select-none font-loom-mono text-[10px] text-loom-faint">{t("composer.openCommand")}</div>
         {commandError && <div className="composer-command-error text-[11px] leading-[1.35] text-loom-err" role="alert">{commandError}</div>}
         <div className="composer-bar flex min-w-0 items-center gap-loom-2">
           <input
@@ -625,7 +627,7 @@ export function Composer({
                 }}
               >
                 <div className="model-switcher-list" role="group" aria-label="Models">
-                  {modelOptions.length === 0 && <div className="cmd-empty">没有可用的模型</div>}
+                  {modelOptions.length === 0 && <div className="cmd-empty">{t("composer.noModels")}</div>}
                   {modelOptions.map((item, index) => (
                     <button
                       key={item.id}
@@ -673,7 +675,7 @@ export function Composer({
             className={`round-send ${busy ? "is-stop" : ""}`}
             onClick={busy ? onStop : submit}
             disabled={sendDisabled || stopPending}
-            title={busy ? "停止生成" : "发送"}
+            title={busy ? t("common.stop") : t("common.send")}
           >
             {busy ? <Square size={12} fill="currentColor" strokeWidth={0} /> : <IconSend />}
           </button>

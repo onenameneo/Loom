@@ -9,6 +9,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { useResolvedTitlebar } from "./TitlebarContext";
 import type { ShellState } from "./shellState";
 import type { ShellTransitionEvent } from "./useAppShellController";
+import { useI18n } from "../i18n/I18nProvider";
 
 type RendererPlatform = NodeJS.Platform | "browser";
 
@@ -63,10 +64,11 @@ export function WindowControlsChrome({
   toggleRef: RefObject<HTMLButtonElement>;
   onToggleSidebar: () => void;
 }) {
+  const { t } = useI18n();
   const isMacElectron = platform === "darwin";
   const transitioning = isTransitioning(shell);
   const expandedTarget = targetsExpanded(shell);
-  const label = expandedTarget ? "折叠侧栏" : "展开侧栏";
+  const label = expandedTarget ? t("layout.collapseSidebar") : t("layout.openSidebar");
   const shortcut =
     platform === "darwin" ? "⌘\\" : platform === "browser" ? "Cmd/Ctrl+\\" : "Ctrl+\\";
 
@@ -156,6 +158,7 @@ export function AppChrome({
   workbenchOpen?: boolean;
   onToggleWorkbench?: () => void;
 }) {
+  const { t } = useI18n();
   const transitioning = isTransitioning(shell);
   const sidebarMounted = shell.phase !== "collapsed";
   const shellRef = useRef<HTMLDivElement>(null);
@@ -264,11 +267,11 @@ export function AppChrome({
           >
             {sidebar}
           </div>
-          <div className="sidebar-resize-handle" role="separator" aria-label="调整侧边栏宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize(event, "sidebar")} />
+          <div className="sidebar-resize-handle" role="separator" aria-label={t("layout.resizeSidebar")} aria-orientation="vertical" onPointerDown={(event) => beginResize(event, "sidebar")} />
         </aside>
       )}
       <section className="content-column">
-        <AppTitlebar collapsed={shell.phase === "collapsed"} platform={platform} trailing={onToggleWorkbench && <button className="titlebar-button workbench-toggle grid size-7 place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/7 hover:text-loom-text" type="button" aria-label={workbenchOpen ? "关闭工作台" : "打开工作台"} aria-expanded={workbenchOpen} onClick={onToggleWorkbench}><PanelRight size={16} /></button>} />
+        <AppTitlebar collapsed={shell.phase === "collapsed"} platform={platform} trailing={onToggleWorkbench && <button className="titlebar-button workbench-toggle grid size-7 place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/7 hover:text-loom-text" type="button" aria-label={workbenchOpen ? t("layout.closeWorkbench") : t("layout.openWorkbench")} aria-expanded={workbenchOpen} onClick={onToggleWorkbench}><PanelRight size={16} /></button>} />
         <main className="main">{main}</main>
       </section>
       {workbenchMounted && (
@@ -277,7 +280,7 @@ export function AppChrome({
           aria-hidden={workbenchInteractive ? undefined : "true"}
           {...(workbenchInteractive ? {} : ({ inert: "" } as Record<string, string>))}
         >
-          <div className="workbench-resize-handle" role="separator" aria-label="调整工作台宽度" aria-orientation="vertical" onPointerDown={(event) => beginResize(event, "workbench")} />
+          <div className="workbench-resize-handle" role="separator" aria-label={t("layout.resizeWorkbench")} aria-orientation="vertical" onPointerDown={(event) => beginResize(event, "workbench")} />
           {right}
         </aside>
       )}

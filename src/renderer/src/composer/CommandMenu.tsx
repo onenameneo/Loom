@@ -2,8 +2,10 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { IconPlus } from "../icons";
 import type { CmdCtx } from "./commands";
 import { visibleCommands } from "./commands";
+import { useI18n } from "../i18n/I18nProvider";
 
 export function CommandMenu({ ctx }: { ctx: CmdCtx }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -33,7 +35,7 @@ export function CommandMenu({ ctx }: { ctx: CmdCtx }) {
       <button
         type="button"
         className="cmd-plus"
-        title="插入"
+        title={t("composer.insert")}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => {

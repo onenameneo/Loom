@@ -3,6 +3,7 @@ import { AlertDialog, Dialog, Popover, Tooltip } from "radix-ui";
 import { Folder, FolderPlus, GitBranch, MessageSquarePlus, X } from "lucide-react";
 import { IconProject } from "../icons";
 import { buttonClassName, cn, dialogActionsClassName, dialogDescriptionClassName, dialogTitleClassName, fieldClassName } from "./styles";
+import { useI18n } from "../i18n/I18nProvider";
 
 // Radix Primitives（无样式、可访问）+ DESIGN.md token 样式。见 shell.css .dlg-*/.tip。
 
@@ -11,7 +12,7 @@ export function ConfirmDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = "删除",
+  confirmLabel,
   onConfirm,
 }: {
   open: boolean;
@@ -21,6 +22,7 @@ export function ConfirmDialog({
   confirmLabel?: string;
   onConfirm: () => void;
 }) {
+  const { t } = useI18n();
   const [displayDescription, setDisplayDescription] = useState(description);
   useEffect(() => {
     if (open) setDisplayDescription(description);
@@ -35,10 +37,10 @@ export function ConfirmDialog({
           {displayDescription && <AlertDialog.Description className={cn("dlg-desc", dialogDescriptionClassName)}>{displayDescription}</AlertDialog.Description>}
           <div className={cn("dlg-actions", dialogActionsClassName)}>
             <AlertDialog.Cancel asChild>
-              <button className={buttonClassName()} onClick={() => onOpenChange(false)}>取消</button>
+              <button className={buttonClassName()} onClick={() => onOpenChange(false)}>{t("common.cancel")}</button>
             </AlertDialog.Cancel>
             <AlertDialog.Action asChild>
-              <button className={buttonClassName("danger")} onClick={onConfirm}>{confirmLabel}</button>
+              <button className={buttonClassName("danger")} onClick={onConfirm}>{confirmLabel ?? t("nav.delete")}</button>
             </AlertDialog.Action>
           </div>
         </AlertDialog.Content>
@@ -59,6 +61,7 @@ export function Modal({
   ariaLabel: string;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -82,6 +85,7 @@ export function MessageBranchDialog({
   onOpenChange: (open: boolean) => void;
   onSelect: (mode: MessageBranchMode) => void | Promise<void>;
 }) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const busyRef = useRef(false);
@@ -103,7 +107,7 @@ export function MessageBranchDialog({
       await onSelect(mode);
       onOpenChange(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "创建分支失败");
+      setError(cause instanceof Error ? cause.message : t("dialog.branchFailed"));
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -122,7 +126,7 @@ export function MessageBranchDialog({
           forceMount
           className="dlg-content branch-dialog"
           aria-hidden={!open}
-          aria-label="从这里创建聊天分支"
+          aria-label={t("dialog.createBranch")}
           onEscapeKeyDown={(event) => {
             if (busyRef.current) event.preventDefault();
           }}
@@ -133,35 +137,35 @@ export function MessageBranchDialog({
             if (busyRef.current) event.preventDefault();
           }}
         >
-          <Dialog.Title className={cn("dlg-title", dialogTitleClassName)}>从这里创建聊天分支</Dialog.Title>
+          <Dialog.Title className={cn("dlg-title", dialogTitleClassName)}>{t("dialog.createBranch")}</Dialog.Title>
           <Dialog.Description className={cn("dlg-desc", dialogDescriptionClassName)}>
-            保留当前聊天窗口，并选择分支继续的位置。
+            {t("dialog.branchDescription")}
           </Dialog.Description>
           <div className="branch-dialog-options">
             <button
               className="branch-dialog-option"
               type="button"
-              aria-label="在当前窗口开启分支"
+              aria-label={t("dialog.currentWindowBranch")}
               disabled={busy}
               onClick={() => void choose("new-session")}
             >
               <MessageSquarePlus size={17} aria-hidden="true" />
               <span>
-                <strong>在当前窗口开启分支</strong>
-                <small>在当前聊天窗口从此消息创建分支</small>
+                <strong>{t("dialog.currentWindowBranch")}</strong>
+                <small>{t("dialog.currentWindowBranchHelp")}</small>
               </span>
             </button>
             <button
               className="branch-dialog-option"
               type="button"
-              aria-label="在画布中开启分支"
+              aria-label={t("dialog.canvasBranch")}
               disabled={busy}
               onClick={() => void choose("canvas-node")}
             >
               <GitBranch size={17} aria-hidden="true" />
               <span>
-                <strong>在画布中开启分支</strong>
-                <small>在画布中的新窗口从此消息创建分支</small>
+                <strong>{t("dialog.canvasBranch")}</strong>
+                <small>{t("dialog.canvasBranchHelp")}</small>
               </span>
             </button>
           </div>
@@ -175,7 +179,7 @@ export function MessageBranchDialog({
 export function RenameDialog({
   open,
   onOpenChange,
-  title = "重命名会话",
+  title,
   initial,
   onSubmit,
 }: {
@@ -185,6 +189,7 @@ export function RenameDialog({
   initial: string;
   onSubmit: (name: string) => void;
 }) {
+  const { t } = useI18n();
   const [v, setV] = useState(initial);
   useEffect(() => {
     if (open) setV(initial);
@@ -201,7 +206,7 @@ export function RenameDialog({
       <Dialog.Portal>
         <Dialog.Overlay forceMount className="dlg-overlay" aria-hidden={!open} />
         <Dialog.Content forceMount className="dlg-content" aria-hidden={!open}>
-          <Dialog.Title className={cn("dlg-title", dialogTitleClassName)}>{title}</Dialog.Title>
+          <Dialog.Title className={cn("dlg-title", dialogTitleClassName)}>{title ?? t("dialog.renameSession")}</Dialog.Title>
           <input
             className={cn("dlg-input", fieldClassName)}
             autoFocus
@@ -213,9 +218,9 @@ export function RenameDialog({
           />
           <div className={cn("dlg-actions", dialogActionsClassName)}>
             <Dialog.Close asChild>
-              <button className={buttonClassName()}>取消</button>
+            <button className={buttonClassName()}>{t("dialog.cancel")}</button>
             </Dialog.Close>
-            <button className={buttonClassName("primary")} onClick={submit}>保存</button>
+            <button className={buttonClassName("primary")} onClick={submit}>{t("dialog.save")}</button>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
@@ -234,6 +239,7 @@ export function CreateProjectDialog({
   onPickFolder: () => Promise<string | undefined>;
   onSubmit: (input: { name: string; sourceRoots: string[] }) => void | Promise<void>;
 }) {
+  const { t } = useI18n();
   const [name, setName] = useState("");
   const [sourceRoots, setSourceRoots] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -292,7 +298,7 @@ export function CreateProjectDialog({
       setName((current) => current || path.split(/[\\/]/).filter(Boolean).at(-1) || "");
     } catch (error) {
       if (requestId !== pickRequestRef.current) return;
-      setPickError(error instanceof Error ? error.message : "选择文件夹失败");
+      setPickError(error instanceof Error ? error.message : t("dialog.addDirectory"));
     } finally {
       if (requestId === pickRequestRef.current) setPicking(false);
     }
@@ -309,7 +315,7 @@ export function CreateProjectDialog({
       await onSubmit({ name: trimmed, sourceRoots });
       onOpenChange(false);
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "创建项目失败");
+      setSubmitError(error instanceof Error ? error.message : t("dialog.createProject"));
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -348,13 +354,13 @@ export function CreateProjectDialog({
               <IconProject size={17} />
             </span>
             <div className="project-dialog-heading">
-              <Dialog.Title className={cn("dlg-title", dialogTitleClassName)}>创建项目</Dialog.Title>
+              <Dialog.Title className={cn("dlg-title", dialogTitleClassName)}>{t("dialog.createProject")}</Dialog.Title>
               <Dialog.Description className={cn("dlg-desc", dialogDescriptionClassName, "project-dialog-description")}>
-                为工作内容命名，并按需授权 Loom 访问项目目录。
+                {t("dialog.createDescription")}
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
-              <button className="project-dialog-close" type="button" aria-label="关闭" disabled={busy}>
+              <button className="project-dialog-close" type="button" aria-label={t("dialog.close")} disabled={busy}>
                 <X size={16} />
               </button>
             </Dialog.Close>
@@ -362,31 +368,31 @@ export function CreateProjectDialog({
           <form className="project-dialog-form" onSubmit={handleSubmit}>
             <div className="project-dialog-body">
               <div className="project-name-field">
-                <label htmlFor={nameId}>项目名称</label>
+                <label htmlFor={nameId}>{t("dialog.projectName")}</label>
                 <input
                   id={nameId}
                   autoFocus
                   required
                   disabled={busy}
-                  placeholder="例如：Loom 桌面端"
+                  placeholder={t("dialog.projectNamePlaceholder")}
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                 />
               </div>
               <section className="project-source-section" aria-labelledby={directoryTitleId}>
-                <h3 className="project-source-title" id={directoryTitleId}>项目目录（可选）</h3>
+                <h3 className="project-source-title" id={directoryTitleId}>{t("dialog.projectDirectory")}</h3>
                 <button
                   className="project-source-drop"
                   type="button"
-                  aria-label="添加项目目录"
+                  aria-label={t("dialog.addDirectory")}
                   aria-describedby={`${directoryHelpId}${pickError ? ` ${pickErrorId}` : ""}`}
                   onClick={addFolder}
                   disabled={picking || busy}
                 >
                   <FolderPlus size={16} />
                   <span className="project-source-copy">
-                    <strong>{picking ? "正在打开目录选择器..." : "添加项目目录"}</strong>
-                    <small id={directoryHelpId}>允许 Loom 在此目录中读取和编辑文件</small>
+                    <strong>{picking ? t("dialog.openingPicker") : t("dialog.addDirectory")}</strong>
+                    <small id={directoryHelpId}>{t("dialog.directoryHelp")}</small>
                   </span>
                 </button>
                 {pickError && <div className="project-source-error" id={pickErrorId} role="alert">{pickError}</div>}
@@ -398,7 +404,7 @@ export function CreateProjectDialog({
                         <span>{folder}</span>
                         <button
                           type="button"
-                          aria-label={`移除目录 ${folder}`}
+                          aria-label={t("dialog.removeDirectory", { folder })}
                           disabled={busy}
                           onClick={() => setSourceRoots((current) => current.filter((item) => item !== folder))}
                         >
@@ -413,7 +419,7 @@ export function CreateProjectDialog({
             </div>
             <div className={cn("dlg-actions", dialogActionsClassName, "project-dialog-actions")}>
               <Dialog.Close asChild>
-                <button className={buttonClassName("default", "min-w-[84px] h-9 justify-center py-0")} type="button" disabled={busy}>取消</button>
+                <button className={buttonClassName("default", "min-w-[84px] h-9 justify-center py-0")} type="button" disabled={busy}>{t("dialog.cancel")}</button>
               </Dialog.Close>
               <button
                 className={buttonClassName("primary", "min-w-[84px] h-9 justify-center py-0")}
@@ -421,7 +427,7 @@ export function CreateProjectDialog({
                 aria-describedby={submitError ? submitErrorId : undefined}
                 disabled={!name.trim() || busy || picking}
               >
-                {busy ? "正在创建..." : "创建项目"}
+                {busy ? t("dialog.creating") : t("dialog.createProject")}
               </button>
             </div>
           </form>

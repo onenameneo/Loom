@@ -27,4 +27,12 @@ describe("shared Loom UI styles", () => {
     expect(fieldClassName).toContain("focus:border-loom-accent");
     expect(iconButtonClassName("danger")).toContain("hover:text-loom-err");
   });
+
+  it("keeps the primary icon button free of the transparent default background", () => {
+    expect(iconButtonClassName("default")).toContain("bg-transparent");
+    expect(iconButtonClassName("primary")).toContain("bg-loom-accent");
+    expect(iconButtonClassName("primary")).toContain("text-loom-on-accent");
+    expect(iconButtonClassName("primary")).not.toContain("bg-transparent");
+    expect(iconButtonClassName("primary")).not.toContain("text-loom-muted");
+  });
 });

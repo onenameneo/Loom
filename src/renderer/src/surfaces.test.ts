@@ -187,6 +187,7 @@ describe("SettingsPanel model registry", () => {
     );
 
     expect(screen.getByRole("heading", { name: "模型配置" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "添加 Skill 来源" }).className).toContain("bg-loom-accent");
     expect(screen.queryByRole("heading", { name: "模型" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "连接" })).toBeNull();
     expect(screen.getByText("Anthropic")).toBeTruthy();

@@ -40,6 +40,8 @@ import { ConfirmDialog, Modal } from "./ui/dialogs";
 import { LoomCheckbox, LoomCheckboxField, LoomSelect, LoomSelectGroup, LoomSelectItem } from "./ui/controls";
 import { buttonClassName, iconButtonClassName } from "./ui/styles";
 import MemoryPanel from "./memory/MemoryPanel";
+import { useI18n, type TranslationKey } from "./i18n/I18nProvider";
+import { localizedSessionTitle } from "./i18n/titleLabels";
 
 export interface SurfaceCtx {
   projects: ProjectMeta[];
@@ -75,6 +77,7 @@ export interface SurfaceCtx {
 export interface Surface {
   id: string;
   label: string;
+  translationKey?: TranslationKey;
   icon: (props?: any) => JSX.Element;
   Panel: (p: { ctx: SurfaceCtx }) => JSX.Element;
   badge?: (ctx: SurfaceCtx) => string | number | null;
@@ -104,6 +107,7 @@ function CreationEmptyState({
 
 // ---- 会话主面（对话/画布合一；本阶段单节点聊天）----
 function ProjectPanel({ ctx }: { ctx: SurfaceCtx }) {
+  const { t } = useI18n();
   const project = ctx.projects.find((p) => p.id === ctx.activeProjectId);
   const session = ctx.sessions.find((s) => s.id === ctx.activeSessionId);
   const noKey = ctx.settings && !ctx.settings.hasKey;
@@ -111,9 +115,9 @@ function ProjectPanel({ ctx }: { ctx: SurfaceCtx }) {
     const hasProjects = ctx.projects.length > 0;
     return (
       <CreationEmptyState
-        title={hasProjects ? "开始一个新项目" : "还没有项目"}
-        description={hasProjects ? "新建项目，或从左侧打开已有话题。" : "一个项目可以包含多个独立会话。"}
-        actionLabel="新建项目"
+        title={hasProjects ? t("empty.newProjectTitle") : t("empty.noProjectTitle")}
+        description={hasProjects ? t("empty.newProjectDescription") : t("empty.noProjectDescription")}
+        actionLabel={t("empty.createProject")}
         onAction={ctx.openCreateProject}
       />
     );
@@ -122,9 +126,9 @@ function ProjectPanel({ ctx }: { ctx: SurfaceCtx }) {
     const hasSessions = ctx.sessions.length > 0;
     return (
       <CreationEmptyState
-        title={hasSessions ? "开始一个新会话" : "还没有会话"}
-        description={hasSessions ? "新建会话，或从左侧打开已有话题。" : "一个会话 = 一张可分支的研究画布。"}
-        actionLabel="新建会话"
+        title={hasSessions ? t("empty.newSessionTitle") : t("empty.noSessionTitle")}
+        description={hasSessions ? t("empty.newSessionDescription") : t("empty.noSessionDescription")}
+        actionLabel={t("empty.createSession")}
         onAction={() => ctx.createSession()}
       />
     );
@@ -133,7 +137,7 @@ function ProjectPanel({ ctx }: { ctx: SurfaceCtx }) {
     <SessionCanvas
       key={session.id}
       sessionId={session.id}
-      sessionName={session.title}
+      sessionName={localizedSessionTitle(session.title, t, session.titleState)}
       model={ctx.settings?.resolvedModel}
       noKey={Boolean(noKey)}
       goSettings={ctx.goSettings}
@@ -183,20 +187,22 @@ export function sessionTitle(session: ActivitySession): string {
   return session.project || session.cwd || session.sessionId;
 }
 
-export function kindLabel(kind: ActivityEvent["kind"]): string {
+type Translate = (key: TranslationKey, values?: Record<string, string | number>) => string;
+
+export function kindLabel(kind: ActivityEvent["kind"], translate?: Translate): string {
   switch (kind) {
     case "tool":
-      return "工具";
+      return translate?.("monitor.kindTool") ?? "工具";
     case "permission":
-      return "批准";
+      return translate?.("monitor.kindPermission") ?? "批准";
     case "turn_end":
-      return "回合";
+      return translate?.("monitor.kindTurn") ?? "回合";
     case "session_start":
-      return "开始";
+      return translate?.("monitor.kindStart") ?? "开始";
     case "stop":
-      return "结束";
+      return translate?.("monitor.kindStop") ?? "结束";
     default:
-      return "通知";
+      return translate?.("monitor.kindNotification") ?? "通知";
   }
 }
 
@@ -241,6 +247,15 @@ export const LIVENESS_LABEL: Record<LivenessState, string> = {
   ended: "已结束",
 };
 export const LIVENESS_ORDER: Record<LivenessState, number> = { active: 0, waiting: 1, idle: 2, ended: 3 };
+export function livenessLabel(state: LivenessState, translate?: Translate): string {
+  const key: Record<LivenessState, TranslationKey> = {
+    active: "monitor.active",
+    waiting: "monitor.livenessWaiting",
+    idle: "monitor.idle",
+    ended: "monitor.ended",
+  };
+  return translate?.(key[state]) ?? LIVENESS_LABEL[state];
+}
 // 90s 是本次设计约定的“近期活动”窗口；渲染层每秒 tick 重新派生，便于后续调参。
 const ACTIVE_WINDOW_MS = 90_000;
 
@@ -294,14 +309,16 @@ function linkState(status?: ActivityToolStatus): LinkState {
   return status.verifiedAt ? "live" : "pending";
 }
 
-function linkLabel(tool: ActivityTool, status: ActivityToolStatus | undefined, now: number): string {
+function linkLabel(tool: ActivityTool, status: ActivityToolStatus | undefined, now: number, translate?: Translate): string {
   switch (linkState(status)) {
     case "live":
-      return status?.lastEventAt ? `已接入 · ${formatRelative(status.lastEventAt, now)} 前` : "已接入";
+      return status?.lastEventAt
+        ? (translate?.("monitor.connectedAgo", { relative: formatRelative(status.lastEventAt, now) }) ?? `已接入 · ${formatRelative(status.lastEventAt, now)} 前`)
+        : (translate?.("monitor.connected") ?? "已接入");
     case "pending":
-      return tool === "codex" ? "已写入配置 · 待信任" : "已写入配置 · 待首个事件";
+      return translate?.(tool === "codex" ? "monitor.codexPending" : "monitor.eventPending") ?? (tool === "codex" ? "已写入配置 · 待信任" : "已写入配置 · 待首个事件");
     default:
-      return "未接入";
+      return translate?.("monitor.notConnected") ?? "未接入";
   }
 }
 
@@ -388,6 +405,7 @@ export function getSessionViews(
 
 // ---- 工作站主面（内部 surface id 仍沿用 observatory）----
 export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
+  const { t } = useI18n();
   const [configOpen, setConfigOpen] = useState(false);
   const [busyTool, setBusyTool] = useState<ActivityTool | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -415,7 +433,7 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
   const sessionViews = getSessionViews(ctx.activitySessions, ctx.agents, "all", ctx.activityNow);
   const activeView = sessionViews.find((view) => view.session.key === ctx.activeSessionKey) ?? sessionViews[0] ?? null;
   const activeSession = activeView?.session ?? null;
-  const activeTitle = activeSession ? sessionTitle(activeSession) : "工作站";
+  const activeTitle = activeSession ? sessionTitle(activeSession) : t("monitor.title");
   const activeCwd = activeSession?.cwd;
   const activeLiveness = activeView?.liveness;
   const telemetry = sessionViews.reduce(
@@ -429,9 +447,9 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
   const titlebarContext = useMemo(
     () => ({
       title: activeTitle,
-      subtitle: activeCwd || "等待本地 agent 事件",
+      subtitle: activeCwd || t("monitor.waiting"),
     }),
-    [activeCwd, activeTitle],
+    [activeCwd, activeTitle, t],
   );
   const titlebarActions = useMemo(
     () => (
@@ -439,14 +457,14 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
         {activeLiveness && (
           <span className={`liveness-pill ${activeLiveness}`}>
             <span className={`state-dot ${activeLiveness}`} />
-            {LIVENESS_LABEL[activeLiveness]}
+            {livenessLabel(activeLiveness, t)}
           </span>
         )}
         <button
           className={iconButtonClassName()}
           type="button"
           onClick={() => copyPath(activeCwd)}
-          aria-label="复制 cwd"
+          aria-label={t("monitor.copyCwd")}
           disabled={!activeCwd}
         >
           <Copy size={15} />
@@ -455,13 +473,13 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
           className={iconButtonClassName("default", "monitor-config-btn")}
           type="button"
           onClick={openConfig}
-          aria-label="活动流配置"
+          aria-label={t("monitor.streamConfig")}
         >
           <Settings size={16} />
         </button>
       </>
     ),
-    [activeCwd, activeLiveness, copyPath, openConfig],
+    [activeCwd, activeLiveness, copyPath, openConfig, t],
   );
   useTitlebarContext(titlebarContext);
   useTitlebarActions(titlebarActions);
@@ -469,12 +487,12 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="mx-auto w-full max-w-[980px] flex-1 overflow-y-auto px-loom-5 pb-[52px] pt-loom-5">
-        <div className="mb-loom-4 flex min-w-0 items-center gap-loom-1" aria-label="活动遥测">
+        <div className="mb-loom-4 flex min-w-0 items-center gap-loom-1" aria-label={t("monitor.telemetry")}>
           {(["active", "waiting", "idle", "ended"] as LivenessState[]).map((state) => (
             <span className={`telemetry-chip ${state}`} key={state}>
               <span className={`state-dot ${state}`} />
               <strong>{telemetry[state]}</strong>
-              {LIVENESS_LABEL[state]}
+              {livenessLabel(state, t)}
             </span>
           ))}
         </div>
@@ -499,9 +517,9 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
                             onClick={() => setExpanded((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
                             title={`${head.toolName} × ${group.events.length}`}
                           >
-                            <span className="activity-kind"><Icon size={14} /> {kindLabel(head.kind)}</span>
+                            <span className="activity-kind"><Icon size={14} /> {kindLabel(head.kind, t)}</span>
                             <strong>{head.toolName} × {group.events.length}</strong>
-                            <time><Clock3 size={13} /> {formatRelative(group.events[group.events.length - 1].ts, ctx.activityNow)} 前</time>
+                            <time><Clock3 size={13} /> {formatRelative(group.events[group.events.length - 1].ts, ctx.activityNow)} {t("monitor.before")}</time>
                           </button>
                         </article>
                       )}
@@ -509,12 +527,12 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
                         <article className={`activity-event ${folded ? "nested" : ""}`} key={event.id}>
                           <span className={`activity-dot ${event.kind}`} />
                           <div className="activity-event-row" title={event.detail || event.title}>
-                            <span className="activity-kind"><Icon size={14} /> {kindLabel(event.kind)}</span>
+                            <span className="activity-kind"><Icon size={14} /> {kindLabel(event.kind, t)}</span>
                             <div className="activity-event-main">
                               <strong>{event.title}</strong>
                               {event.detail && <span className="activity-event-detail">{event.detail}</span>}
                             </div>
-                            <time><Clock3 size={13} /> {formatRelative(event.ts, ctx.activityNow)} 前</time>
+                            <time><Clock3 size={13} /> {formatRelative(event.ts, ctx.activityNow)} {t("monitor.before")}</time>
                           </div>
                         </article>
                       ))}
@@ -523,20 +541,20 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
                 })}
               </div>
             ) : (
-              <div className="activity-empty large">暂无活动。启用活动流后，本地 Claude Code / Codex 的动作会实时出现在这里。</div>
+              <div className="activity-empty large">{t("monitor.empty")}</div>
             )}
           </div>
         </section>
         {!supported && (
-          <div className="activity-empty monitor-support-note">本地进程发现仅在 macOS 桌面环境可用，活动流事件仍会显示。</div>
+          <div className="activity-empty monitor-support-note">{t("monitor.macosNote")}</div>
         )}
       </div>
 
-      <Modal open={configOpen} onOpenChange={setConfigOpen} ariaLabel="活动流配置">
+      <Modal open={configOpen} onOpenChange={setConfigOpen} ariaLabel={t("monitor.streamConfig")}>
         <div className="settings-modal__panel activity-config-panel">
           <div className="settings-modal__head">
-            <h3>活动流接入</h3>
-            <button className={iconButtonClassName()} type="button" onClick={() => setConfigOpen(false)} aria-label="关闭" title="关闭">
+            <h3>{t("monitor.configTitle")}</h3>
+            <button className={iconButtonClassName()} type="button" onClick={() => setConfigOpen(false)} aria-label={t("monitor.close")} title={t("monitor.close")}>
               <X size={16} />
             </button>
           </div>
@@ -548,18 +566,18 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
                 <div className="activity-tool-head">
                   <span className={`activity-status ${state}`} />
                   <strong>{TOOL_LABEL[tool]}</strong>
-                  <small>{linkLabel(tool, st, ctx.activityNow)}</small>
+                  <small>{linkLabel(tool, st, ctx.activityNow, t)}</small>
                 </div>
                 <code>{st?.path}</code>
                 {st?.actionRequired && <p className="activity-note">{st.actionRequired}</p>}
                 <div className="activity-tool-actions">
                   {state === "off" ? (
                     <button className={buttonClassName("primary")} disabled={busyTool === tool} onClick={() => runConfig("enable", tool)}>
-                      <Power size={15} /> 启用
+                      <Power size={15} /> {t("monitor.enable")}
                     </button>
                   ) : (
                     <button className={buttonClassName()} disabled={busyTool === tool} onClick={() => runConfig("disable", tool)}>
-                      <PowerOff size={15} /> 断开接入
+                      <PowerOff size={15} /> {t("monitor.disconnect")}
                     </button>
                   )}
                 </div>
@@ -567,7 +585,7 @@ export function MonitorPanel({ ctx }: { ctx: SurfaceCtx }) {
             );
           })}
           <p className="activity-result-note">
-            只写全局配置，覆盖本机所有 agent。配置改动对正在运行的会话不生效，需重开该会话。
+            {t("monitor.configNote")}
           </p>
         </div>
       </Modal>
@@ -587,6 +605,7 @@ type RendererProvider = NonNullable<SettingsPayload["modelRegistry"]>["providers
 type RendererModel = RendererProvider["models"][number];
 
 export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
+  const { locale, setLocale, t } = useI18n();
   const s = ctx.settings;
   const [selectedModel, setSelectedModel] = useState("");
   const [addOpen, setAddOpen] = useState(false);
@@ -617,7 +636,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [selectedSkillSource, setSelectedSkillSource] = useState<SkillCatalogDto["sources"][number] | null>(null);
   const [skillModalOpen, setSkillModalOpen] = useState(false);
   const [pendingDeleteModel, setPendingDeleteModel] = useState<{ providerId: string; modelId: string; name: string } | null>(null);
-  const titlebarContext = useMemo(() => ({ title: "设置" }), []);
+  const titlebarContext = useMemo(() => ({ title: t("nav.settings") }), [t]);
   const permissionDefaults = {
     sandboxMode: "workspace-write" as const,
     approvalPolicy: "on-request" as const,
@@ -654,7 +673,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
     void reloadSkills();
   }, [reloadSkills, s?.skills]);
 
-  if (!s) return <div className="surface-empty">加载中…</div>;
+  if (!s) return <div className="surface-empty">{t("settings.loading")}</div>;
 
   async function save() {
     const [providerId, modelId] = selectedModel.split("/");
@@ -836,17 +855,17 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
       <section className="model-config skills-config">
         <div className="model-config__head">
           <div>
-            <h3>Skills</h3>
-            <p>管理全局与当前项目可用的 Agent Skills。</p>
+            <h3>{t("settings.skills")}</h3>
+            <p>{t("settings.manageSkills")}</p>
           </div>
-          <button className={iconButtonClassName()} type="button" onClick={reloadSkills} aria-label="重新扫描 Skills" title="重新扫描 Skills"><RefreshCw size={16} /></button>
+          <button className={iconButtonClassName()} type="button" onClick={reloadSkills} aria-label={t("settings.scanSkills")} title={t("settings.scanSkills")}><RefreshCw size={16} /></button>
         </div>
         <div className="settings-grid">
           <label className="field settings-grid__wide">
-            <span>添加全局来源 <em className="src">不会复制或删除原目录</em></span>
+            <span>{t("settings.addSource")} <em className="src">{t("settings.sourceNote")}</em></span>
             <div className="settings-inline">
               <input value={skillSourceDraft} onChange={(e) => setSkillSourceDraft(e.target.value)} placeholder="/path/to/skills" />
-              <button className={iconButtonClassName()} type="button" onClick={addSkillSource} aria-label="添加 Skill 来源" title="添加 Skill 来源"><Plus size={16} /></button>
+              <button className={iconButtonClassName("primary")} type="button" onClick={addSkillSource} aria-label={t("settings.addSkillSource")} title={t("settings.addSkillSource")}><Plus size={16} /></button>
             </div>
           </label>
         </div>
@@ -857,33 +876,33 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                 <div className="connection-title-row">
                   <div>
                     <div className="source-name-line">
-                      <div className="connection-name">{source.scope === "project" ? (source.projectName ?? "项目来源") : source.registered ? "全局来源" : "默认全局来源"}</div>
+                      <div className="connection-name">{source.scope === "project" ? (source.projectName ?? t("settings.projectSource")) : source.registered ? t("settings.globalSource") : t("settings.defaultGlobalSource")}</div>
                       <span className={`source-tag ${source.scope}`}>{source.scope}</span>
                     </div>
                     <div className="connection-meta">{source.rootPath} · {source.trusted ? "trusted" : "untrusted"}</div>
                   </div>
                 </div>
               </div>
-              <button className={iconButtonClassName()} type="button" aria-label="查看 Skills" title="查看 Skills" onClick={() => { setSelectedSkillSource(source); setSkillModalOpen(true); }}><Eye size={15} /></button>
-              <button className={iconButtonClassName()} type="button" aria-label="打开目录" title="打开目录" onClick={() => window.api.settings.openSkillSource(source.rootPath)}><FolderOpen size={15} /></button>
-              {source.registered && <button className={iconButtonClassName("danger")} type="button" onClick={() => removeSkillSource(source.rootPath)} aria-label={`移除 ${source.rootPath}`} title="移除来源"><Trash2 size={15} /></button>}
+              <button className={iconButtonClassName()} type="button" aria-label={t("settings.viewSkills")} title={t("settings.viewSkills")} onClick={() => { setSelectedSkillSource(source); setSkillModalOpen(true); }}><Eye size={15} /></button>
+              <button className={iconButtonClassName()} type="button" aria-label={t("settings.openDirectory")} title={t("settings.openDirectory")} onClick={() => window.api.settings.openSkillSource(source.rootPath)}><FolderOpen size={15} /></button>
+              {source.registered && <button className={iconButtonClassName("danger")} type="button" onClick={() => removeSkillSource(source.rootPath)} aria-label={`${t("settings.removeSource")} ${source.rootPath}`} title={t("settings.removeSource")}><Trash2 size={15} /></button>}
             </div>
           ))}
-          {(skillCatalog?.sources.length ?? 0) === 0 && <div className="empty-state compact"><div className="empty-state__title">暂无 Skill 来源</div></div>}
+          {(skillCatalog?.sources.length ?? 0) === 0 && <div className="empty-state compact"><div className="empty-state__title">{t("settings.noSkillSources")}</div></div>}
         </div>
       </section>
 
       <section className="model-config">
         <div className="model-config__head">
           <div>
-            <h3>模型配置</h3>
-            <p>管理已连接 Provider 的模型，并设置全局默认模型。</p>
+        <h3>{t("settings.modelConfig")}</h3>
+            <p>{t("settings.manageModels")}</p>
           </div>
-          <button className={iconButtonClassName("primary")} type="button" onClick={openAddForm} aria-label="添加模型" title="添加模型"><Plus size={17} /></button>
+          <button className={iconButtonClassName("primary")} type="button" onClick={openAddForm} aria-label={t("settings.addModel")} title={t("settings.addModel")}><Plus size={17} /></button>
         </div>
 
         <div className="model-config__block">
-          <div className="model-config__label">已添加模型</div>
+          <div className="model-config__label">{t("settings.configuredModels")}</div>
           <div className="connection-list">
             {configuredProviders.map((provider) => {
               const configuredModels = provider.models;
@@ -894,17 +913,17 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                       <div>
                         <div className="connection-name">{provider.name}</div>
                         <div className="connection-meta">
-                          {provider.id} · {provider.source} · {provider.baseUrl || "默认 Base URL"}
+                            {provider.id} · {provider.source} · {provider.baseUrl || t("settings.defaultBaseUrl")}
                         </div>
                       </div>
-                      <span className={`status-pill ${provider.availability}`}>{provider.availability === "available" ? "已连接" : provider.availability}</span>
+                      <span className={`status-pill ${provider.availability}`}>{provider.availability === "available" ? t("settings.connected") : provider.availability}</span>
                     </div>
                     <div className="model-chip-row">
                       {configuredModels.map((model) => (
                         <span key={model.id} className={`model-chip ${model.available ? "" : "empty"}`}>
                           <span>{model.name}</span>
-                          <button className={iconButtonClassName()} type="button" onClick={() => editProviderModel(provider, model)} aria-label="编辑" title={`编辑 ${model.name}`}><Pencil size={13} /></button>
-                          <button className={iconButtonClassName("danger")} type="button" onClick={() => setPendingDeleteModel({ providerId: provider.id, modelId: model.id, name: model.name })} aria-label="删除" title={`删除 ${model.name}`}><Trash2 size={13} /></button>
+                          <button className={iconButtonClassName()} type="button" onClick={() => editProviderModel(provider, model)} aria-label={t("settings.edit")} title={`${t("settings.edit")} ${model.name}`}><Pencil size={13} /></button>
+                          <button className={iconButtonClassName("danger")} type="button" onClick={() => setPendingDeleteModel({ providerId: provider.id, modelId: model.id, name: model.name })} aria-label={t("nav.delete")} title={`${t("nav.delete")} ${model.name}`}><Trash2 size={13} /></button>
                         </span>
                       ))}
                     </div>
@@ -914,8 +933,8 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
             })}
             {configuredProviders.length === 0 && (
               <div className="empty-state">
-                <div className="empty-state__title">还没有已添加的模型</div>
-                <div className="empty-state__body">点击“添加模型”从 Provider 注册表选择一个 Provider，然后填写模型和凭证。</div>
+                <div className="empty-state__title">{t("settings.noModels")}</div>
+                <div className="empty-state__body">{t("settings.noModelsBody")}</div>
               </div>
             )}
           </div>
@@ -923,9 +942,9 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
 
         <div className="model-config__block">
           <label className="field">
-            <span>默认模型 <em className="src">{availableModels.length} 个已配置模型</em></span>
-            <LoomSelect value={selectedModel || "__auto__"} onValueChange={(value) => setSelectedModel(value === "__auto__" ? "" : value)} disabled={availableModels.length === 0} placeholder={availableModels.length === 0 ? "暂无可用模型" : "自动选择第一个可用模型"} ariaLabel="默认模型">
-              <LoomSelectItem value="__auto__">{availableModels.length === 0 ? "暂无可用模型" : "自动选择第一个可用模型"}</LoomSelectItem>
+            <span>{t("settings.defaultModel")} <em className="src">{availableModels.length} {t("settings.configuredModels")}</em></span>
+            <LoomSelect value={selectedModel || "__auto__"} onValueChange={(value) => setSelectedModel(value === "__auto__" ? "" : value)} disabled={availableModels.length === 0} placeholder={availableModels.length === 0 ? t("settings.noAvailableModels") : t("settings.autoFirstModel")} ariaLabel={t("settings.defaultModel")}>
+              <LoomSelectItem value="__auto__">{availableModels.length === 0 ? t("settings.noAvailableModels") : t("settings.autoFirstModel")}</LoomSelectItem>
               {configuredProviders.map((provider) => {
                 const configuredModels = provider.models.filter((item) => item.available);
                 if (configuredModels.length === 0) return null;
@@ -941,28 +960,28 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
               })}
             </LoomSelect>
           </label>
-          {availableModels.length === 0 && <div className="ok-note">配置成功的模型才会出现在默认模型列表里。</div>}
+          {availableModels.length === 0 && <div className="ok-note">{t("settings.successfulModelsOnly")}</div>}
         </div>
-        {s.legacyKeyPresent && <div className="warn-note">检测到旧版应用数据库中仍有 API key。Loom 不再使用或迁移它，请把凭证写入 models.json。</div>}
-        {hasPlaintextSecret && <div className="warn-note">models.json 包含明文凭证；不要提交或同步到不可信位置。</div>}
+        {s.legacyKeyPresent && <div className="warn-note">{t("settings.legacyKey")}</div>}
+        {hasPlaintextSecret && <div className="warn-note">{t("settings.plaintextSecret")}</div>}
       </section>
 
-      <Modal open={addOpen} onOpenChange={setAddOpen} ariaLabel="添加模型配置">
+      <Modal open={addOpen} onOpenChange={setAddOpen} ariaLabel={t("settings.modelDialogAria")}>
           <div className="settings-modal__panel">
             <div className="settings-modal__head">
-              <h3>{editingModel ? "编辑模型" : "添加模型"}</h3>
-              <button className={iconButtonClassName()} type="button" onClick={() => setAddOpen(false)} aria-label="关闭" title="关闭"><X size={16} /></button>
+              <h3>{editingModel ? t("settings.editModel") : t("settings.addModel")}</h3>
+              <button className={iconButtonClassName()} type="button" onClick={() => setAddOpen(false)} aria-label={t("settings.close")} title={t("settings.close")}><X size={16} /></button>
             </div>
             {providerOptions.length === 0 && (
               <div className="empty-state compact">
-                <div className="empty-state__title">没有可配置的 Provider。</div>
-                <div className="empty-state__body">Provider 注册表为空，暂时无法添加模型。</div>
+                <div className="empty-state__title">{t("settings.noProvider")}</div>
+                <div className="empty-state__body">{t("settings.emptyRegistry")}</div>
               </div>
             )}
             <div className="settings-grid">
               <label className="field">
                 <span>Provider</span>
-                <LoomSelect value={providerId} onValueChange={selectProvider} disabled={providerOptions.length === 0 || Boolean(editingModel)} placeholder="选择 Provider" ariaLabel="Provider">
+                <LoomSelect value={providerId} onValueChange={selectProvider} disabled={providerOptions.length === 0 || Boolean(editingModel)} placeholder={t("settings.chooseProvider")} ariaLabel="Provider">
                   {providerOptions.map((provider) => (
                     <LoomSelectItem key={provider.id} value={provider.id}>
                       {provider.name} · {provider.id}
@@ -978,7 +997,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                 <>
                   {editingModel ? (
                     <div className="field model-static">
-                      <span>Model</span>
+                <span>{t("settings.modelConfig")}</span>
                       <div className="model-static__value">
                         <strong>{selectedModelOption?.name ?? modelId}</strong>
                         <em>{selectedModelOption?.id ?? modelId}</em>
@@ -987,13 +1006,13 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                   ) : (
                     <div className="field settings-grid__wide">
                       <span>
-                        Model <em className="src">{selectedModelIds.length}/{providerModelOptions.length} 已选</em>
+                        Model <em className="src">{selectedModelIds.length}/{providerModelOptions.length} {t("settings.selectedCount")}</em>
                       </span>
                       <div className="model-picker" role="group" aria-label="Model">
                         {providerModelOptions.length > 1 && (
                           <div className="model-picker__toolbar">
-                            <button type="button" onClick={() => setRegistryModelSelection(providerModelOptions.map((model) => model.id))}>全选</button>
-                            <button type="button" onClick={() => setRegistryModelSelection([])}>清空</button>
+                            <button type="button" onClick={() => setRegistryModelSelection(providerModelOptions.map((model) => model.id))}>{t("settings.selectAll")}</button>
+                            <button type="button" onClick={() => setRegistryModelSelection([])}>{t("settings.clear")}</button>
                           </div>
                         )}
                         <div className="model-picker__list">
@@ -1035,9 +1054,9 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                         {selectedRegistryModels[0].capabilities.images && <span>image</span>}
                       </>
                     ) : selectedRegistryModels.length > 1 ? (
-                      <span>将添加 {selectedRegistryModels.length} 个模型，共用同一个 Base URL 和 API key。</span>
+                      <span>{t("settings.modelsWillShare", { count: selectedRegistryModels.length })}</span>
                     ) : (
-                      <span>至少选择一个模型。</span>
+                      <span>{t("settings.selectAtLeastOne")}</span>
                     )}
                   </div>
                 </>
@@ -1045,7 +1064,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                 <>
                   <label className="field">
                     <span>API type</span>
-                    <LoomSelect value={api} onValueChange={setApi} placeholder="选择 API type" ariaLabel="API type">
+                    <LoomSelect value={api} onValueChange={setApi} placeholder={t("settings.chooseApiType")} ariaLabel="API type">
                       <LoomSelectItem value="openai-completions">openai-completions</LoomSelectItem>
                       <LoomSelectItem value="openai-responses">openai-responses</LoomSelectItem>
                       <LoomSelectItem value="anthropic-messages">anthropic-messages</LoomSelectItem>
@@ -1059,7 +1078,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                   </label>
                   <label className="field">
                     <span>Model name</span>
-                    <input value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="可选显示名" />
+                    <input value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder={t("settings.optionalDisplayName")} />
                   </label>
                   <label className="field">
                     <span>Context window</span>
@@ -1073,103 +1092,111 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
               )}
               <label className="field settings-grid__wide">
                 <span>API key</span>
-                <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="$OPENAI_API_KEY 或字面 key" />
+                <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={t("settings.apiKeyPlaceholder")} />
               </label>
             </div>
             {!useRegistryModel && (
               <div className="settings-checks">
-                <LoomCheckboxField checked={reasoning} onCheckedChange={setReasoning} label="支持推理" />
-                <LoomCheckboxField checked={images} onCheckedChange={setImages} label="支持图片输入" />
+                <LoomCheckboxField checked={reasoning} onCheckedChange={setReasoning} label={t("settings.supportsReasoning")} />
+                <LoomCheckboxField checked={images} onCheckedChange={setImages} label={t("settings.supportsImages")} />
               </div>
             )}
             <div className="settings-foot">
-              <button className={iconButtonClassName("primary")} type="button" onClick={addProviderModel} disabled={!canSaveModel} aria-label="保存模型" title="保存模型"><Check size={16} /></button>
+              <button className={iconButtonClassName("primary")} type="button" onClick={addProviderModel} disabled={!canSaveModel} aria-label={t("settings.saveModel")} title={t("settings.saveModel")}><Check size={16} /></button>
             </div>
           </div>
         </Modal>
 
       <section>
-        <h3>Agent 权限</h3>
-        <p className="settings-help">权限范围和审批策略分别控制 agent 能做什么、什么时候需要停下来询问。</p>
+        <h3>{t("settings.agentPermissions")}</h3>
+        <p className="settings-help">{t("settings.permissionsHelp")}</p>
         <div className="settings-grid">
           <label className="field">
-            <span>Sandbox 范围</span>
-            <LoomSelect value={sandboxMode} onValueChange={(value) => setSandboxMode(value as typeof sandboxMode)} placeholder="选择 Sandbox 范围" ariaLabel="Sandbox 范围">
-              <LoomSelectItem value="read-only">只读观察</LoomSelectItem>
-              <LoomSelectItem value="workspace-write">修改当前项目</LoomSelectItem>
-              <LoomSelectItem value="danger-full-access">完全访问</LoomSelectItem>
+            <span>{t("settings.sandbox")}</span>
+            <LoomSelect value={sandboxMode} onValueChange={(value) => setSandboxMode(value as typeof sandboxMode)} placeholder={t("settings.chooseSandbox")} ariaLabel={t("settings.sandbox")}>
+              <LoomSelectItem value="read-only">{t("settings.readOnly")}</LoomSelectItem>
+              <LoomSelectItem value="workspace-write">{t("settings.workspaceWrite")}</LoomSelectItem>
+              <LoomSelectItem value="danger-full-access">{t("settings.fullAccess")}</LoomSelectItem>
             </LoomSelect>
           </label>
           <label className="field">
             <span>Approval policy</span>
-            <LoomSelect value={approvalPolicy} onValueChange={(value) => setApprovalPolicy(value as typeof approvalPolicy)} placeholder="选择 Approval policy" ariaLabel="Approval policy">
-              <LoomSelectItem value="on-request">越界时询问</LoomSelectItem>
-              <LoomSelectItem value="untrusted">不可信命令询问</LoomSelectItem>
-              <LoomSelectItem value="never">从不询问</LoomSelectItem>
+            <LoomSelect value={approvalPolicy} onValueChange={(value) => setApprovalPolicy(value as typeof approvalPolicy)} placeholder={t("settings.chooseApprovalPolicy")} ariaLabel={t("settings.approvalPolicy")}>
+              <LoomSelectItem value="on-request">{t("settings.askOutOfBounds")}</LoomSelectItem>
+              <LoomSelectItem value="untrusted">{t("settings.askUntrusted")}</LoomSelectItem>
+              <LoomSelectItem value="never">{t("settings.neverAsk")}</LoomSelectItem>
             </LoomSelect>
           </label>
           <label className="field">
-            <span>审批人</span>
-            <LoomSelect value={approvalsReviewer} onValueChange={(value) => setApprovalsReviewer(value as typeof approvalsReviewer)} placeholder="选择审批人" ariaLabel="审批人">
-              <LoomSelectItem value="user">我</LoomSelectItem>
-              <LoomSelectItem value="auto-review">自动审查</LoomSelectItem>
+            <span>{t("settings.reviewer")}</span>
+            <LoomSelect value={approvalsReviewer} onValueChange={(value) => setApprovalsReviewer(value as typeof approvalsReviewer)} placeholder={t("settings.chooseReviewer")} ariaLabel={t("settings.reviewer")}>
+              <LoomSelectItem value="user">{t("settings.me")}</LoomSelectItem>
+              <LoomSelectItem value="auto-review">{t("settings.autoReview")}</LoomSelectItem>
             </LoomSelect>
           </label>
         </div>
-        <LoomCheckboxField checked={networkAccess} onCheckedChange={setNetworkAccess} label="允许命令联网（默认关闭）" />
-        <div className="ok-note">推荐：修改当前项目 · 越界时询问 · 我 · 网络关闭。</div>
+        <LoomCheckboxField checked={networkAccess} onCheckedChange={setNetworkAccess} label={t("settings.network")} />
+        <div className="ok-note">{t("settings.recommended")}</div>
       </section>
 
       <section>
-        <h3>外观</h3>
+        <h3>{t("settings.appearance")}</h3>
         <label className="field">
-          <span>主题</span>
-          <LoomSelect value={theme} onValueChange={(value) => setTheme(value as typeof theme)} placeholder="选择主题" ariaLabel="主题">
-            <LoomSelectItem value="system">跟随系统</LoomSelectItem>
-            <LoomSelectItem value="light">亮色</LoomSelectItem>
-            <LoomSelectItem value="dark">暗色</LoomSelectItem>
+          <span>{t("settings.language")}</span>
+          <LoomSelect value={locale} onValueChange={(value) => setLocale(value as typeof locale)} placeholder={t("settings.language")} ariaLabel={t("settings.language")}>
+            <LoomSelectItem value="zh-CN">{t("settings.languageChinese")}</LoomSelectItem>
+            <LoomSelectItem value="en">{t("settings.languageEnglish")}</LoomSelectItem>
+          </LoomSelect>
+          <em className="src">{t("settings.languageHelp")}</em>
+        </label>
+        <label className="field">
+          <span>{t("settings.theme")}</span>
+          <LoomSelect value={theme} onValueChange={(value) => setTheme(value as typeof theme)} placeholder={t("settings.theme")} ariaLabel={t("settings.theme")}>
+            <LoomSelectItem value="system">{t("settings.system")}</LoomSelectItem>
+            <LoomSelectItem value="light">{t("settings.light")}</LoomSelectItem>
+            <LoomSelectItem value="dark">{t("settings.dark")}</LoomSelectItem>
           </LoomSelect>
         </label>
       </section>
 
       <section>
-        <h3>工作站</h3>
+        <h3>{t("settings.workstation")}</h3>
         <LoomCheckboxField
           checked={monitorNotify}
           onCheckedChange={setMonitorNotify}
-          label="工作站桌面通知（agent 回合完成 / 需要输入时响声提醒）"
+          label={t("settings.monitorNotification")}
         />
       </section>
 
       <section className="settings-memory-section">
-        <h3>长期记忆</h3>
-        <p className="settings-help">跨会话记忆以 Markdown 保存。关闭后不会读取或运行后台提取；已有文件保留。</p>
+        <h3>{t("settings.memory")}</h3>
+        <p className="settings-help">{t("settings.memoryHelp")}</p>
         <div className="settings-memory-options">
-          <LoomCheckboxField checked={memoryEnabled} onCheckedChange={setMemoryEnabled} label="启用跨会话长期记忆" />
+          <LoomCheckboxField checked={memoryEnabled} onCheckedChange={setMemoryEnabled} label={t("settings.enableMemory")} />
           <LoomCheckboxField
             checked={backgroundExtraction}
             onCheckedChange={setBackgroundExtraction}
             disabled={!memoryEnabled}
-            label="回合结束后提取候选记忆"
-            description={<em className="src">默认关闭，开启后会调用后台模型</em>}
+            label={t("settings.extractCandidates")}
+            description={<em className="src">{t("settings.memoryDefaultOff")}</em>}
           />
-          <LoomCheckboxField checked={autoDream} onCheckedChange={setAutoDream} disabled={!memoryEnabled} label="允许 AutoDream 后台整理" />
+          <LoomCheckboxField checked={autoDream} onCheckedChange={setAutoDream} disabled={!memoryEnabled} label={t("settings.allowAutoDream")} />
         </div>
       </section>
 
       <div className="settings-foot settings-actions">
-        <button className={buttonClassName("primary")} onClick={save}>保存</button>
-        {saved && <span className="saved">已保存</span>}
+        <button className={buttonClassName("primary")} onClick={save}>{t("settings.save")}</button>
+        {saved && <span className="saved">{t("settings.saved")}</span>}
       </div>
       </div>
-      <Modal open={skillModalOpen} onOpenChange={setSkillModalOpen} ariaLabel={`${selectedSkillSource?.scope ?? ""} 来源 Skills`}>
+      <Modal open={skillModalOpen} onOpenChange={setSkillModalOpen} ariaLabel={`${selectedSkillSource?.scope === "project" ? t("settings.projectSource") : t("settings.globalSource")} Skills`}>
           <div className="settings-modal__panel" onClick={(event) => event.stopPropagation()}>
             <div className="settings-modal__head">
               <div>
-                <h3>{selectedSkillSource?.scope === "project" ? (selectedSkillSource.projectName ?? "项目来源") : "全局来源"} · Skills</h3>
+                <h3>{selectedSkillSource?.scope === "project" ? (selectedSkillSource.projectName ?? t("settings.projectSource")) : t("settings.globalSource")} · Skills</h3>
                 <div className="connection-meta">{selectedSkillSource?.rootPath ?? ""} · {selectedSkillSource?.trusted ? "trusted" : "untrusted"}</div>
               </div>
-              <button className={iconButtonClassName()} type="button" onClick={() => setSkillModalOpen(false)} aria-label="关闭 Skills 列表" title="关闭"><X size={16} /></button>
+              <button className={iconButtonClassName()} type="button" onClick={() => setSkillModalOpen(false)} aria-label={t("settings.closeSkills")} title={t("settings.closeSkills")}><X size={16} /></button>
             </div>
             <div className="skills-list skill-detail__list">
               {(skillCatalog?.skills ?? []).filter((skill) => selectedSkillSource && (skill.sourceId === selectedSkillSource.id || skill.rootPath === selectedSkillSource.rootPath)).map((skill) => (
@@ -1179,21 +1206,21 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                       <div className="connection-name">{skill.name}</div>
                       <div className="connection-meta">{skill.id} · {skill.hash}</div>
                     </div>
-                    <span className={`status-pill ${skill.active ? "available" : "unavailable"}`}>{skill.active ? "active" : "overridden"}</span>
+                    <span className={`status-pill ${skill.active ? "available" : "unavailable"}`}>{skill.active ? t("settings.active") : t("settings.overridden")}</span>
                   </div>
-                  <div className="ok-note skill-summary">{skill.description || "暂无描述"}</div>
+                  <div className="ok-note skill-summary">{skill.description || t("settings.noDescription")}</div>
                   {skill.diagnostics.map((d) => <div key={`${d.code}:${d.path ?? ""}`} className={d.level === "error" ? "warn-note" : "ok-note"}>{d.code}: {d.message}</div>)}
                 </div>
               ))}
-              {(skillCatalog?.skills ?? []).filter((skill) => selectedSkillSource && (skill.sourceId === selectedSkillSource.id || skill.rootPath === selectedSkillSource.rootPath)).length === 0 && <div className="empty-state compact"><div className="empty-state__title">没有发现可用 Skills</div></div>}
+              {(skillCatalog?.skills ?? []).filter((skill) => selectedSkillSource && (skill.sourceId === selectedSkillSource.id || skill.rootPath === selectedSkillSource.rootPath)).length === 0 && <div className="empty-state compact"><div className="empty-state__title">{t("settings.noSkillsFound")}</div></div>}
             </div>
           </div>
         </Modal>
       <ConfirmDialog
         open={Boolean(pendingDeleteModel)}
         onOpenChange={(open) => { if (!open) setPendingDeleteModel(null); }}
-        title="删除模型？"
-        description={pendingDeleteModel ? `确定要删除“${pendingDeleteModel.name}”吗？此操作会从当前 Provider 配置中移除模型。` : undefined}
+        title={t("settings.deleteModel")}
+        description={pendingDeleteModel ? t("settings.deleteModelDescription", { name: pendingDeleteModel.name }) : undefined}
         onConfirm={() => {
           if (!pendingDeleteModel) return;
           void deleteProviderModel(pendingDeleteModel.providerId, pendingDeleteModel.modelId);
@@ -1205,14 +1232,15 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
 }
 
 export const SURFACES: Surface[] = [
-  { id: "project", label: "项目", icon: IconProject, Panel: ProjectPanel },
+  { id: "project", label: "项目", translationKey: "nav.project", icon: IconProject, Panel: ProjectPanel },
   {
     id: "observatory",
     label: "工作站",
+    translationKey: "nav.observatory",
     icon: IconEye,
     Panel: MonitorPanel,
     badge: (ctx) => ctx.agentCount || null,
   },
-  { id: "memory", label: "记忆", icon: (props) => <Brain {...props} />, Panel: LongTermMemoryPanel },
-  { id: "settings", label: "设置", icon: IconSettings, Panel: SettingsPanel },
+  { id: "memory", label: "记忆", translationKey: "nav.memory", icon: (props) => <Brain {...props} />, Panel: LongTermMemoryPanel },
+  { id: "settings", label: "设置", translationKey: "nav.settings", icon: IconSettings, Panel: SettingsPanel },
 ];

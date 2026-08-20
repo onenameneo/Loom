@@ -7,6 +7,7 @@ import type { NodeMsg } from "../env";
 import { IconSplit } from "../icons";
 import { MessageBranchDialog, type MessageBranchMode } from "../ui/dialogs";
 import { CodeBlock } from "./CodeBlock";
+import { useI18n } from "../i18n/I18nProvider";
 
 export type MsgRole = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
 export type Density = "compact" | "comfortable";
@@ -105,6 +106,7 @@ function CheckpointView({ checkpoint, text }: { checkpoint?: CheckpointInfo; tex
 }
 
 function ThinkingView({ text }: { text: string }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
 
   return (
@@ -116,7 +118,7 @@ function ThinkingView({ text }: { text: string }) {
         onClick={() => setOpen((current) => !current)}
       >
         <Brain size={13} />
-        <span>Thinking</span>
+              <span>{t("message.thinkingLabel")}</span>
       </button>
       <div className={`m__thinking-collapse ${open ? "" : "is-collapsed"}`} aria-hidden={!open}>
         <div className="m__thinking-body">{text}</div>
@@ -163,6 +165,7 @@ export function Message({
   onBranch?: (mode: MessageBranchMode, sourceSeq: number) => void | Promise<void>;
   messageSeq?: number;
 }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);
@@ -188,21 +191,21 @@ export function Message({
   return (
     <div className={`m m--${role} m--${density}`} data-message-seq={typeof messageSeq === "number" ? messageSeq : undefined}>
       <div className="m__bar nodrag">
-        <button onClick={copy} title="复制">
+        <button onClick={copy} title={t("common.copy")}>
           {copied ? <Check size={13} /> : <Copy size={13} />}
         </button>
         {canRegenerate && (
-          <button onClick={onRegenerate} title="重答">
+          <button onClick={onRegenerate} title={t("message.regenerate")}>
             <RefreshCcw size={13} />
           </button>
         )}
         {canEdit && (
-          <button onClick={() => setEditing((v) => !v)} title="编辑重发">
+          <button onClick={() => setEditing((v) => !v)} title={t("message.editResend")}>
             <Pencil size={13} />
           </button>
         )}
         {role !== "user" && typeof sourceSeq === "number" && onBranch && (
-          <button onClick={() => setBranchOpen(true)} title="分支" aria-label="分支">
+          <button onClick={() => setBranchOpen(true)} title={t("message.branch")} aria-label={t("message.branch")}>
             <IconSplit size={13} />
           </button>
         )}
@@ -218,7 +221,7 @@ export function Message({
       )}
 
       {fileMentions && fileMentions.length > 0 && (
-        <div className="m__file-mentions" aria-label="引用文件">
+        <div className="m__file-mentions" aria-label={t("message.referencedFiles")}>
           {fileMentions.map((mention) => {
             const fileName = mention.path.split("/").pop() || mention.path;
             return (
@@ -245,8 +248,8 @@ export function Message({
             autoFocus
           />
           <div>
-            <button onClick={() => setEditing(false)}>取消</button>
-            <button className="primary" onClick={submitEdit}>重发</button>
+            <button onClick={() => setEditing(false)}>{t("common.cancel")}</button>
+            <button className="primary" onClick={submitEdit}>{t("message.resend")}</button>
           </div>
         </div>
       ) : role === "checkpoint" ? (
@@ -265,7 +268,7 @@ export function Message({
         <span className="m__plain">{text}</span>
       )}
       {role === "error" && onRetry && (
-        <button className="m__retry nodrag" onClick={onRetry}>重试</button>
+        <button className="m__retry nodrag" onClick={onRetry}>{t("message.retry")}</button>
       )}
       {role !== "user" && branchOpen && typeof sourceSeq === "number" && onBranch && (
         <MessageBranchDialog

@@ -13,6 +13,7 @@ import {
   type TraceSpanDto,
   type TraceSpanNode,
 } from "./traceState";
+import { useI18n } from "../i18n/I18nProvider";
 
 type WorkbenchPageId = "trace" | "files";
 type CompactionTracePayload = {
@@ -140,19 +141,21 @@ function isSkillMessage(message: any) {
 }
 
 function CopyButton({ value, label }: { value: unknown; label: string }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     await navigator.clipboard?.writeText(typeof value === "string" ? value : JSON.stringify(value, null, 2));
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
   };
-  return <button className="trace-copy" aria-label={`复制${label}`} onClick={copy}><Copy size={13} />{copied ? "已复制" : "复制"}</button>;
+  return <button className="trace-copy" aria-label={`${t("common.copy")}${label}`} onClick={copy}><Copy size={13} />{copied ? t("common.copied") : t("common.copy")}</button>;
 }
 
 function MessageList({ messages }: { messages: any[] }) {
+  const { t } = useI18n();
   return <div className="trace-messages">
     {messages.map((message, index) => <article className="trace-message trace-message--reading" key={`${message?.timestamp ?? index}-${index}`}>
-      <header><span>{message?.role ?? "message"}</span><CopyButton label="消息" value={message} /></header>
+      <header><span>{message?.role ?? "message"}</span><CopyButton label={t("workbench.copyMessage")} value={message} /></header>
       <pre>{textFromTraceMessage(message)}</pre>
     </article>)}
   </div>;
@@ -238,6 +241,7 @@ function TraceDisclosure({ id, label, summary, children, className, triggerClass
 }
 
 function LlmSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) {
+  const { t } = useI18n();
   const attrs = span.attributes as Record<string, any>;
   const messages = Array.isArray(attrs.messages) ? attrs.messages : [];
   const skills = messages.filter(isSkillMessage);
@@ -268,11 +272,11 @@ function LlmSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) 
         </dl>
       </div>
     </TraceDisclosure>}
-    {response != null && <TraceDisclosure id={disclosureId(turnId, span, "response")} label="Response" summary="completed">
-      <div className="trace-detail-body trace-response"><CopyButton label="响应" value={traceText(response)} /><pre>{traceText(response)}</pre></div>
+    {response != null && <TraceDisclosure id={disclosureId(turnId, span, "response")} label="Response" summary={t("workbench.completed")}>
+      <div className="trace-detail-body trace-response"><CopyButton label={t("workbench.copyResponse")} value={traceText(response)} /><pre>{traceText(response)}</pre></div>
     </TraceDisclosure>}
-    {attrs.systemPrompt != null && <TraceDisclosure id={disclosureId(turnId, span, "system-prompt")} label="System prompt" summary="已注入">
-      <div className="trace-detail-body"><CopyButton label="系统提示词" value={attrs.systemPrompt} /><pre>{traceText(attrs.systemPrompt)}</pre></div>
+    {attrs.systemPrompt != null && <TraceDisclosure id={disclosureId(turnId, span, "system-prompt")} label="System prompt" summary={t("workbench.injected")}>
+      <div className="trace-detail-body"><CopyButton label={t("workbench.copySystemPrompt")} value={attrs.systemPrompt} /><pre>{traceText(attrs.systemPrompt)}</pre></div>
     </TraceDisclosure>}
     {skills.length > 0 && <TraceDisclosure id={disclosureId(turnId, span, "skills-context")} label="Skills context" summary={skills.length}>
       <div className="trace-detail-body"><MessageList messages={skills} /></div>
@@ -281,7 +285,7 @@ function LlmSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) 
       <div className="trace-detail-body"><MessageList messages={conversation} /></div>
     </TraceDisclosure>
     {tools.length > 0 && <TraceDisclosure id={disclosureId(turnId, span, "tools")} label="Tools" summary={tools.length}>
-      <div className="trace-detail-body"><CopyButton label="工具定义" value={tools} /><Json value={tools} /></div>
+      <div className="trace-detail-body"><CopyButton label={t("workbench.copyTools")} value={tools} /><Json value={tools} /></div>
     </TraceDisclosure>}
     {attrs.options != null && <TraceDisclosure id={disclosureId(turnId, span, "options")} label="Options">
       <div className="trace-detail-body"><Json value={attrs.options} /></div>
@@ -293,6 +297,7 @@ function LlmSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) 
 }
 
 function ToolSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) {
+  const { t } = useI18n();
   const attrs = span.attributes as Record<string, any>;
   const usage = readUsageFacts(attrs.usage);
   return <section className="trace-section trace-tool-section trace-timeline-event">
@@ -301,7 +306,7 @@ function ToolSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string })
       <span>{attrs.id != null && <code>{String(attrs.id)}</code>}{attrs.id != null ? " · " : ""}{spanDurationMs(span)} · <SpanStatus status={span.status} /></span>
     </div>
     <TraceDisclosure id={disclosureId(turnId, span, "tool-arguments")} label="Arguments and result">
-      <div className="trace-detail-body"><CopyButton label="工具调用" value={span.attributes} /><Json value={span.attributes} /></div>
+      <div className="trace-detail-body"><CopyButton label={t("workbench.copyToolCall")} value={span.attributes} /><Json value={span.attributes} /></div>
     </TraceDisclosure>
     {usage && <dl className="trace-facts"><dt>Usage</dt><dd>{usageSummary(usage)}</dd></dl>}
   </section>;
@@ -318,6 +323,7 @@ function tokenDiagnosticText(label: string, value: { tokens?: number; exact?: bo
 }
 
 function CompactionSpanView({ span, turnId }: { span: TraceSpanNode; turnId: string }) {
+  const { t } = useI18n();
   const payload = span.attributes as unknown as CompactionTracePayload;
   const coverage = spanText(payload.coverage);
   const retainedTail = spanText(payload.retainedTail);
@@ -345,8 +351,8 @@ function CompactionSpanView({ span, turnId }: { span: TraceSpanNode; turnId: str
       {payload.reason && <><dt>Reason</dt><dd>{payload.reason}</dd></>}
       {payload.error && <><dt>Error</dt><dd>{payload.error}</dd></>}
     </dl>
-    <TraceDisclosure id={disclosureId(turnId, span, "compaction-diagnostics")} label="Diagnostics" summary={payload.diagnostics ? "available" : "event"}>
-      <div className="trace-detail-body"><CopyButton label="压缩事件" value={span.attributes} /><Json value={span.attributes} /></div>
+    <TraceDisclosure id={disclosureId(turnId, span, "compaction-diagnostics")} label="Diagnostics" summary={payload.diagnostics ? t("workbench.available") : t("workbench.event")}>
+      <div className="trace-detail-body"><CopyButton label={t("workbench.copyCompaction")} value={span.attributes} /><Json value={span.attributes} /></div>
     </TraceDisclosure>
   </section>;
 }
@@ -375,6 +381,7 @@ function TraceRecordView({ record }: { record: TraceRecordDto }) {
 }
 
 export function Workbench({ nodeId, projectId = null }: { nodeId: string | null; projectId?: string | null }) {
+  const { t } = useI18n();
   const [tabs, setTabs] = useState<WorkbenchPageId[]>(restoredTabs);
   const [selectedTab, setSelectedTab] = useState<WorkbenchPageId | null>(() => restoredTabs()[0] ?? null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -442,9 +449,9 @@ export function Workbench({ nodeId, projectId = null }: { nodeId: string | null;
     }
     return () => { dead = true; off(); };
   }, [nodeId, tabs]);
-  if (!tabs.length) return <div className="grid h-full place-items-center p-loom-4"><div className="grid w-[min(100%,360px)] gap-loom-1" role="menu" aria-label="打开工作台页面">{(Object.keys(WORKBENCH_PAGES) as WorkbenchPageId[]).map((page) => { const PageIcon = WORKBENCH_PAGES[page].icon; return <button type="button" key={page} className="flex w-full cursor-pointer items-center gap-loom-3 rounded-loom-md border-0 bg-transparent p-loom-3 text-left text-[13px] font-medium text-loom-text hover:bg-loom-surface-2" role="menuitem" onClick={() => open(page)}><PageIcon size={18} /><span className="flex-1">{WORKBENCH_PAGES[page].label}</span>{page === "trace" && <kbd className="rounded-loom-pill bg-loom-surface-2 px-[7px] py-[2px] font-loom-mono text-[10px] text-loom-muted">⌘R</kbd>}</button>; })}</div></div>;
+  if (!tabs.length) return <div className="grid h-full place-items-center p-loom-4"><div className="grid w-[min(100%,360px)] gap-loom-1" role="menu" aria-label={t("workbench.openPage")}>{(Object.keys(WORKBENCH_PAGES) as WorkbenchPageId[]).map((page) => { const PageIcon = WORKBENCH_PAGES[page].icon; return <button type="button" key={page} className="flex w-full cursor-pointer items-center gap-loom-3 rounded-loom-md border-0 bg-transparent p-loom-3 text-left text-[13px] font-medium text-loom-text hover:bg-loom-surface-2" role="menuitem" onClick={() => open(page)}><PageIcon size={18} /><span className="flex-1">{WORKBENCH_PAGES[page].label}</span>{page === "trace" && <kbd className="rounded-loom-pill bg-loom-surface-2 px-[7px] py-[2px] font-loom-mono text-[10px] text-loom-muted">⌘R</kbd>}</button>; })}</div></div>;
   return <Tabs.Root className="flex h-full min-w-0 flex-col" value={selectedTab ?? tabs[0]} onValueChange={(value) => setSelectedTab(value as WorkbenchPageId)}>
-    <Tabs.List className="flex min-h-11 flex-none items-center gap-loom-2 overflow-x-auto border-b border-loom-border p-loom-2" aria-label="工作台页面">
+    <Tabs.List className="flex min-h-11 flex-none items-center gap-loom-2 overflow-x-auto border-b border-loom-border p-loom-2" aria-label={t("workbench.pages")}>
       {tabs.map((page) => {
         const PageIcon = WORKBENCH_PAGES[page].icon;
         const isSelected = selectedTab === page;
@@ -457,12 +464,12 @@ export function Workbench({ nodeId, projectId = null }: { nodeId: string | null;
           <Tabs.Trigger value={page} className="inline-flex min-w-0 cursor-pointer items-center gap-loom-2 border-0 bg-transparent p-0 text-left text-inherit outline-none focus-visible:outline-2 focus-visible:outline-loom-accent focus-visible:outline-offset-1">
             <PageIcon size={14} /><span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{WORKBENCH_PAGES[page].label}</span>
           </Tabs.Trigger>
-          <button type="button" className="cursor-pointer rounded-loom-sm border-0 bg-transparent p-[2px] text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text focus-visible:outline focus-visible:outline-loom-accent" aria-label={`关闭 ${WORKBENCH_PAGES[page].label}`} onClick={(event) => { event.stopPropagation(); close(page); }}><X size={13} /></button>
+          <button type="button" className="cursor-pointer rounded-loom-sm border-0 bg-transparent p-[2px] text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text focus-visible:outline focus-visible:outline-loom-accent" aria-label={`${t("dialog.close")} ${WORKBENCH_PAGES[page].label}`} onClick={(event) => { event.stopPropagation(); close(page); }}><X size={13} /></button>
         </div>;
       })}
       <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenu.Trigger asChild>
-          <button ref={addRef} type="button" className="grid h-7 w-7 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-[2px] text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text focus-visible:outline focus-visible:outline-loom-accent" aria-label="打开页面"><Plus size={16} /></button>
+          <button ref={addRef} type="button" className="grid h-7 w-7 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-[2px] text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text focus-visible:outline focus-visible:outline-loom-accent" aria-label={t("workbench.open")}><Plus size={16} /></button>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal container={document.getElementById("app-overlay-root") ?? undefined}>
           <DropdownMenu.Content className="z-[220] min-w-40 rounded-loom-md border border-loom-border bg-loom-surface p-loom-1 shadow-loom-float" sideOffset={4} align="end" collisionPadding={8} onCloseAutoFocus={(event) => { event.preventDefault(); addRef.current?.focus(); }}>
@@ -481,14 +488,14 @@ export function Workbench({ nodeId, projectId = null }: { nodeId: string | null;
       readingHistoryRef.current = !atNewest;
       if (atNewest) setHasNewActivity(false);
     }}>
-      {hasNewActivity && <button className="sticky top-0 z-[1] mb-loom-2 cursor-pointer rounded-loom-sm border border-loom-border bg-loom-surface px-loom-2 py-loom-1 font-loom-ui text-[10px] text-loom-text focus-visible:outline focus-visible:outline-loom-accent" onClick={() => { inspectorRef.current?.scrollTo({ top: 0, behavior: "smooth" }); readingHistoryRef.current = false; setHasNewActivity(false); }}>有新的 Trace 活动</button>}
-      {metrics && <section className="trace-section trace-metrics-summary" aria-label="Usage summary">
-        <div className="trace-section-heading"><div><h3>Usage summary</h3><p>当前节点的历史累计</p></div><span className="trace-metrics-summary__scope">LIFETIME</span></div>
+      {hasNewActivity && <button className="sticky top-0 z-[1] mb-loom-2 cursor-pointer rounded-loom-sm border border-loom-border bg-loom-surface px-loom-2 py-loom-1 font-loom-ui text-[10px] text-loom-text focus-visible:outline focus-visible:outline-loom-accent" onClick={() => { inspectorRef.current?.scrollTo({ top: 0, behavior: "smooth" }); readingHistoryRef.current = false; setHasNewActivity(false); }}>{t("workbench.newTrace")}</button>}
+      {metrics && <section className="trace-section trace-metrics-summary" aria-label={t("workbench.usage")}>
+        <div className="trace-section-heading"><div><h3>{t("workbench.usage")}</h3><p>{t("workbench.history")}</p></div><span className="trace-metrics-summary__scope">LIFETIME</span></div>
         <div className="trace-metrics-summary__hero">
           <div className="trace-metric-card trace-metric-card--primary"><span>Total tokens</span><strong>{formatTokenCount(readUsageFacts(metrics.usage)?.total)}</strong></div>
           {typeof metrics.usage?.cost?.total === "number" && <div className="trace-metric-card"><span>Cost</span><strong>${metrics.usage.cost.total.toFixed(4)}</strong></div>}
         </div>
-        <div className="trace-metrics-summary__grid" aria-label="运行指标">
+        <div className="trace-metrics-summary__grid" aria-label={t("workbench.metrics")}>
           <div className="trace-metric-card"><span>Turns</span><strong>{metrics.turns}</strong></div>
           <div className="trace-metric-card"><span>LLM calls</span><strong>{metrics.llmRequests}</strong></div>
           <div className="trace-metric-card"><span>Tools</span><strong>{metrics.toolCalls}</strong></div>
@@ -507,7 +514,7 @@ export function Workbench({ nodeId, projectId = null }: { nodeId: string | null;
           </div>;
         })()}
       </section>}
-      {!nodeId ? <p>选择一个节点以查看 trace。</p> : !trace?.order.length ? <p>此节点运行后，实际模型请求、响应和工具调用会出现在这里。</p> : [...trace.order].reverse().map((turnId) => {
+      {!nodeId ? <p>{t("workbench.selectNode")}</p> : !trace?.order.length ? <p>{t("workbench.noTrace")}</p> : [...trace.order].reverse().map((turnId) => {
         const record = trace.recordsByTurnId[turnId];
         return record ? <TraceRecordView key={record.turnId} record={record} /> : null;
       })}

@@ -5,6 +5,8 @@ import { useTitlebarContext } from "../titlebar/Titlebar";
 import Canvas from "./Canvas";
 import ChatView from "./ChatView";
 import { branchTitleFromCandidates, DEFAULT_BRANCH_TITLE, DEFAULT_ROOT_TITLE } from "../../../common/titleDefaults";
+import { useI18n } from "../i18n/I18nProvider";
+import { localizedNodeTitle } from "../i18n/titleLabels";
 
 // 会话主视图：对话优先、按需成画布。
 //   · 只有起点（无分支）→ 居中聊天视图（ChatView）。
@@ -41,6 +43,7 @@ export default function SessionCanvas({
   onReturnToBranch?: (source: BranchSource) => void | Promise<void>;
   focusMessageSeq?: number;
 }) {
+  const { t } = useI18n();
   const [nodeList, setNodeList] = useState<CanvasNodeDto[]>([]);
   const [nodeCount, setNodeCount] = useState(1);
 
@@ -92,7 +95,7 @@ export default function SessionCanvas({
         await window.api.canvas.create({
           sessionId: sessionId,
           parentId: chatNode.id,
-          seed: { text: seedText, from: chatNode.title || DEFAULT_ROOT_TITLE, parent: chatNode.id },
+          seed: { text: seedText, from: localizedNodeTitle(chatNode.title || DEFAULT_ROOT_TITLE, t, chatNode.titleState), parent: chatNode.id },
           title: branchTitleFromCandidates({
             selectedText: seedText,
             currentPrompt: [...chatNode.messages].reverse().find((msg) => msg.role === "user")?.text,
@@ -104,7 +107,7 @@ export default function SessionCanvas({
       onModeChange?.("canvas"); // Canvas 会自行 open 载入 root+新会话
       onTreeChange?.();
     },
-    [chatNode, sessionId, onModeChange, onTreeChange],
+    [chatNode, sessionId, onModeChange, onTreeChange, t],
   );
 
   const branchMessageFromChat = useCallback(

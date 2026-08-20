@@ -15,6 +15,7 @@ import { selectNodeLiveTurn, selectNodeTodoPlan, useWorkspaceStore } from "../wo
 import { TodoProgressPanel } from "../composer/TodoProgressPanel";
 import { ComposerTelemetryLine } from "../composer/ComposerTelemetryLine";
 import { useNodeMetrics } from "../composer/useNodeMetrics";
+import { useI18n } from "../i18n/I18nProvider";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
 type Msg = { id: number; role: Role; text: string; thinking?: string; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
@@ -65,6 +66,7 @@ export default function ChatView({
   noKey: boolean;
   goSettings: () => void;
 }) {
+  const { t } = useI18n();
   const idRef = useRef(1);
   const initialMessagesRef = useRef({ nodeId, messages: initialMessages });
   const goSettingsRef = useRef(goSettings);
@@ -142,19 +144,19 @@ export default function ChatView({
           className="titlebar-button canvas-titlebar-action"
           type="button"
           onClick={onExpandCanvas}
-          aria-label="展开画布"
-          title="展开画布"
+          aria-label={t("chat.expandCanvas")}
+          title={t("chat.expandCanvas")}
         >
           <IconProject size={15} />
         </button>
         {noKey && (
           <button className="chip-warn" type="button" onClick={openSettings}>
-            未配置 API key · 去设置
+            {t("chat.noApiKey")}
           </button>
         )}
       </>
     ),
-    [noKey, onExpandCanvas, openSettings],
+    [noKey, onExpandCanvas, openSettings, t],
   );
   useTitlebarActions(titlebarActions);
 
@@ -285,7 +287,7 @@ export default function ChatView({
         case "error":
           setThinking(false);
           setBusy(false);
-          setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: String(e.payload ?? "出错了") }]);
+          setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: String(e.payload ?? t("chat.genericError")) }]);
           break;
       }
     });
@@ -334,7 +336,7 @@ export default function ChatView({
     setDraftSkills([]);
     localStorage.removeItem(`loom:draft:${nodeId}`);
     if (!window.api) {
-      setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: "浏览器预览：在 Electron 中运行（pnpm dev）以对话。" }]);
+      setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: t("chat.browserPreview") }]);
       return { ok: false };
     }
     setBusy(true);
@@ -343,13 +345,13 @@ export default function ChatView({
       ? await window.api.canvas.send(nodeId, text, images, skillIds, mentions)
       : await window.api.canvas.send(nodeId, text, images, skillIds);
     if (!result.ok && result.reason === "file-mention-error") {
-      const details = result.errors?.map((error) => `@${error.path}：${error.message}`).join("；") || "文件无法读取";
+      const details = result.errors?.map((error) => `@${error.path}: ${error.message}`).join("; ") || "Unable to read file";
       setBusy(false);
       setThinking(false);
       setInput(text);
       setMsgs((m) => [
         ...m.filter((message) => message.id !== optimisticId),
-        { id: idRef.current++, role: "error", text: `文件引用失败：${details}。请移除引用后重试。` },
+        { id: idRef.current++, role: "error", text: t("chat.fileReferenceFailed", { details }) },
       ]);
     }
     return result;
@@ -433,11 +435,11 @@ export default function ChatView({
       const result = await window.api.canvas.compact(nodeId);
       if (result.ok) {
         if (result.node) reloadFromInitial(result.node.messages ?? [], nodeId);
-        setMsgs((m) => [...m, { id: idRef.current++, role: "tool", text: "压缩完成。已插入压缩摘要。" }]);
+        setMsgs((m) => [...m, { id: idRef.current++, role: "tool", text: t("chat.compactionDone") }]);
       } else if (result.reason === "not_needed") {
-        setMsgs((m) => [...m, { id: idRef.current++, role: "tool", text: "压缩未执行：当前上下文还不需要压缩。" }]);
+        setMsgs((m) => [...m, { id: idRef.current++, role: "tool", text: t("chat.compactionSkipped") }]);
       } else {
-        setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: `压缩失败：${result.error ?? result.reason ?? "unknown"}` }]);
+        setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: t("chat.compactionFailed", { error: result.error ?? result.reason ?? "unknown" }) }]);
       }
       void refreshMetrics();
     } finally {
@@ -483,7 +485,7 @@ export default function ChatView({
     return (
       <button className="branch-return-notice" type="button" onClick={() => void onReturnToBranch()}>
         <IconSplit size={14} aria-hidden="true" />
-        <span>从聊天中继续</span>
+        <span>{t("chat.continue")}</span>
       </button>
     );
   }
@@ -506,19 +508,19 @@ export default function ChatView({
                 <div className="persona persona--chatview">
                   <textarea
                     value={persona}
-                    placeholder="留空使用默认 system prompt"
+                    placeholder={t("chat.defaultPersona")}
                     onChange={(e) => setPersona(e.target.value)}
                   />
-                  <button onClick={savePersona}>保存</button>
+                  <button onClick={savePersona}>{t("chat.save")}</button>
                 </div>
               )}
             </div>
           )}
           {msgs.length === 0 && !thinking && (
             <div className="cv-empty">
-              开始一段思考。
+              {t("node.startThinking")}
               <br />
-              <span className="mono">在回复里划选文字，即可岔出一条分支</span>
+              <span className="mono">{t("chat.branchHint")}</span>
             </div>
           )}
           {groupToolTimelineMessages(msgs).map((item) => (
@@ -551,7 +553,7 @@ export default function ChatView({
           ))}
           {thinking && !liveTurn && (
             <div className="thinking">
-              <span className="dot">·</span> 思考中…
+              <span className="dot">·</span> {t("chat.thinking")}
             </div>
           )}
           {tb && (
@@ -567,7 +569,7 @@ export default function ChatView({
               onPointerDown={(e) => e.stopPropagation()}
             >
               <button onClick={doBranch}>
-                <span><IconSplit size={13} /> 从这里展开</span>
+                <span><IconSplit size={13} /> {t("chat.expandFromHere")}</span>
                 <small>{tb.text.length > 40 ? `${tb.text.slice(0, 40)}…` : tb.text}</small>
               </button>
               <button
@@ -575,16 +577,16 @@ export default function ChatView({
                 type="button"
                 aria-pressed={tb.includeParentContext}
                 onClick={() => setTb((current) => current && { ...current, includeParentContext: !current.includeParentContext })}
-                title="创建时包含父级当前上下文；创建后保持冻结"
+              title={t("chat.freezeContext")}
               >
-                创建时包含父级上下文
+                {t("node.contextIncluded")}
               </button>
             </div>
           )}
         </div>
       </div>
       {!autoScroll && (
-        <button className="to-latest" type="button" aria-label="回到最新" title="回到最新" onClick={() => {
+        <button className="to-latest" type="button" aria-label={t("chat.backToLatest")} title={t("chat.backToLatest")} onClick={() => {
           setAutoScroll(true);
           requestAnimationFrame(() => {
             const el = scrollRef.current;
@@ -601,7 +603,7 @@ export default function ChatView({
           onChange={setInput}
           busy={isBusy}
           stopPending={stopPending}
-          placeholder={awaitingApproval ? "等待工具审批…" : isBusy ? "生成中…" : "随心输入…（Enter 发送，Shift+Enter 换行）"}
+          placeholder={awaitingApproval ? t("chat.approvalPlaceholder") : isBusy ? t("chat.generatingPlaceholder") : t("chat.inputPlaceholder")}
           topAccessory={(
             <>
               <TodoProgressPanel plan={todoPlan} />

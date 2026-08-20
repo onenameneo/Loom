@@ -27,6 +27,8 @@ import { finishResizeInteraction, guardResizeNodeChanges } from "./resizeLifecyc
 import { ResizeSession } from "./resizeSession";
 import { branchTitleFromCandidates, DEFAULT_BRANCH_TITLE, DEFAULT_ROOT_TITLE } from "../../../common/titleDefaults";
 import { publishNodeUpdate, subscribeNodeUpdates, type NodeUpdate } from "./nodeUpdates";
+import { useI18n } from "../i18n/I18nProvider";
+import { localizedNodeTitle } from "../i18n/titleLabels";
 
 const nodeTypes = { chatThread: ChatThreadNode };
 const defaultEdgeOptions = { type: "default" as const };
@@ -96,6 +98,7 @@ function toNode(
   fresh = false,
   actions?: Record<string, unknown>,
   dirtyLayout?: { x: number; y: number; width: number; height: number },
+  translate?: ReturnType<typeof useI18n>["t"],
 ): Node {
   const resolved = resolveNodeLayout(
     dto,
@@ -112,7 +115,8 @@ function toNode(
       sessionId: dto.sessionId,
       projectId: dto.projectId,
       parentId: dto.parentId,
-      title: dto.title,
+      title: translate ? localizedNodeTitle(dto.title, translate, dto.titleState) : dto.title,
+      titleState: dto.titleState,
       seed: dto.seed,
       messages: dto.messages,
       hasFrozenContext: dto.hasFrozenContext,
@@ -172,6 +176,7 @@ function CanvasContent({
   onTreeChange,
   onCreateChatBranch,
 }: CanvasProps) {
+  const { t } = useI18n();
   const [nodes, setNodes, applyNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -662,7 +667,7 @@ function CanvasContent({
       }
       if (!alive) return;
       const pos = layout(dtos);
-      titleRef.current = new Map(dtos.map((d) => [d.id, d.title]));
+      titleRef.current = new Map(dtos.map((d) => [d.id, localizedNodeTitle(d.title, t, d.titleState)]));
       const nodeActions = actions();
       setNodes(
         dtos.map((d) =>
@@ -673,6 +678,7 @@ function CanvasContent({
             false,
             nodeActions,
             layoutStore.getDirty(sessionId, d.id),
+            t,
           ),
         ),
       );
@@ -681,7 +687,7 @@ function CanvasContent({
     return () => {
       alive = false;
     };
-  }, [sessionId, setNodes, setEdges, actions, layoutStore]);
+  }, [sessionId, setNodes, setEdges, actions, layoutStore, t]);
 
   // 进入画布时的取景：把主节点（root）或指定聚焦节点以 1:1(100%) 居中，
   // 而不是缩放到能装下整棵树——多节点时那样每张卡片都太小。首帧瞬时定位（不动画），
@@ -769,6 +775,7 @@ function CanvasContent({
           true,
           nodeActions,
           initialLayout,
+          t,
         );
         return nds.concat(newNode);
       });
@@ -778,7 +785,7 @@ function CanvasContent({
       onSelectedNode?.(id);
       treeChangeRef.current?.();
     },
-    [sessionId, model, nodes, setNodes, setEdges, actions, layoutStore, onSelectedNode],
+    [sessionId, model, nodes, setNodes, setEdges, actions, layoutStore, onSelectedNode, t],
   );
 
   const branchFromMessage = useCallback(
@@ -811,7 +818,7 @@ function CanvasContent({
       titleRef.current.set(result.node.id, result.node.title);
       setNodes((current) => {
         if (current.some((node) => node.id === result.node!.id)) return current;
-        return current.concat(toNode(result.node!, { x: initialLayout.x, y: initialLayout.y }, model, true, nodeActions, initialLayout));
+        return current.concat(toNode(result.node!, { x: initialLayout.x, y: initialLayout.y }, model, true, nodeActions, initialLayout, t));
       });
       layoutStore.enqueue(sessionId, result.node.id, initialLayout);
       setEdges((current) => current.some((edge) => edge.id === `e-${sourceNodeId}-${result.node!.id}`)
@@ -820,7 +827,7 @@ function CanvasContent({
       onSelectedNode?.(result.node.id);
       treeChangeRef.current?.();
     },
-    [actions, layoutStore, model, nodes, onCreateChatBranch, onSelectedNode, sessionId, setEdges, setNodes],
+    [actions, layoutStore, model, nodes, onCreateChatBranch, onSelectedNode, sessionId, setEdges, setNodes, t],
   );
   messageBranchRef.current = branchFromMessage;
 
@@ -907,16 +914,16 @@ function CanvasContent({
         <div
           className="canvas-layout-notice nodrag absolute left-1/2 top-loom-3 z-30 flex -translate-x-1/2 items-center gap-loom-2 rounded-loom-md border border-loom-border-strong bg-loom-surface px-loom-2 py-loom-2 text-[11.5px] text-loom-muted shadow-loom-float"
           role="status"
-          aria-label="布局保存状态"
+          aria-label={t("canvas.layoutStatus")}
         >
-          <span>布局尚未保存</span>
+          <span>{t("canvas.layoutUnsaved")}</span>
           <button
             type="button"
             className="canvas-layout-retry cursor-pointer border-0 bg-transparent p-0 font-inherit font-medium text-loom-accent outline-none focus-visible:outline-1 focus-visible:outline-loom-accent focus-visible:outline-offset-2"
             onClick={() => void layoutPersistence.retry()}
-            aria-label="重试保存布局"
+            aria-label={t("canvas.retryLayout")}
           >
-            重试
+            {t("message.retry")}
           </button>
         </div>
       )}
@@ -977,8 +984,8 @@ function CanvasContent({
         onOpenChange={(open) => {
           if (!open) setDeletingNodeId(null);
         }}
-        title="删除这个分支及其后代？"
-        description="此操作不可撤销。"
+        title={t("chat.deleteBranchTitle")}
+        description={t("nav.deleteIrreversible")}
         onConfirm={() => void confirmDeleteNode()}
       />
     </BranchContext.Provider>

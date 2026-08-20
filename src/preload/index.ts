@@ -172,6 +172,7 @@ const api = {
   settings: {
     get: (): Promise<any> => ipcRenderer.invoke("settings:get"),
     set: (patch: any): Promise<any> => ipcRenderer.invoke("settings:set", patch),
+    setLocale: (locale: "zh-CN" | "en"): void => ipcRenderer.send("settings:locale", locale),
     getPermissions: (): Promise<any> => ipcRenderer.invoke("settings:getPermissions"),
     setPermissions: (patch: any): Promise<any> => ipcRenderer.invoke("settings:setPermissions", patch),
     setGlobalModel: (model: { providerId: string; modelId: string }): Promise<{ ok: boolean }> =>

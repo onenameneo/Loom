@@ -1,4 +1,5 @@
 import type { AgentMetricTotals } from "../../../common/telemetry";
+import { useI18n } from "../i18n/I18nProvider";
 
 function compact(value: number | undefined): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
@@ -22,6 +23,7 @@ function cacheShare(metrics: AgentMetricTotals | null | undefined): string {
 }
 
 export function ComposerTelemetryLine({ metrics }: { metrics?: AgentMetricTotals | null }) {
+  const { t } = useI18n();
   const totals = metrics;
   const approximate = totals?.usage?.exact === false;
   const tokenPrefix = approximate ? "~" : "";
@@ -29,18 +31,18 @@ export function ComposerTelemetryLine({ metrics }: { metrics?: AgentMetricTotals
     ? `${Math.round(totals.outputTokensPerSecond)} tok/s`
     : "—";
   const items = [
-    ["首 token 平均", averageTtft(totals)],
-    ["LLM 输出速率", outputRate],
-    ["缓存占比", `${tokenPrefix}${cacheShare(totals)}`],
-    ["输入累计", `${tokenPrefix}${compact(totals?.usage?.input)} tok`],
-    ["输出累计", `${tokenPrefix}${compact(totals?.usage?.output)} tok`],
+    [t("telemetry.firstToken"), averageTtft(totals)],
+    [t("telemetry.outputRate"), outputRate],
+    [t("telemetry.cacheShare"), `${tokenPrefix}${cacheShare(totals)}`],
+    [t("telemetry.inputTotal"), `${tokenPrefix}${compact(totals?.usage?.input)} tok`],
+    [t("telemetry.outputTotal"), `${tokenPrefix}${compact(totals?.usage?.output)} tok`],
   ];
   return (
     <div
       className="composer-telemetry"
-      aria-label="当前节点累计运行指标"
+      aria-label={t("telemetry.label")}
       aria-live="polite"
-      title="当前节点累计统计；完成新回合后刷新。缓存占比 = 缓存读取 ÷（普通输入 + 缓存读取）；LLM 输出速率 = 输出 token ÷ LLM 请求耗时（包含首 token 等待）"
+      title={t("telemetry.title")}
     >
       {items.map(([label, value], index) => (
         <span className="composer-telemetry-item" key={`${label}-${value}`}>

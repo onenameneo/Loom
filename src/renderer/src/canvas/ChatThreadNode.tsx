@@ -18,6 +18,7 @@ import { selectNodeTodoPlan } from "../workspace/store";
 import { TodoProgressPanel } from "../composer/TodoProgressPanel";
 import { ComposerTelemetryLine } from "../composer/ComposerTelemetryLine";
 import { useNodeMetrics } from "../composer/useNodeMetrics";
+import { useI18n } from "../i18n/I18nProvider";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
 type Msg = { id: number; role: Role; text: string; thinking?: string; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
@@ -85,6 +86,7 @@ const NODE_COLORS = ["gray", "red", "orange", "yellow", "green", "blue", "purple
 // 画布节点 = 一个活的 pi 对话线程（「索引卡片」）。发消息走 window.api.canvas，
 // 订阅本 nodeId 的流式事件；头部显示 token 预算（含/不含祖先）与挂载开关。
 export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
+  const { t } = useI18n();
   const { id, data } = props;
   const branch = useContext(BranchContext);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -293,7 +295,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
         case "error":
           setThinking(false);
           setBusy(false);
-          setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: String(e.payload ?? "出错了") }]);
+          setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: String(e.payload ?? t("chat.genericError")) }]);
           break;
       }
     });
@@ -345,7 +347,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     setDraftSkills([]);
     localStorage.removeItem(`loom:draft:${id}`);
     if (!window.api) {
-      setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: "浏览器预览：在 Electron 中运行（pnpm dev）以对话。" }]);
+      setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: t("node.browserPreview") }]);
       return { ok: false };
     }
     setBusy(true);
@@ -354,13 +356,13 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
       ? await window.api.canvas.send(id, text, images, skillIds, mentions)
       : await window.api.canvas.send(id, text, images, skillIds);
     if (!result.ok && result.reason === "file-mention-error") {
-      const details = result.errors?.map((error) => `@${error.path}：${error.message}`).join("；") || "文件无法读取";
+      const details = result.errors?.map((error) => `@${error.path}: ${error.message}`).join("; ") || "Unable to read file";
       setBusy(false);
       setThinking(false);
       setInput(text);
       setMsgs((m) => [
         ...m.filter((message) => message.id !== optimisticId),
-        { id: idRef.current++, role: "error", text: `文件引用失败：${details}。请移除引用后重试。` },
+        { id: idRef.current++, role: "error", text: t("node.fileReferenceFailed", { details }) },
       ]);
     }
     return result;
@@ -461,9 +463,9 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
       if (result.ok) {
         await reloadNode();
       } else if (result.reason !== "not_needed") {
-        setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: `压缩失败：${result.error ?? result.reason ?? "unknown"}` }]);
+        setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: t("chat.compactionFailed", { error: result.error ?? result.reason ?? "unknown" }) }]);
       } else {
-        setMsgs((m) => [...m, { id: idRef.current++, role: "tool", text: "压缩未执行：当前上下文还不需要压缩。" }]);
+        setMsgs((m) => [...m, { id: idRef.current++, role: "tool", text: t("chat.compactionSkipped") }]);
       }
     } finally {
       setBusy(false);
@@ -603,14 +605,14 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           <button
             className={`color-dot ${color ? "is-set" : ""}`}
             style={color ? { background: `var(--label-${color})` } : undefined}
-            title="颜色标签"
+            title={t("node.colorLabel")}
             onClick={() => setColorOpen((v) => !v)}
           />
           {colorOpen && (
             <div className="color-pop">
               <button
                 className="color-swatch is-none"
-                title="无色"
+                title={t("nav.noColor")}
                 onClick={() => {
                   data.onSetColor?.(id, "");
                   setColorOpen(false);
@@ -660,8 +662,8 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
               <button
                 className="title-edit-btn nodrag"
                 type="button"
-                title="编辑标题"
-                aria-label="编辑标题"
+                title={t("node.editTitle")}
+                aria-label={t("node.editTitle")}
                 onClick={() => setEditingTitle(true)}
               >
                 <Pencil size={12} />
@@ -670,20 +672,20 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           )}
           <div className="head-meta">
             {nodeModel && <span className="model" title={nodeModel}>{nodeModel}</span>}
-            {skillCount > 0 && <span className="tokens" title="当前分支生效 Skills">skills {skillCount}</span>}
+            {skillCount > 0 && <span className="tokens" title={t("node.activeSkills")}>skills {skillCount}</span>}
           </div>
         </div>
         <button
           className="head-icon nodrag"
           type="button"
-          title="回到聊天模式"
-          aria-label="回到聊天模式"
+          title={t("node.backToChat")}
+          aria-label={t("node.backToChat")}
           onClick={() => data.onReturnChat?.(id)}
         >
           <MessageSquareText size={13} />
         </button>
         {!data.isRoot && (
-          <button className="head-icon danger nodrag" title="删除会话" onClick={() => data.onDelete?.(id)}>
+          <button className="head-icon danger nodrag" title={t("node.deleteSession")} onClick={() => data.onDelete?.(id)}>
             <Trash2 size={13} />
           </button>
         )}
@@ -691,7 +693,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           <button
             className={`tree-toggle nodrag ${treeCollapsed ? "is-collapsed" : ""}`}
             onClick={() => data.onToggleCollapse?.(id)}
-            title={treeCollapsed ? `展开子树（${collapsedCount}）` : "折叠子树"}
+            title={treeCollapsed ? t("node.expandTree", { count: collapsedCount }) : t("node.collapseTree")}
           >
             <IconChevronRight size={14} />
             {treeCollapsed && collapsedCount > 0 && <span className="tree-count">{collapsedCount}</span>}
@@ -703,11 +705,11 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
         <div className="persona nodrag">
           <textarea
             value={persona}
-            placeholder="留空使用默认 system prompt"
+            placeholder={t("chat.defaultPersona")}
             onChange={(e) => setPersona(e.target.value)}
           />
           <button onClick={savePersona}>
-            <Check size={13} /> 保存
+            <Check size={13} /> {t("chat.save")}
           </button>
         </div>
       )}
@@ -720,9 +722,9 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
         onBlur={() => setTb(null)}
       >
         {isResizing ? (
-          <div className="card__resize-preview" aria-label="正在调整窗口">
-            <span className="card__resize-preview-label">调整窗口</span>
-            <strong>{msgs.length ? `${msgs.length} 条消息` : "暂无消息"}</strong>
+          <div className="card__resize-preview" aria-label={t("node.resizePreview")}>
+            <span className="card__resize-preview-label">{t("node.resizeWindow")}</span>
+            <strong>{msgs.length ? t("node.messageCount", { count: msgs.length }) : t("node.noMessages")}</strong>
           </div>
         ) : (
           <>
@@ -731,13 +733,13 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
               className="seed seed--chip nodrag"
               type="button"
               onClick={() => branch?.onFocusNode?.(data.seed.parent, { flash: true })}
-              title="跳到来源节点"
+              title={t("node.jumpToSource")}
             >
-              <span className="seed__from">来自 {data.seed.from}</span>
+              <span className="seed__from">{t("node.from", { from: data.seed.from })}</span>
               <span className="seed__q">“{seedPreview}”</span>
               {frozenContextMessageCount > 0 && (
                 <span className="seed__context">
-                  包含 {frozenContextMessageCount} 条消息 <i aria-hidden="true">·</i> 约 {frozenContextTokenLabel} tokens
+                  {t("node.frozenContext", { count: frozenContextMessageCount, tokens: frozenContextTokenLabel })}
                 </span>
               )}
               <IconArrowUpRight size={13} />
@@ -745,7 +747,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           )}
 
           {msgs.length === 0 && !thinking && (
-            <div className="empty">{data.seed ? "顺着这个片段往下问…" : "从起点开始一段思考…"}</div>
+            <div className="empty">{data.seed ? t("node.seedPrompt") : t("node.startThinking")}</div>
           )}
 
           {groupToolTimelineMessages(msgs).map((item) => (
@@ -775,7 +777,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
             )
           ))}
 
-          {thinking && !liveTurn && <div className="thinking"><span className="dot">·</span> 思考中…</div>}
+          {thinking && !liveTurn && <div className="thinking"><span className="dot">·</span> {t("chat.thinking")}</div>}
 
           {tb && (
             <div
@@ -790,7 +792,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
               onPointerDown={(e) => e.stopPropagation()}
             >
               <button onClick={doBranch}>
-                <span><IconSplit size={13} /> 从这里展开</span>
+                <span><IconSplit size={13} /> {t("node.expandHere")}</span>
                 <small>{tb.text.length > 40 ? `${tb.text.slice(0, 40)}…` : tb.text}</small>
               </button>
               <button
@@ -798,9 +800,9 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
                 type="button"
                 aria-pressed={tb.includeParentContext}
                 onClick={() => setTb((current) => current && { ...current, includeParentContext: !current.includeParentContext })}
-                title="创建时包含父级当前上下文；创建后保持冻结"
+              title={t("chat.freezeContext")}
               >
-                创建时包含父级上下文
+                {t("node.contextIncluded")}
               </button>
             </div>
           )}
@@ -812,8 +814,8 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
         <button
           className="to-latest to-latest--card nodrag"
           type="button"
-          aria-label="回到最新"
-          title="回到最新"
+          aria-label={t("node.backToLatest")}
+          title={t("node.backToLatest")}
           onClick={() => {
             setAutoScroll(true);
             requestAnimationFrame(() => {
@@ -833,7 +835,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           onChange={setInput}
           busy={isBusy}
           stopPending={stopPending}
-          placeholder={awaitingApproval ? "等待工具审批…" : isBusy ? "回复中…" : msgs.length ? "继续追问…" : data.seed ? "顺着这个往下问…" : "开始一段思考…"}
+          placeholder={awaitingApproval ? t("chat.approvalPlaceholder") : isBusy ? t("chat.generatingPlaceholder") : msgs.length ? t("chat.continuePlaceholder") : data.seed ? t("chat.seedPlaceholder") : t("chat.startPlaceholder")}
           topAccessory={(
             <>
               <TodoProgressPanel plan={todoPlan} />

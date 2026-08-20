@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties }
 import type { FileEntry } from "../../../../common/filePreview";
 import { FilePreviewPane } from "./FilePreviewPane";
 import { FilePreviewController, openFilePreview, type FilesApi } from "./controller";
+import { useI18n } from "../../i18n/I18nProvider";
 
 function entryIcon(entry: FileEntry) {
   if (entry.kind === "directory") return <Folder size={14} />;
@@ -23,6 +24,7 @@ function useFilesController(projectId: string | null) {
 }
 
 export function FilesPage({ projectId }: { projectId: string | null }) {
+  const { t } = useI18n();
   const { controller, snapshot } = useFilesController(projectId);
   const [split, setSplit] = useState(42);
   const splitRef = useRef(42);
@@ -88,25 +90,25 @@ export function FilesPage({ projectId }: { projectId: string | null }) {
     {entryIcon(entry)}<span>{entry.name}</span><small>{entry.path}</small>
   </button>);
 
-  return <div className="files-page" role="region" aria-label="Files 文件工作区">
+  return <div className="files-page" role="region" aria-label={t("files.workspace")}>
     <div className="files-toolbar">
       <div className="files-toolbar__title"><FolderOpen size={14} /><span>Files</span></div>
       <div className="files-toolbar__actions">
-        <button className="files-icon-button" type="button" aria-label={explorerCollapsed ? "展开文件列表" : "折叠文件列表"} aria-expanded={!explorerCollapsed} onClick={() => setExplorerCollapsed((collapsed) => !collapsed)}><PanelLeft size={14} /></button>
-        <button className="files-icon-button" type="button" aria-label="刷新文件列表" onClick={() => void controller.refresh()}><RefreshCw size={14} /></button>
-        <button className="files-icon-button" type="button" aria-label="在系统中打开文件" disabled={!snapshot.selectedPath || !window.api?.files.open} onClick={() => { if (snapshot.selectedPath && window.api?.files.open && projectId) void window.api.files.open({ projectId, root: snapshot.root, path: snapshot.selectedPath }); }}><ExternalLink size={14} /></button>
+        <button className="files-icon-button" type="button" aria-label={explorerCollapsed ? t("files.expandList") : t("files.collapseList")} aria-expanded={!explorerCollapsed} onClick={() => setExplorerCollapsed((collapsed) => !collapsed)}><PanelLeft size={14} /></button>
+        <button className="files-icon-button" type="button" aria-label={t("files.refresh")} onClick={() => void controller.refresh()}><RefreshCw size={14} /></button>
+        <button className="files-icon-button" type="button" aria-label={t("files.openSystem")} disabled={!snapshot.selectedPath || !window.api?.files.open} onClick={() => { if (snapshot.selectedPath && window.api?.files.open && projectId) void window.api.files.open({ projectId, root: snapshot.root, path: snapshot.selectedPath }); }}><ExternalLink size={14} /></button>
       </div>
     </div>
     <div ref={workspaceRef} className="files-workspace" data-explorer-collapsed={explorerCollapsed ? "true" : "false"} style={{ "--files-explorer-width": `${splitRef.current}%` } as CSSProperties}>
-      <div className="files-explorer" aria-label="文件列表">
-        <label className="files-search"><Search size={14} /><input type="search" value={snapshot.searchQuery} placeholder="搜索文件名" aria-label="搜索文件名" onChange={(event) => controller.setSearchQuery(event.target.value)} /></label>
-        <div className="files-tree" role="tree" aria-label="项目文件树">
-          {snapshot.searchQuery.trim() ? snapshot.searchLoading ? <div className="files-list-status"><LoaderCircle className="animate-spin" size={14} />搜索中…</div> : snapshot.searchError ? <div className="files-list-status files-list-status--error">{snapshot.searchError}</div> : snapshot.searchResults?.length ? renderSearchResults() : <div className="files-list-status">没有匹配的文件。</div> : snapshot.loading ? <div className="files-list-status">读取目录中…</div> : snapshot.error ? <div className="files-list-status files-list-status--error">{snapshot.error}</div> : snapshot.entries.length === 0 ? <div className="files-list-status">{projectId ? "目录为空，或项目尚未配置文件根目录。" : "选择项目后浏览文件。"}</div> : renderTree(snapshot.entries)}
+      <div className="files-explorer" aria-label={t("files.list")}>
+        <label className="files-search"><Search size={14} /><input type="search" value={snapshot.searchQuery} placeholder={t("files.searchPlaceholder")} aria-label={t("files.searchPlaceholder")} onChange={(event) => controller.setSearchQuery(event.target.value)} /></label>
+        <div className="files-tree" role="tree" aria-label={t("files.tree")}>
+          {snapshot.searchQuery.trim() ? snapshot.searchLoading ? <div className="files-list-status"><LoaderCircle className="animate-spin" size={14} />{t("composer.searching")}</div> : snapshot.searchError ? <div className="files-list-status files-list-status--error">{snapshot.searchError}</div> : snapshot.searchResults?.length ? renderSearchResults() : <div className="files-list-status">{t("files.noMatches")}</div> : snapshot.loading ? <div className="files-list-status">{t("files.readingDirectory")}</div> : snapshot.error ? <div className="files-list-status files-list-status--error">{snapshot.error}</div> : snapshot.entries.length === 0 ? <div className="files-list-status">{projectId ? t("files.emptyDirectory") : t("files.selectProject")}</div> : renderTree(snapshot.entries)}
         </div>
-        {!snapshot.searchQuery.trim() && snapshot.truncated && <div className="files-list-status">目录过大，仅显示前 500 项。</div>}
+        {!snapshot.searchQuery.trim() && snapshot.truncated && <div className="files-list-status">{t("files.tooLarge")}</div>}
       </div>
-      <div ref={splitterRef} className="files-splitter" role="separator" aria-label="调整文件列表宽度" aria-orientation="vertical" aria-valuemin={28} aria-valuemax={68} aria-valuenow={Math.round(split)} tabIndex={0} onPointerDown={beginSplitResize} onPointerMove={moveSplitResize} onPointerUp={(event) => finishSplitResize(event.pointerId)} onPointerCancel={(event) => finishSplitResize(event.pointerId)} onLostPointerCapture={() => finishSplitResize()} onKeyDown={(event) => { if (event.key === "ArrowLeft") { event.preventDefault(); nudgeSplit(-2); } if (event.key === "ArrowRight") { event.preventDefault(); nudgeSplit(2); } }} />
-      <div className="files-preview" aria-label="文件预览"><FilePreviewPane preview={snapshot.preview} loading={snapshot.previewLoading} error={snapshot.previewError} /></div>
+      <div ref={splitterRef} className="files-splitter" role="separator" aria-label={t("layout.resizeFileList")} aria-orientation="vertical" aria-valuemin={28} aria-valuemax={68} aria-valuenow={Math.round(split)} tabIndex={0} onPointerDown={beginSplitResize} onPointerMove={moveSplitResize} onPointerUp={(event) => finishSplitResize(event.pointerId)} onPointerCancel={(event) => finishSplitResize(event.pointerId)} onLostPointerCapture={() => finishSplitResize()} onKeyDown={(event) => { if (event.key === "ArrowLeft") { event.preventDefault(); nudgeSplit(-2); } if (event.key === "ArrowRight") { event.preventDefault(); nudgeSplit(2); } }} />
+      <div className="files-preview" aria-label={t("files.preview")}><FilePreviewPane preview={snapshot.preview} loading={snapshot.previewLoading} error={snapshot.previewError} /></div>
     </div>
   </div>;
 }

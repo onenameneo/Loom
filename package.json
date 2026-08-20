@@ -38,8 +38,8 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.2.1",
-    "@earendil-works/pi-agent-core": "^0.82.0",
-    "@earendil-works/pi-ai": "^0.82.0",
+    "@earendil-works/pi-agent-core": "^0.84.2",
+    "@earendil-works/pi-ai": "^0.84.2",
     "@xyflow/react": "^12.11.2",
     "better-sqlite3": "^12.11.1",
     "dotenv": "^16.4.7",

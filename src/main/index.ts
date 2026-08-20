@@ -44,6 +44,7 @@ let monitor: ReturnType<typeof registerMonitor> | null = null;
 let acp: ReturnType<typeof registerAcp> | null = null;
 let collector: ReturnType<typeof registerCollector> | null = null;
 let memory: MemoryRuntimeService | null = null;
+let menuLocale: "zh-CN" | "en" = app.getLocale().toLowerCase().startsWith("en") ? "en" : "zh-CN";
 
 // productName 只在 electron-builder 打包时写入 Info.plist；开发态 Electron
 // 二进制没有 Info.plist，app.getName() 默认返回 "Electron"，必须显式覆盖。
@@ -75,6 +76,11 @@ function registerIpc() {
   });
 
   // ---- settings ----
+  ipcMain.on("settings:locale", (_event, locale: unknown) => {
+    menuLocale = locale === "en" ? "en" : "zh-CN";
+    invalidateAgent();
+    buildMenu();
+  });
   ipcMain.handle("settings:get", async () => {
     const s = store.getSettings();
     const registry = await ModelRegistry.load();
@@ -276,28 +282,29 @@ function registerIpc() {
 
 function buildMenu() {
   const isMac = process.platform === "darwin";
+  const en = menuLocale === "en";
   const menuAction = (name: string) => () => sendToWindow(() => win, "menu:action", name);
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(isMac ? [{ role: "appMenu" as const }] : []),
     {
-      label: "文件",
+      label: en ? "File" : "文件",
       submenu: [
-        { label: "新建项目", accelerator: "CmdOrCtrl+Shift+N", click: menuAction("new-project") },
-        { label: "新建会话", accelerator: "CmdOrCtrl+N", click: menuAction("new-session") },
+        { label: en ? "New project" : "新建项目", accelerator: "CmdOrCtrl+Shift+N", click: menuAction("new-project") },
+        { label: en ? "New session" : "新建会话", accelerator: "CmdOrCtrl+N", click: menuAction("new-session") },
         { type: "separator" as const },
-        { label: "设置…", accelerator: "CmdOrCtrl+,", click: menuAction("settings") },
+        { label: en ? "Settings…" : "设置…", accelerator: "CmdOrCtrl+,", click: menuAction("settings") },
         isMac ? { role: "close" as const } : { role: "quit" as const },
       ],
     },
     { role: "editMenu" as const },
     {
-      label: "视图",
+      label: en ? "View" : "视图",
       submenu: [
-        { label: "切换侧栏", accelerator: "CmdOrCtrl+\\", click: menuAction("toggle-sidebar") },
+        { label: en ? "Toggle sidebar" : "切换侧栏", accelerator: "CmdOrCtrl+\\", click: menuAction("toggle-sidebar") },
         { type: "separator" as const },
-        { label: "项目", accelerator: "CmdOrCtrl+1", click: menuAction("surface:project") },
-        { label: "工作站", accelerator: "CmdOrCtrl+2", click: menuAction("surface:observatory") },
-        { label: "记忆", accelerator: "CmdOrCtrl+3", click: menuAction("surface:memory") },
+        { label: en ? "Project" : "项目", accelerator: "CmdOrCtrl+1", click: menuAction("surface:project") },
+        { label: en ? "Observatory" : "工作站", accelerator: "CmdOrCtrl+2", click: menuAction("surface:observatory") },
+        { label: en ? "Memory" : "记忆", accelerator: "CmdOrCtrl+3", click: menuAction("surface:memory") },
         { type: "separator" as const },
         { role: "toggleDevTools" as const },
         { role: "resetZoom" as const },
@@ -381,7 +388,7 @@ app.whenReady().then(() => {
   void memory.initialize();
   ensureLoomAgentDefaults({ homeDir: app.getPath("home"), legacyApiKeyPresent: Boolean(store.getApiKeyEnc()) });
   applyThemeSource();
-  canvas = registerCanvas({ getWin: () => win, store, userDataDir: app.getPath("userData"), memory });
+  canvas = registerCanvas({ getWin: () => win, store, userDataDir: app.getPath("userData"), memory, getLocale: () => menuLocale });
   monitor = registerMonitor({ getWin: () => win, store });
   acp = registerAcp({ getWin: () => win, store });
   collector = registerCollector({ getWin: () => win, store });

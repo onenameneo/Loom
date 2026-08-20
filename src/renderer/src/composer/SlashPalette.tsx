@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useState } 
 import type { SkillCatalogItemDto } from "../env";
 import type { CmdCtx, Command } from "./commands";
 import { visibleCommands } from "./commands";
+import { useI18n } from "../i18n/I18nProvider";
 
 function parseSlash(value: string): { name: string; arg: string; hasSpace: boolean } {
   const raw = value.slice(1);
@@ -31,6 +32,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
   onNoMatch,
   onUnknownCommand,
 }, ref) {
+  const { t } = useI18n();
   const [active, setActive] = useState(0);
   const listId = useId();
   const state = ctx.getState();
@@ -82,7 +84,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
   function executeModel(index: number) {
     const model = modelItems[index]?.id;
     if (!model || !modelCommand) {
-      onUnknownCommand?.("没有匹配的已添加模型");
+      onUnknownCommand?.(t("composer.noMatchingModels"));
       return;
     }
     modelCommand.run(ctx, model);
@@ -93,7 +95,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
   function executeSkill(index: number) {
     const skill = skillItems[index]?.id;
     if (!skill || !skillCommand) {
-      onUnknownCommand?.("没有匹配的 Skill");
+      onUnknownCommand?.(t("composer.noMatchingSkills"));
       return;
     }
     skillCommand.run(ctx, skill);
@@ -151,7 +153,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
               <small>{model.name}</small>
             </button>
           ))}
-          {modelItems.length === 0 && <div className="cmd-empty">没有匹配的已添加模型</div>}
+          {modelItems.length === 0 && <div className="cmd-empty">{t("composer.noMatchingModels")}</div>}
         </>
       ) : skillMode ? (
         <>
@@ -172,7 +174,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
               <small>{skill.scope} · {skill.hash}</small>
             </button>
           ))}
-          {skillItems.length === 0 && <div className="cmd-empty">没有匹配的 Skill</div>}
+          {skillItems.length === 0 && <div className="cmd-empty">{t("composer.noMatchingSkills")}</div>}
         </>
       ) : filtered.length ? (
         filtered.map((cmd, index) => {
@@ -196,7 +198,7 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
           );
         })
       ) : (
-        <div className="cmd-empty">没有匹配命令</div>
+        <div className="cmd-empty">{t("composer.noMatchingCommands")}</div>
       )}
     </div>
   );

@@ -33,7 +33,7 @@ import type { ComposerBudgetPreviewInput } from "../common/composerBudget";
 
 export type { Seed };
 
-export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store: Store; userDataDir?: string; memory?: MemoryRuntimePort }) {
+export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store: Store; userDataDir?: string; memory?: MemoryRuntimePort; getLocale?: () => "zh-CN" | "en" }) {
   const { getWin, store } = opts;
 
   const events = createIpcEventSink(getWin);
@@ -74,6 +74,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     ids,
     clock,
     getApiKey: () => "registry-managed",
+    getLocale: opts.getLocale,
     command: createCommandPort(),
     userDataDir: opts.userDataDir,
     compaction: {
@@ -105,6 +106,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
         // updates Node-scoped live snapshots before forwarding canvas events.
         events: hooks.events,
         resolveModel: () => resolveModelConfig(store),
+        getLocale: opts.getLocale,
         buildContext: hooks.buildContext,
         getNodeInit: hooks.getNodeInit,
         getTools: hooks.getTools,

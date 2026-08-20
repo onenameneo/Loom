@@ -1,6 +1,7 @@
 import { ChevronDown, SquareTerminal } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import type { ApprovalRequestPayload, ApprovalScope } from "../env";
+import { useI18n } from "../i18n/I18nProvider";
 
 export type ApprovalState = ApprovalRequestPayload & { scope: ApprovalScope };
 
@@ -14,14 +15,14 @@ function previewArgsText(args: unknown): string | undefined {
   return entries.length ? entries.join(" · ") : undefined;
 }
 
-function permissionReasonLabel(reason?: string): string | undefined {
+function permissionReasonLabel(reason: string | undefined, t: ReturnType<typeof useI18n>["t"]): string | undefined {
   switch (reason) {
-    case "outside_workspace": return "工作区外访问";
-    case "network_access": return "网络访问";
-    case "destructive_command": return "破坏性操作";
-    case "external_mutation": return "外部系统变更";
-    case "permission_escalation": return "权限提升";
-    case "untrusted_command": return "不可信命令";
+    case "outside_workspace": return t("approval.reasonOutsideWorkspace");
+    case "network_access": return t("approval.reasonNetwork");
+    case "destructive_command": return t("approval.reasonDestructive");
+    case "external_mutation": return t("approval.reasonExternal");
+    case "permission_escalation": return t("approval.reasonEscalation");
+    case "untrusted_command": return t("approval.reasonUntrusted");
     default: return reason;
   }
 }
@@ -37,16 +38,17 @@ export function ApprovalPrompt({
   onScopeChange: (scope: ApprovalScope) => void;
   onDecision: (action: "allow" | "deny", scope?: ApprovalScope) => void;
 }) {
-  const allowLabel = approval.scope === "once" ? "允许一次" : approval.scope === "node-session" ? "允许本节点" : "记住并允许";
+  const { t } = useI18n();
+  const allowLabel = approval.scope === "once" ? t("approval.once") : approval.scope === "node-session" ? t("approval.nodeSession") : t("approval.persistent");
   const detail = previewArgsText(approval.preview.args);
   const allowOptions: Array<{ scope: ApprovalScope; label: string }> = [
-    { scope: "once", label: "允许一次" },
-    { scope: "node-session", label: "允许本节点" },
-    { scope: "persistent", label: "记住并允许" },
+    { scope: "once", label: t("approval.once") },
+    { scope: "node-session", label: t("approval.nodeSession") },
+    { scope: "persistent", label: t("approval.persistent") },
   ];
 
   return (
-    <div className={`approval-prompt ${compact ? "approval-prompt--compact" : ""}`} role="group" aria-label="工具审批">
+    <div className={`approval-prompt ${compact ? "approval-prompt--compact" : ""}`} role="group" aria-label={t("approval.tools")}>
       <div className="approval-prompt__head">
         <span className="approval-prompt__icon" aria-hidden="true">
           <SquareTerminal size={16} />
@@ -59,17 +61,17 @@ export function ApprovalPrompt({
         {detail && <div className="approval-prompt__detail">{detail}</div>}
         {(approval.reason || approval.sandboxMode) && (
           <div className="approval-prompt__detail">
-            {[permissionReasonLabel(approval.reason), approval.sandboxMode && `sandbox: ${approval.sandboxMode}`].filter(Boolean).join(" · ")}
+            {[permissionReasonLabel(approval.reason, t), approval.sandboxMode && `sandbox: ${approval.sandboxMode}`].filter(Boolean).join(" · ")}
           </div>
         )}
         <div className="approval-prompt__target">{approval.target}</div>
       </div>
       <div className="approval-prompt__actions">
-        <button type="button" className="approval-prompt__deny" onClick={() => onDecision("deny")} aria-label="拒绝工具调用">
-          拒绝
+        <button type="button" className="approval-prompt__deny" onClick={() => onDecision("deny")} aria-label={t("approval.deny")}>
+          {t("common.deny")}
         </button>
         <DropdownMenu.Root>
-          <DropdownMenu.Trigger className="approval-prompt__allow" aria-label="允许工具调用">
+          <DropdownMenu.Trigger className="approval-prompt__allow" aria-label={t("approval.allow")}>
             <span>{allowLabel}</span>
             <ChevronDown size={14} />
           </DropdownMenu.Trigger>

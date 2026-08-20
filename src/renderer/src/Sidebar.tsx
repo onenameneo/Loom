@@ -13,7 +13,7 @@ import {
   getSessionViews,
   isDarwinRenderer,
   kindLabel,
-  LIVENESS_LABEL,
+  livenessLabel,
   matchesAgentSession,
   sessionTitle,
   TOOL_SHORT_LABEL,
@@ -23,6 +23,8 @@ import {
 import { ConfirmDialog, RenameDialog, Tip } from "./ui/dialogs";
 import { cn } from "./ui/styles";
 import { selectProjects, selectSessionsForProject, useWorkspaceStore } from "./workspace/store";
+import { useI18n } from "./i18n/I18nProvider";
+import { localizedNodeTitle, localizedSessionTitle } from "./i18n/titleLabels";
 
 const SIDEBAR_PROJECT_EXPANSION_KEY = "loom:sidebar:expanded-projects";
 const SIDEBAR_SESSION_EXPANSION_KEY = "loom:sidebar:expanded-sessions";
@@ -77,6 +79,7 @@ function SidebarNodeRow({
   root?: boolean;
 }) {
   const liveTurn = useWorkspaceStore((state) => state.turnsByNodeId[nodeId]);
+  const { t } = useI18n();
   return (
     <div
       className={`sb-session-row ${root ? "is-root" : "is-child"} ${active ? "active" : ""}`}
@@ -87,8 +90,8 @@ function SidebarNodeRow({
           className="node-running-indicator"
           data-testid={`node-running-${nodeId}`}
           role="status"
-          aria-label={`${title} 正在生成`}
-          title="正在生成"
+          aria-label={`${title} ${t("nav.generating")}`}
+          title={t("nav.generating")}
         />
       ) : colorControl}
       <button
@@ -118,17 +121,19 @@ function SidebarSessionRow({
   onToggle: () => void;
   actions?: ReactNode;
 }) {
+  const { t } = useI18n();
+  const displayTitle = localizedSessionTitle(session.title, t, session.titleState);
   return (
     <div className={`sb-session-row sb-session-header ${active ? "active" : ""}`}>
       <button
         className="sb-session-toggle grid h-7 w-5 shrink-0 cursor-pointer place-items-center border-0 bg-transparent p-0 text-loom-faint"
-        aria-label={`${expanded ? "折叠" : "展开"}${session.title}`}
+        aria-label={`${expanded ? t("nav.collapse") : t("nav.expand")}${displayTitle}`}
         onClick={onToggle}
       >
         {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
       </button>
-      <button className="sb-session-title min-w-0 flex-1 cursor-pointer overflow-hidden border-0 bg-transparent px-[2px] py-1 text-left text-[11px] text-loom-muted" onClick={onClick} aria-label={session.title}>
-        <span>{session.title}</span>
+      <button className="sb-session-title min-w-0 flex-1 cursor-pointer overflow-hidden border-0 bg-transparent px-[2px] py-1 text-left text-[11px] text-loom-muted" onClick={onClick} aria-label={displayTitle}>
+        <span>{displayTitle}</span>
       </button>
       {actions}
     </div>
@@ -175,6 +180,8 @@ export default function Sidebar({
   toggleTheme: () => void;
   settings?: SettingsPayload | null;
 }) {
+  const { t } = useI18n();
+  const displaySessionTitle = (session: SessionMeta) => localizedSessionTitle(session.title, t, session.titleState);
   const [renaming, setRenaming] = useState<ProjectMeta | null>(null);
   const [deleting, setDeleting] = useState<ProjectMeta | null>(null);
   const [renamingSession, setRenamingSession] = useState<SessionMeta | null>(null);
@@ -318,15 +325,15 @@ export default function Sidebar({
         <button
           className={`color-dot ${node.color ? "is-set" : ""}`}
           style={node.color ? { background: `var(--label-${node.color})` } : undefined}
-          title="会话颜色"
-          aria-label={`${node.title || DEFAULT_ROOT_TITLE} 会话颜色`}
+          title={t("nav.sessionColor")}
+          aria-label={t("nav.branchColor", { title: localizedNodeTitle(node.title || DEFAULT_ROOT_TITLE, t, node.titleState) })}
           onClick={(event) => {
             event.stopPropagation();
             setSessionColorOpen((current) => current === colorKey ? null : colorKey);
           }}
         />
         <div className={`color-pop session-color-pop ${sessionColorOpen === colorKey ? "is-open" : ""}`}>
-          <button className="color-swatch is-none" title="无色" onClick={() => updateColor("")}>{!node.color && <Check size={11} />}</button>
+          <button className="color-swatch is-none" title={t("nav.noColor")} onClick={() => updateColor("")}>{!node.color && <Check size={11} />}</button>
           {NODE_COLORS.map((color) => (
             <button key={color} className="color-swatch" style={{ background: `var(--label-${color})` }} title={color} onClick={() => updateColor(color)}>
               {node.color === color && <Check size={11} />}
@@ -385,8 +392,8 @@ export default function Sidebar({
                     <span className="sb-agent-time">{formatRelative(session.lastActiveAt, ctx.activityNow)}</span>
                   </span>
                   <span className="sb-agent-sub">
-                    <span className={`sb-agent-state ${liveness}`}>{LIVENESS_LABEL[liveness]}</span>
-                    <span className="sb-agent-last">{kindLabel(session.events[session.events.length - 1]?.kind ?? "notification")}</span>
+                    <span className={`sb-agent-state ${liveness}`}>{livenessLabel(liveness, t)}</span>
+                    <span className="sb-agent-last">{kindLabel(session.events[session.events.length - 1]?.kind ?? "notification", t)}</span>
                   </span>
                 </span>
               </button>
@@ -395,7 +402,7 @@ export default function Sidebar({
               <div
                 className="sb-agent-session muted"
                 key={agent.pid}
-                title={`${agent.cwd || agentTitle(agent)} · 未接入，重开会话后生效`}
+                title={`${agent.cwd || agentTitle(agent)} · ${t("nav.unconnectedRestart")}`}
               >
                 <span className="state-dot ended" />
                 <span className="sb-agent-body">
@@ -404,12 +411,12 @@ export default function Sidebar({
                     <span className="sb-agent-time">{formatDuration(agent.startedAt, ctx.activityNow)}</span>
                   </span>
                   <span className="sb-agent-sub">
-                    <span className="sb-agent-state">未接入</span>
+                    <span className="sb-agent-state">{t("nav.unconnected")}</span>
                   </span>
                 </span>
               </div>
             ))}
-            {count === 0 && <div className="sb-agent-empty">暂无会话</div>}
+            {count === 0 && <div className="sb-agent-empty">{t("nav.noSessions")}</div>}
           </div>
         )}
       </Fragment>
@@ -441,10 +448,10 @@ export default function Sidebar({
             {w.sourceRoots?.[0] && <small>{w.sourceRoots[0]}</small>}
           </span>
           <span className="project-actions">
-            <Tip label="新建起点">
+            <Tip label={t("nav.newRoot")}>
               <button
                 className="grid size-6 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/8 hover:text-loom-text"
-                aria-label="新建起点"
+                aria-label={t("nav.newRoot")}
                 onClick={(e) => {
                   e.stopPropagation();
                   createSessionForProject(w.id);
@@ -453,10 +460,10 @@ export default function Sidebar({
                 <IconPlus />
               </button>
             </Tip>
-            <Tip label={w.pinned ? "取消置顶" : "置顶"}>
+            <Tip label={w.pinned ? t("nav.unpin") : t("nav.pin")}>
               <button
                 className="grid size-6 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/8 hover:text-loom-text"
-                aria-label={w.pinned ? "取消置顶" : "置顶"}
+                aria-label={w.pinned ? t("nav.unpin") : t("nav.pin")}
                 onClick={(e) => {
                   e.stopPropagation();
                   onPinProject(w.id, !w.pinned);
@@ -465,10 +472,10 @@ export default function Sidebar({
                 <Pin size={13} fill={w.pinned ? "currentColor" : "none"} />
               </button>
             </Tip>
-            <Tip label="重命名">
+            <Tip label={t("nav.rename")}>
               <button
                 className="grid size-6 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/8 hover:text-loom-text"
-                aria-label="重命名"
+                aria-label={t("nav.rename")}
                 onClick={(e) => {
                   e.stopPropagation();
                   setRenaming(w);
@@ -477,10 +484,10 @@ export default function Sidebar({
                 <Pencil size={13} />
               </button>
             </Tip>
-            <Tip label="删除">
+            <Tip label={t("nav.delete")}>
               <button
                 className="grid size-6 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/8 hover:text-loom-text"
-                aria-label="删除"
+                aria-label={t("nav.delete")}
                 onClick={(e) => {
                   e.stopPropagation();
                   setDeleting(w);
@@ -494,7 +501,7 @@ export default function Sidebar({
         <div className={`sb-collapse ${isProjectExpanded ? "open" : ""}`} aria-hidden={!isProjectExpanded}>
           <div className="sb-collapse-inner sb-project-children">
             {ctx.activeProjectId === w.id && projectSessions.length === 0 && (
-              <div className="sb-hint px-[9px] pb-[6px] pt-[2px] text-[11px] text-loom-faint">一个会话 = 一张可分支的画布</div>
+              <div className="sb-hint px-[9px] pb-[6px] pt-[2px] text-[11px] text-loom-faint">{t("nav.sessionCanvasHint")}</div>
             )}
             {projectSessions.map((session) => {
               const rows = outlineRows((nodeIdsBySessionId[session.id] ?? [])
@@ -510,8 +517,8 @@ export default function Sidebar({
                     onClick={() => toggleSession(session.id)}
                     actions={(
                       <span className="session-actions">
-                        <Tip label="重命名"><button aria-label="重命名会话" onClick={() => setRenamingSession(session)}><Pencil size={13} /></button></Tip>
-                        <Tip label="删除"><button aria-label="删除会话" onClick={() => setDeletingSession(session)}><Trash2 size={13} /></button></Tip>
+                        <Tip label={t("nav.rename")}><button aria-label={`${t("nav.rename")}${displaySessionTitle(session)}`} onClick={() => setRenamingSession(session)}><Pencil size={13} /></button></Tip>
+                        <Tip label={t("nav.delete")}><button aria-label={`${t("nav.delete")}${displaySessionTitle(session)}`} onClick={() => setDeletingSession(session)}><Trash2 size={13} /></button></Tip>
                       </span>
                     )}
                   />
@@ -523,14 +530,14 @@ export default function Sidebar({
                           nodeId={node.id}
                           root={depth === 0}
                           active={ctx.activeSessionId === session.id && activeNodeId === node.id}
-                          title={depth === 0 ? (node.title || DEFAULT_ROOT_TITLE) : node.title || DEFAULT_BRANCH_TITLE}
+                          title={localizedNodeTitle(node.title || (depth === 0 ? DEFAULT_ROOT_TITLE : DEFAULT_BRANCH_TITLE), t, node.titleState)}
                           colorControl={renderNodeColor(session.id, node)}
                           paddingLeft={depth === 0 ? 16 : 28 + (depth - 1) * 12}
                           onClick={() => focusNode(session.id, node.id)}
                           actions={(
                             <span className="session-actions">
-                              <Tip label="重命名分支"><button aria-label="重命名分支" onClick={() => setRenamingNode(node)}><Pencil size={13} /></button></Tip>
-                              <Tip label="删除分支"><button aria-label="删除分支" onClick={() => setDeletingNode(node)}><Trash2 size={13} /></button></Tip>
+                              <Tip label={t("nav.rename")}><button aria-label={`${t("nav.rename")}${t("nav.branch")}`} onClick={() => setRenamingNode(node)}><Pencil size={13} /></button></Tip>
+                              <Tip label={t("nav.delete")}><button aria-label={`${t("nav.delete")}${t("nav.branch")}`} onClick={() => setDeletingNode(node)}><Trash2 size={13} /></button></Tip>
                             </span>
                           )}
                         />
@@ -551,10 +558,10 @@ export default function Sidebar({
   const collapseProjectsButton = (projects: ProjectMeta[], label: string) => {
     const projectIds = new Set(projects.map((project) => project.id));
     return (
-      <Tip label={`折叠${label}中的项目`}>
+      <Tip label={t("nav.collapseGroup", { label })}>
       <button
         className="sb-section-toggle grid size-5 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/8 hover:text-loom-text [&>svg]:h-[15px] [&>svg]:w-[15px] [&>svg]:stroke-[1.5]"
-        aria-label={`折叠${label}中的项目`}
+        aria-label={t("nav.collapseGroup", { label })}
         onClick={() => {
           setProjectExpanded((current) => new Set([...current].filter((id) => !projectIds.has(id))));
           setSessionColorOpen(null);
@@ -573,9 +580,9 @@ export default function Sidebar({
           <img className="block size-[23px] object-contain" src={loomIconUrl} alt="Loom" draggable={false} />
         </span>
         <span className="sb-word text-[13.5px] font-semibold">
-          Loom<small className="ml-[5px] text-[11px] font-normal text-loom-faint">一起思考</small>
+          Loom<small className="ml-[5px] text-[11px] font-normal text-loom-faint">{t("nav.brandTagline")}</small>
         </span>
-        <Tip label="切换明暗">
+        <Tip label={t("nav.toggleTheme")}>
           <button className="theme-toggle ml-auto grid size-[26px] flex-none cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-faint hover:bg-loom-text/8 hover:text-loom-text" onClick={toggleTheme}>
             {theme === "light" ? <IconMoon /> : <IconSun />}
           </button>
@@ -594,7 +601,7 @@ export default function Sidebar({
             onClick={() => setSurface(s.id)}
           >
             <s.icon />
-            {s.label}
+            {s.translationKey ? t(s.translationKey) : s.label}
             {badge != null && <span className="badge-num ml-auto font-loom-mono text-[10px] text-loom-accent">{badge}</span>}
           </div>
         );
@@ -605,26 +612,26 @@ export default function Sidebar({
           {pinnedProjects.length > 0 && (
             <>
               <div className="sb-label flex items-center px-[9px] pb-2 pt-loom-4 text-[12.5px] font-semibold text-loom-faint">
-                置顶
+                {t("nav.pinned")}
                 <span className="sb-section-actions ml-auto inline-flex items-center gap-loom-1">
-                  {collapseProjectsButton(pinnedProjects, "置顶")}
+                  {collapseProjectsButton(pinnedProjects, t("nav.pinned"))}
                 </span>
               </div>
               {pinnedProjects.map(renderProject)}
             </>
           )}
           <div className="sb-label flex items-center px-[9px] pb-2 pt-loom-4 text-[12.5px] font-semibold text-loom-faint">
-            项目
+            {t("nav.regularProjects")}
             <span className="sb-section-actions ml-auto inline-flex items-center gap-loom-1">
-              {collapseProjectsButton(regularProjects, "普通项目")}
-              <Tip label="新建项目">
-                <button className="sb-add ml-0 grid size-5 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/8 hover:text-loom-text [&>svg]:h-4 [&>svg]:w-4" aria-label="新建项目" onClick={onOpenCreateProject}>
+              {collapseProjectsButton(regularProjects, t("nav.regularProjects"))}
+              <Tip label={t("nav.newProject")}>
+                <button className="sb-add ml-0 grid size-5 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-0 text-loom-muted hover:bg-loom-text/8 hover:text-loom-text [&>svg]:h-4 [&>svg]:w-4" aria-label={t("nav.newProject")} onClick={onOpenCreateProject}>
                   <IconPlus size={16} strokeWidth={1.5} />
                 </button>
               </Tip>
             </span>
           </div>
-          {projects.length === 0 && <div className="sb-hint px-[9px] pb-[6px] pt-[2px] text-[11px] text-loom-faint">（还没有，点 + 新建）</div>}
+          {projects.length === 0 && <div className="sb-hint px-[9px] pb-[6px] pt-[2px] text-[11px] text-loom-faint">{t("nav.noProjects")}</div>}
           {regularProjects.map(renderProject)}
         </div>
       )}
@@ -633,7 +640,7 @@ export default function Sidebar({
         <>
           {agentTools.map(renderAgentGroup)}
           {sessionViews.length === 0 && unconnectedAgents.length === 0 && (
-            <div className="sb-hint px-[9px] pb-[6px] pt-[2px] text-[11px] text-loom-faint">暂无活动。启用后会显示本地 agent 会话。</div>
+            <div className="sb-hint px-[9px] pb-[6px] pt-[2px] text-[11px] text-loom-faint">{t("nav.noActivity")}</div>
           )}
         </>
       )}
@@ -641,29 +648,29 @@ export default function Sidebar({
       <RenameDialog
         open={!!renaming}
         onOpenChange={(o) => !o && setRenaming(null)}
-        title="重命名项目"
+        title={`${t("nav.rename")}${t("nav.project")}`}
         initial={renaming?.name ?? ""}
         onSubmit={(name) => renaming && onRenameProject(renaming.id, name)}
       />
       <RenameDialog
         open={!!renamingSession}
         onOpenChange={(o) => !o && setRenamingSession(null)}
-        title="重命名会话"
+        title={`${t("nav.rename")}${t("nav.newSession")}`}
         initial={renamingSession?.title ?? ""}
         onSubmit={(name) => renamingSession && onRenameSession?.(renamingSession.id, name)}
       />
       <RenameDialog
         open={!!renamingNode}
         onOpenChange={(o) => !o && setRenamingNode(null)}
-        title="重命名分支"
+        title={`${t("nav.rename")}${t("nav.branch")}`}
         initial={renamingNode?.title ?? ""}
         onSubmit={(name) => renamingNode && onRenameNode?.(renamingNode.id, name)}
       />
       <ConfirmDialog
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(null)}
-        title={`删除项目「${deleting?.name ?? ""}」？`}
-        description="此操作不可撤销。"
+        title={t("nav.deleteProjectTitle", { name: deleting?.name ?? "" })}
+        description={t("nav.deleteIrreversible")}
         onConfirm={() => {
           if (deleting) onDeleteProject(deleting.id);
           setDeleting(null);
@@ -672,8 +679,8 @@ export default function Sidebar({
       <ConfirmDialog
         open={!!deletingSession}
         onOpenChange={(o) => !o && setDeletingSession(null)}
-        title={`删除会话「${deletingSession?.title ?? ""}」？`}
-        description="此操作不可撤销。"
+        title={t("nav.deleteSessionTitle", { name: deletingSession ? displaySessionTitle(deletingSession) : "" })}
+        description={t("nav.deleteIrreversible")}
         onConfirm={() => {
           if (deletingSession) onDeleteSession?.(deletingSession.id);
           setDeletingSession(null);
@@ -682,8 +689,8 @@ export default function Sidebar({
       <ConfirmDialog
         open={!!deletingNode}
         onOpenChange={(o) => !o && setDeletingNode(null)}
-        title={`删除分支「${deletingNode?.title ?? ""}」？`}
-        description="此操作会删除该分支及其后代。"
+        title={t("nav.deleteBranchTitle", { name: deletingNode?.title ?? "" })}
+        description={t("nav.deleteBranchDesc")}
         onConfirm={() => {
           if (deletingNode) onDeleteNode?.(deletingNode.id);
           setDeletingNode(null);

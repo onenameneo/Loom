@@ -102,6 +102,8 @@ import type {
   AgentTelemetryPort,
   TurnLifecycleEvent,
 } from "../ports";
+import { defaultSystemPrompt, type SystemPromptLocale } from "../../../common/systemPrompt";
+import { agentMessage } from "../../../common/agentMessages";
 
 // ---------------------------------------------------------------------------
 // ② 应用编排 · 单 Session 画布的多节点运行时：图缓存 + 消息持久化编排 + 引擎驱动。
@@ -116,6 +118,7 @@ export interface CanvasNode {
   projectId: string;
   parentId?: string;
   title: string;
+  titleState?: "default" | "manual";
   seed?: Seed;
   systemPrompt?: string;
   model?: StoredModelSelection;
@@ -135,6 +138,8 @@ export interface CanvasRuntimeDeps {
   clock: ClockPort;
   /** 现取 API key（未配置返回空），用于发送前拦截。 */
   getApiKey: () => string | undefined;
+  /** Current UI locale, used to select the built-in agent prompt. */
+  getLocale?: () => SystemPromptLocale;
   command?: CommandPort;
   /** Electron app.getPath("userData"). Used for session-local tool result sidecars. */
   userDataDir?: string;
@@ -216,8 +221,6 @@ interface CanvasMessageDto {
   };
 }
 
-const NO_KEY_ERROR = "未配置 API key（去设置填写，或设置 ANTHROPIC_API_KEY）。";
-const DEFAULT_SYSTEM_PROMPT = "你是一个冷静、精确、克制的思考助手。回答直接，不啰嗦。";
 const TODO_PLAN_SYSTEM_PROMPT = [
   "## Execution planning",
   "- For work with multiple meaningful steps, call write_todos first with a concise ordered plan.",
@@ -236,6 +239,8 @@ const TOOL_RESULT_BUDGET_OPT_OUT_TOOLS = new Set(["read", "skill_read"]);
 
 export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   const { store, events: eventSink, ids, clock, getApiKey } = deps;
+  const getDefaultSystemPrompt = () => defaultSystemPrompt(deps.getLocale?.());
+  const getAgentMessage = (key: Parameters<typeof agentMessage>[0]) => agentMessage(key, deps.getLocale?.());
   const liveTurnPublisher = createLiveTurnPublisher();
   const runtime = createNodeRuntimeStore({
     publishLive: (event) => liveTurnPublisher.publish(event),
@@ -334,6 +339,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       projectId: record.projectId,
       parentId: record.parentId,
       title: record.title,
+      titleState: record.titleState,
       seed: record.seed as Seed | undefined,
       systemPrompt: record.systemPrompt,
       model: record.model,
@@ -440,7 +446,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     if (!node || !deps.resolveContextModel) return undefined;
     const model = await deps.resolveContextModel(nodeId, node.model);
     const skillIndex = compileAvailableSkillsIndex(catalogFor(nodeId).skills);
-    const systemPrompt = [node.systemPrompt || DEFAULT_SYSTEM_PROMPT, skillIndex].filter(Boolean).join("\n\n");
+    const systemPrompt = [node.systemPrompt || getDefaultSystemPrompt(), skillIndex].filter(Boolean).join("\n\n");
     const tools = toolsFor(nodeId);
     const toolText = JSON.stringify(tools.map((tool) => ({
       name: tool.name,
@@ -477,7 +483,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     if (!contextBudget) {
       const projectedTokens = (messages: Message[]) => estTokens(messages.reduce((sum, msg) => sum + textOf(msg as AgentMessage).length, 0));
       const skillIndex = compileAvailableSkillsIndex(catalogFor(nodeId).skills);
-      const systemPrompt = [node.systemPrompt || DEFAULT_SYSTEM_PROMPT, skillIndex].filter(Boolean).join("\n\n");
+      const systemPrompt = [node.systemPrompt || getDefaultSystemPrompt(), skillIndex].filter(Boolean).join("\n\n");
       const systemTokens = estTokens(systemPrompt.length);
       const toolTokens = estTokens(JSON.stringify(toolsFor(nodeId).map((tool) => ({
         name: tool.name,
@@ -568,7 +574,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   function systemPromptFor(node: CanvasNode): string {
     const skillIndex = compileAvailableSkillsIndex(catalogFor(node.id).skills);
     const memoryPrompt = deps.memory?.memoryPrompt?.(node.projectId);
-    return [node.systemPrompt || DEFAULT_SYSTEM_PROMPT, TODO_PLAN_SYSTEM_PROMPT, FILE_TOOL_PATH_GUIDANCE, memoryPrompt, skillIndex].filter(Boolean).join("\n\n");
+    return [node.systemPrompt || getDefaultSystemPrompt(), TODO_PLAN_SYSTEM_PROMPT, FILE_TOOL_PATH_GUIDANCE, memoryPrompt, skillIndex].filter(Boolean).join("\n\n");
   }
 
   async function refreshMemoryPrompt(node: CanvasNode, handle: EngineHandle, text: string, supplementalContext?: string): Promise<void> {
@@ -1069,7 +1075,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     });
     if (!retry.result.ok) {
       if (retry.result.reason === "failed" && isContextOverflow(retry.error)) {
-        events.emit(node.id, "error", "上下文仍然超出模型窗口，已停止自动重试。");
+        events.emit(node.id, "error", getAgentMessage("contextOverflow"));
         return { ok: false as const, reason: "overflow" as const };
       }
       if (retry.result.reason === "failed") events.emit(node.id, "error", String((retry.error as any)?.message ?? retry.error));
@@ -1200,7 +1206,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   async function send(arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[]; skillIds?: string[]; mentions?: FileMentionRef[] }) {
     const node = loadNode(arg.nodeId);
     if (!node) {
-      events.emit(arg.nodeId, "error", "节点不存在。");
+      events.emit(arg.nodeId, "error", getAgentMessage("nodeNotFound"));
       return { ok: false };
     }
     const memoryCommand = await deps.memory?.handleCommand(arg.text, {
@@ -1213,7 +1219,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       return { ok: memoryCommand.ok, reason: memoryCommand.message };
     }
     if (!getApiKey()) {
-      events.emit(arg.nodeId, "error", NO_KEY_ERROR);
+      events.emit(arg.nodeId, "error", getAgentMessage("apiKeyMissing"));
       return { ok: false };
     }
     const project = store.listProjects().find((candidate) => candidate.id === node.projectId);
@@ -1328,7 +1334,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   async function compact(nodeId: string) {
     const node = loadNode(nodeId);
     if (!node) {
-      events.emit(nodeId, "error", "节点不存在。");
+      events.emit(nodeId, "error", getAgentMessage("nodeNotFound"));
       return { ok: false, reason: "node-not-found" };
     }
     if (!compaction) return { ok: false, reason: "unavailable" };
@@ -1348,11 +1354,11 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   async function regenerate(nodeId: string) {
     const node = loadNode(nodeId);
     if (!node) {
-      events.emit(nodeId, "error", "节点不存在。");
+      events.emit(nodeId, "error", getAgentMessage("nodeNotFound"));
       return { ok: false };
     }
     if (!getApiKey()) {
-      events.emit(nodeId, "error", NO_KEY_ERROR);
+      events.emit(nodeId, "error", getAgentMessage("apiKeyMissing"));
       return { ok: false };
     }
     const lastUser = [...node.messages].map(roleOf).lastIndexOf("user");
@@ -1387,12 +1393,12 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     const node = loadNode(arg.nodeId);
     const text = arg.text.trim();
     if (!node || !text) {
-      if (!node) events.emit(arg.nodeId, "error", "节点不存在。");
+      if (!node) events.emit(arg.nodeId, "error", getAgentMessage("nodeNotFound"));
       return { ok: false };
     }
     if (roleOf(node.messages[arg.seq]) !== "user") return { ok: false };
     if (!getApiKey()) {
-      events.emit(arg.nodeId, "error", NO_KEY_ERROR);
+      events.emit(arg.nodeId, "error", getAgentMessage("apiKeyMissing"));
       return { ok: false };
     }
     let activeTurn: { turnId: string; signal: AbortSignal } | undefined;

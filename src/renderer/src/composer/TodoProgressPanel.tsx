@@ -2,6 +2,7 @@ import { Check, Circle, CircleAlert, ChevronDown, LoaderCircle } from "lucide-re
 import { useEffect, useState } from "react";
 import { Collapsible } from "radix-ui";
 import type { TodoPlanSnapshot } from "../env";
+import { useI18n } from "../i18n/I18nProvider";
 
 const itemClasses = {
   completed: "text-loom-faint line-through",
@@ -18,6 +19,7 @@ const statusClasses = {
 } as const;
 
 export function TodoProgressPanel({ plan }: { plan?: TodoPlanSnapshot }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(true);
   useEffect(() => { setExpanded(true); }, [plan?.planId]);
   if (!plan || plan.status === "cleared") {
@@ -35,7 +37,7 @@ export function TodoProgressPanel({ plan }: { plan?: TodoPlanSnapshot }) {
     <Collapsible.Root
       className="todo-progress-panel group box-border w-full overflow-hidden rounded-loom-md border border-loom-border bg-loom-surface transition-[border-color] duration-150 ease-loom"
       role="region"
-      aria-label="执行计划"
+      aria-label={t("plan.label")}
       open={expanded}
       onOpenChange={setExpanded}
     >
@@ -43,7 +45,7 @@ export function TodoProgressPanel({ plan }: { plan?: TodoPlanSnapshot }) {
         <button
           className="todo-progress-header flex min-h-[38px] w-full cursor-pointer items-center gap-loom-2 border-0 bg-transparent px-[10px] py-[7px] text-left font-[inherit] text-loom-muted hover:bg-loom-surface-2 active:bg-loom-surface-2 focus-visible:outline-2 focus-visible:outline-loom-accent focus-visible:outline-offset-[-2px]"
           type="button"
-          aria-label="展开或折叠执行计划"
+          aria-label={t("plan.toggle")}
         >
           <span className="todo-progress-title font-loom-mono text-[10px] font-semibold leading-none tracking-[0.08em] text-loom-text">PLAN</span>
           <span className="todo-progress-count font-loom-mono text-[10px] leading-none text-loom-faint">{completed} / {plan.todos.length}</span>

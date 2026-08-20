@@ -20,6 +20,7 @@ import { globalSettingsPath, modelsJsonPath } from "../../modelConfig/paths";
 import { attributeModelError } from "../../modelConfig/errors";
 import type { RegistryProvider } from "../../modelConfig/types";
 import { normalizeLlmUsage } from "../core/usage";
+import { defaultSystemPrompt, type SystemPromptLocale } from "../../../common/systemPrompt";
 
 // ---------------------------------------------------------------------------
 // ④ 适配器 · pi 引擎：pi（pi-agent-core / pi-ai）的全部使用收敛于此，实现 EngineFactory。
@@ -28,7 +29,6 @@ import { normalizeLlmUsage } from "../core/usage";
 // ② 不直接依赖 pi；分支上下文装配经 buildContext 回调转交 ① 领域核心。
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT = "你是一个冷静、精确、克制的思考助手。回答直接，不啰嗦。";
 const TRACE_TEXT_PREVIEW = 600;
 const TRACE_MESSAGE_HEAD = 8;
 const TRACE_MESSAGE_TAIL = 12;
@@ -107,6 +107,8 @@ export interface PiEngineDeps {
   events: EventSinkPort;
   /** 现取模型配置（设置优先、env 回退）。 */
   resolveModel: () => ResolvedModelConfig;
+  /** Current UI locale, used when a node has no custom system prompt. */
+  getLocale?: () => SystemPromptLocale;
   /** convertToLlm 委托：某节点发送前，交 ① 核心装配上下文。返回 pi Message[]。 */
   buildContext: (nodeId: string, own: AgentMessage[]) => Message[] | Promise<Message[]>;
   /** 创建引擎时读取节点初值（系统提示 / 模型 / 初始转写）。 */
@@ -122,7 +124,7 @@ export interface PiEngineDeps {
 }
 
 export function createPiEngine(deps: PiEngineDeps): EngineFactory {
-  const { events, resolveModel, buildContext, getNodeInit, getTools, getProjectRoot, dispatcher, getCurrentTurnId } = deps;
+  const { events, resolveModel, getLocale, buildContext, getNodeInit, getTools, getProjectRoot, dispatcher, getCurrentTurnId } = deps;
 
   function fileStamp(filePath: string | undefined) {
     if (!filePath || !existsSync(filePath)) return `${filePath ?? ""}:missing`;
@@ -248,7 +250,7 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
     };
     const agent = new Agent({
       initialState: {
-        systemPrompt: init?.systemPrompt || SYSTEM_PROMPT,
+        systemPrompt: init?.systemPrompt || defaultSystemPrompt(getLocale?.()),
         model,
         thinkingLevel: init?.thinkingLevel,
         messages: [...(init?.messages ?? [])],
@@ -271,7 +273,7 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
           at: startedAt,
           attributes: {
             model: { provider: ref.providerId, id: ref.modelId },
-            systemPrompt: init?.systemPrompt || SYSTEM_PROMPT,
+            systemPrompt: init?.systemPrompt || defaultSystemPrompt(getLocale?.()),
             messages: summarizeMessages(context.messages),
             messageCount: context.messages.length,
             tools: getTools(nodeId).map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })),

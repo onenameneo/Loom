@@ -30,22 +30,21 @@ export function buttonClassName(variant: ButtonVariant = "default", className?: 
 }
 
 const iconButtonBase = cn(
-  "grid h-[30px] w-[30px] cursor-pointer place-items-center rounded-loom-md border border-loom-border",
-  "bg-transparent text-loom-muted",
+  "grid h-[30px] w-[30px] cursor-pointer place-items-center rounded-loom-md border",
   interactiveTransition,
-  "hover:bg-loom-surface-2 hover:text-loom-text",
   "focus-visible:outline-2 focus-visible:outline-loom-accent focus-visible:outline-offset-1",
   "disabled:cursor-default disabled:opacity-[.45]",
   "[&>svg]:block [&>svg]:stroke-current",
 );
 
+const iconButtonVariants: Record<ButtonVariant, string> = {
+  default: "border-loom-border bg-transparent text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text",
+  primary: "border-loom-accent bg-loom-accent text-loom-on-accent hover:border-loom-accent-hover hover:bg-loom-accent-hover",
+  danger: "border-loom-border bg-transparent text-loom-muted hover:border-loom-err hover:bg-transparent hover:text-loom-err",
+};
+
 export function iconButtonClassName(variant: ButtonVariant = "default", className?: string) {
-  const variantClass = variant === "primary"
-    ? "border-loom-accent bg-loom-accent text-loom-on-accent hover:border-loom-accent-hover hover:bg-loom-accent-hover"
-    : variant === "danger"
-      ? "hover:border-loom-err hover:bg-transparent hover:text-loom-err"
-      : "";
-  return cn(iconButtonBase, variantClass, className);
+  return cn(iconButtonBase, iconButtonVariants[variant], className);
 }
 
 export const fieldClassName = cn(

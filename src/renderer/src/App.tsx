@@ -22,8 +22,10 @@ import {
 } from "./workspace/store";
 import { connectLiveTurnBridge } from "./workspace/liveTurnBridge";
 import { connectTodoPlanBridge } from "./workspace/todoPlanBridge";
+import { useI18n } from "./i18n/I18nProvider";
 
 export default function App() {
+  const { t } = useI18n();
   const [activeSurface, setActiveSurface] = useState("project");
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const projects = useWorkspaceStore(useShallow(selectProjects));
@@ -383,7 +385,7 @@ export default function App() {
   };
 
   const Active = SURFACES.find((s) => s.id === activeSurface) ?? SURFACES[0];
-  const defaultTitlebar = useMemo(() => ({ title: Active.label }), [Active.label]);
+  const defaultTitlebar = useMemo(() => ({ title: Active.translationKey ? t(Active.translationKey) : Active.label }), [Active.label, Active.translationKey, t]);
   const platform = window.api?.platform ?? "browser";
   useEffect(() => localStorage.setItem("loom:workbench:open", workbenchOpen ? "1" : "0"), [workbenchOpen]);
 

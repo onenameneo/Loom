@@ -66,6 +66,7 @@ export interface CanvasNodeDto {
   projectId: string;
   parentId?: string;
   title: string;
+  titleState?: "default" | "manual";
   seed?: NodeSeed;
   hasFrozenContext?: boolean;
   frozenContextMessageCount?: number;
@@ -383,6 +384,7 @@ export interface SessionMeta {
   id: string;
   projectId: string;
   title: string;
+  titleState?: "default" | "manual";
   createdAt: number;
   updatedAt: number;
   order: number;
@@ -593,6 +595,7 @@ declare global {
       settings: {
         get: () => Promise<SettingsPayload>;
         set: (patch: any) => Promise<{ ok: boolean; appearance: any; permissions: SettingsPayload["permissions"] }>;
+        setLocale: (locale: "zh-CN" | "en") => void;
         getPermissions: () => Promise<NonNullable<SettingsPayload["permissions"]>>;
         setPermissions: (patch: Partial<NonNullable<SettingsPayload["permissions"]>>) => Promise<{ ok: boolean; permissions: NonNullable<SettingsPayload["permissions"]> }>;
         setGlobalModel: (model: { providerId: string; modelId: string }) => Promise<{ ok: boolean }>;
