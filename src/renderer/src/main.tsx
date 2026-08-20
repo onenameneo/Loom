@@ -7,6 +7,8 @@ import "./tailwind.css";
 import "./shell.css";
 import "./message/message.css";
 import "./canvas/canvas.css";
+import "./workbench/monacoEnvironment";
+import "./workbench/files/files.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

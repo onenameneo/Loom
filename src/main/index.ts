@@ -27,6 +27,9 @@ import { createMemoryRuntime, type MemoryRuntimeService } from "./memory/runtime
 import { createRuntimeMemoryExtractor } from "./memory/llmExtractor";
 import type { MemoryWriteInput } from "./memory/types";
 import { initializeProjectDirectories } from "./projectDirectory";
+import { parseFileSearchRequest, parseFileWorkspaceRequest } from "../common/filePreview";
+import { ProjectFileWorkspace } from "./projectFiles/fileWorkspace";
+import { assertRendererSender } from "./fileIpcAuthorization";
 
 // ---------------------------------------------------------------------------
 // 主进程：持久化(store) + 设置 + 会话 + 画布引擎(pi 多节点)。
@@ -64,6 +67,7 @@ function invalidateAgent() {
 }
 
 function registerIpc() {
+  const fileWorkspace = new ProjectFileWorkspace(store);
   ipcMain.on("renderer:ready", (event) => {
     const current = win;
     if (!current || current.isDestroyed() || event.sender !== current.webContents) return;
@@ -190,6 +194,24 @@ function registerIpc() {
     };
     const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
     return { canceled: result.canceled, path: result.filePaths[0] };
+  });
+  ipcMain.handle("file:list", (event, request: unknown) => {
+    assertRendererSender(event, win);
+    return fileWorkspace.list(parseFileWorkspaceRequest(request));
+  });
+  ipcMain.handle("file:search", (event, request: unknown) => {
+    assertRendererSender(event, win);
+    return fileWorkspace.search(parseFileSearchRequest(request));
+  });
+  ipcMain.handle("file:preview", (event, request: unknown) => {
+    assertRendererSender(event, win);
+    return fileWorkspace.preview(parseFileWorkspaceRequest(request));
+  });
+  ipcMain.handle("file:open", async (event, request: unknown) => {
+    assertRendererSender(event, win);
+    const filePath = await fileWorkspace.absoluteFilePath(parseFileWorkspaceRequest(request));
+    const error = await shell.openPath(filePath);
+    return { ok: !error, error: error || undefined };
   });
   ipcMain.handle("session:list", (_e, projectId: string) => {
     return store.listSessions(projectId);

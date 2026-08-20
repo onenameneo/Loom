@@ -2,6 +2,16 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { FileMentionRef } from "../common/fileMentions";
 import type { ComposerBudgetPreviewInput } from "../common/composerBudget";
 import type { AgentMetricTotals } from "../common/telemetry";
+import {
+  parseFileListResult,
+  parseFilePreviewResult,
+  parseFileSearchResult,
+  type FileListResult,
+  type FilePreviewResult,
+  type FileSearchRequest,
+  type FileSearchResult,
+  type FileWorkspaceRequest,
+} from "../common/filePreview";
 
 type CanvasEvent = { nodeId: string; type: string; payload?: unknown };
 type LiveTurnSnapshot = { nodeId: string; sessionId: string; turnId: string; operation: "send" | "regenerate" | "edit-resend"; state: "running" | "awaiting_approval"; revision: number; assistantText: string; approval?: { requestId: string; toolName: string; toolCallId: string; reason?: string; sandboxMode?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "untrusted" | "on-request" | "never" } };
@@ -246,6 +256,16 @@ const api = {
       ipcRenderer.invoke("project:updateUi", { id, ui }),
     pickSourceRoot: (): Promise<{ canceled: boolean; path?: string }> =>
       ipcRenderer.invoke("project:pickSourceRoot"),
+  },
+  files: {
+    list: async (request: FileWorkspaceRequest): Promise<FileListResult> =>
+      parseFileListResult(await ipcRenderer.invoke("file:list", request)),
+    search: async (request: FileSearchRequest): Promise<FileSearchResult> =>
+      parseFileSearchResult(await ipcRenderer.invoke("file:search", request)),
+    preview: async (request: FileWorkspaceRequest): Promise<FilePreviewResult> =>
+      parseFilePreviewResult(await ipcRenderer.invoke("file:preview", request)),
+    open: (request: FileWorkspaceRequest): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke("file:open", request),
   },
   sessions: {
     list: (projectId: string): Promise<any[]> => ipcRenderer.invoke("session:list", projectId),

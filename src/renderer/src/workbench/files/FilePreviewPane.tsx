@@ -1,0 +1,17 @@
+import { AlertTriangle, FileCode2, FileImage, LoaderCircle } from "lucide-react";
+import { lazy, Suspense } from "react";
+import { useState } from "react";
+import type { editor } from "monaco-editor";
+import type { FilePreviewResult } from "../../../../common/filePreview";
+
+const MonacoFileEditor = lazy(() => import("./MonacoFileEditor").then((module) => ({ default: module.MonacoFileEditor })));
+
+export function FilePreviewPane({ preview, loading, error }: { preview: FilePreviewResult | null; loading: boolean; error: string | null }) {
+  const [editorInstance, setEditorInstance] = useState<editor.IStandaloneCodeEditor | null>(null);
+  if (loading) return <div className="files-empty" role="status"><LoaderCircle className="animate-spin" size={16} />读取文件中…</div>;
+  if (error) return <div className="files-empty files-empty--error" role="alert"><AlertTriangle size={16} /><span>{error}</span></div>;
+  if (!preview) return <div className="files-empty"><FileCode2 size={18} /><span>选择文件以查看预览</span></div>;
+  if (preview.kind === "text") return <div className="files-preview-content flex h-full min-h-0 min-w-0 flex-col bg-loom-code-bg"><div className="files-preview-meta flex min-h-9 flex-none items-center justify-between gap-loom-1 border-b border-loom-code-border bg-loom-surface px-loom-2 py-loom-1"><span className="font-loom-mono text-[10px] tracking-[0.02em] text-loom-muted">{preview.language}{preview.truncated ? " · 已截断至 2 MB" : ""}</span><span className="files-preview-actions inline-flex gap-loom-1"><button type="button" className="files-preview-action cursor-pointer rounded-loom-sm border border-transparent bg-transparent px-loom-1 py-[3px] font-loom-ui text-[11px] text-loom-muted transition-colors duration-150 ease-loom hover:bg-loom-surface-2 hover:text-loom-text focus-visible:outline focus-visible:outline-loom-accent disabled:cursor-default disabled:opacity-45" aria-label="复制文件内容" onClick={() => void navigator.clipboard?.writeText(preview.content)}>复制</button><button type="button" className="files-preview-action cursor-pointer rounded-loom-sm border border-transparent bg-transparent px-loom-1 py-[3px] font-loom-ui text-[11px] text-loom-muted transition-colors duration-150 ease-loom hover:bg-loom-surface-2 hover:text-loom-text focus-visible:outline focus-visible:outline-loom-accent disabled:cursor-default disabled:opacity-45" aria-label="查找文件内容" disabled={!editorInstance} onClick={() => void editorInstance?.getAction("actions.find")?.run()}>查找</button><button type="button" className="files-preview-action cursor-pointer rounded-loom-sm border border-transparent bg-transparent px-loom-1 py-[3px] font-loom-ui text-[11px] text-loom-muted transition-colors duration-150 ease-loom hover:bg-loom-surface-2 hover:text-loom-text focus-visible:outline focus-visible:outline-loom-accent disabled:cursor-default disabled:opacity-45" aria-label="折叠全部代码" disabled={!editorInstance} onClick={() => void editorInstance?.getAction("editor.foldAll")?.run()}>折叠</button></span></div><Suspense fallback={<div className="files-empty" role="status"><LoaderCircle className="animate-spin" size={16} />加载编辑器中…</div>}><MonacoFileEditor preview={preview} onEditorReady={setEditorInstance} /></Suspense></div>;
+  if (preview.kind === "image") return <div className="files-image-preview"><FileImage size={16} /><img src={preview.dataUrl} alt={preview.name} /></div>;
+  return <div className="files-empty"><AlertTriangle size={18} /><span>{preview.reason === "too-large" ? "文件过大，暂不预览" : "二进制文件暂不支持文本预览"}</span></div>;
+}

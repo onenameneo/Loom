@@ -18,13 +18,56 @@ describe("Workbench", () => {
     render(<Workbench nodeId="node-1" />);
 
     const add = screen.getByRole("button", { name: "打开页面" });
-    fireEvent.click(add);
+    fireEvent(add, new MouseEvent("pointerdown", { bubbles: true, button: 0, ctrlKey: false }));
     const menu = screen.getByRole("menu");
-    expect(document.activeElement).toBe(menu);
-    fireEvent.keyDown(menu, { key: "Escape" });
+    expect(screen.getByRole("menuitem", { name: "Trace" })).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Trace" }), { key: "Escape" });
 
     expect(screen.queryByRole("menu")).toBeNull();
     expect(document.activeElement).toBe(add);
+  });
+
+  it("closes the add menu when the pointer interacts outside its content", async () => {
+    localStorage.setItem("loom:workbench:tabs", '["trace"]');
+    render(<Workbench nodeId={null} />);
+
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    fireEvent(screen.getByRole("button", { name: "打开页面" }), new MouseEvent("pointerdown", { bubbles: true, button: 0, ctrlKey: false }));
+    expect(screen.getByRole("menu")).toBeTruthy();
+    await act(async () => {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    fireEvent(outside, new MouseEvent("pointerdown", { bubbles: true, button: 0, ctrlKey: false }));
+    fireEvent.click(outside);
+    await act(async () => {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    expect(screen.queryByRole("menu")).toBeNull();
+    outside.remove();
+  });
+
+  it("uses Radix tab state and keeps the tab close action pointer-friendly", () => {
+    localStorage.setItem("loom:workbench:tabs", '["trace","files"]');
+    render(<Workbench nodeId={null} />);
+
+    const filesTab = screen.getByRole("tab", { name: /Files/ });
+    const traceTab = screen.getByRole("tab", { name: /Trace/ });
+    const filesTabShell = filesTab.parentElement!;
+    const traceTabShell = traceTab.parentElement!;
+    expect(traceTab.getAttribute("data-state")).toBe("active");
+    expect(filesTab.getAttribute("data-state")).toBe("inactive");
+    expect(traceTabShell.className).toContain("bg-loom-surface-2");
+    expect(filesTabShell.className).toContain("bg-transparent");
+    expect(filesTabShell.className).toContain("hover:bg-loom-surface-2");
+
+    fireEvent.mouseDown(filesTab, { button: 0, ctrlKey: false });
+
+    expect(filesTab.getAttribute("data-state")).toBe("active");
+    expect(traceTab.getAttribute("data-state")).toBe("inactive");
+    expect(screen.getByRole("button", { name: "关闭 Files" }).className).toContain("cursor-pointer");
   });
 
   function spanRecord(spans: any[], overrides: Record<string, unknown> = {}) {
@@ -125,6 +168,55 @@ describe("Workbench", () => {
     expect(screen.getByRole("menu", { name: "打开工作台页面" })).toBeTruthy();
   });
 
+  it("registers Files as a persisted Workbench page and loads the active project directory", async () => {
+    (window as any).api = {
+      files: {
+        list: vi.fn(async () => ({ projectId: "project-1", root: "project:0", path: ".", entries: [{ name: "src", path: "src", kind: "directory" }], truncated: false })),
+        preview: vi.fn(),
+      },
+    };
+    localStorage.setItem("loom:workbench:tabs", '["files"]');
+    render(<Workbench nodeId={null} projectId="project-1" />);
+
+    expect(screen.getByRole("tab", { name: /Files/ })).toBeTruthy();
+    expect(await screen.findByRole("treeitem", { name: /src/ })).toBeTruthy();
+    expect((window as any).api.files.list).toHaveBeenCalledWith({ projectId: "project-1", root: "project:0", path: undefined });
+    expect(screen.getByRole("searchbox", { name: "搜索文件名" })).toBeTruthy();
+    expect(screen.queryByLabelText("文件路径")).toBeNull();
+    const collapse = screen.getByRole("button", { name: "折叠文件列表" });
+    fireEvent.click(collapse);
+    expect(screen.getByRole("button", { name: "展开文件列表" })).toBeTruthy();
+    expect(document.querySelector(".files-workspace")?.getAttribute("data-explorer-collapsed")).toBe("true");
+  });
+
+  it("keeps the file explorer splitter directly under pointer control during a drag", async () => {
+    (window as any).api = {
+      files: {
+        list: vi.fn(async () => ({ projectId: "project-1", root: "project:0", path: ".", entries: [{ name: "src", path: "src", kind: "directory" }], truncated: false })),
+        preview: vi.fn(),
+      },
+    };
+    localStorage.setItem("loom:workbench:tabs", '["files"]');
+    render(<Workbench nodeId={null} projectId="project-1" />);
+
+    const splitter = await screen.findByRole("separator", { name: "调整文件列表宽度" });
+    const workspace = document.querySelector<HTMLElement>(".files-workspace")!;
+    Object.defineProperty(workspace, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ width: 1_000, height: 600, top: 0, left: 0, right: 1_000, bottom: 600 }),
+    });
+
+    fireEvent(splitter, new MouseEvent("pointerdown", { bubbles: true, clientX: 420 }));
+    fireEvent(splitter, new MouseEvent("pointermove", { bubbles: true, clientX: 520 }));
+
+    expect(workspace.classList.contains("is-resizing")).toBe(true);
+    expect(workspace.style.getPropertyValue("--files-explorer-width")).toBe("52%");
+
+    fireEvent(splitter, new MouseEvent("pointerup", { bubbles: true, clientX: 520 }));
+    expect(workspace.classList.contains("is-resizing")).toBe(false);
+    expect(splitter.getAttribute("aria-valuenow")).toBe("52");
+  });
+
   it("renders the add menu in the overlay root", () => {
     const overlay = document.createElement("div");
     overlay.id = "app-overlay-root";
@@ -132,7 +224,7 @@ describe("Workbench", () => {
     localStorage.setItem("loom:workbench:tabs", '["trace"]');
     render(<Workbench nodeId={null} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "打开页面" }));
+    fireEvent(screen.getByRole("button", { name: "打开页面" }), new MouseEvent("pointerdown", { bubbles: true, button: 0, ctrlKey: false }));
     expect(overlay.contains(screen.getByRole("menu"))).toBe(true);
     overlay.remove();
   });
@@ -231,8 +323,7 @@ describe("Workbench", () => {
     render(<Workbench nodeId="node-1" />);
 
     await openTurn();
-    act(() => frames.shift()?.(0));
-    act(() => frames.shift()?.(16));
+    frames.splice(0);
     const prompt = screen.getByRole("button", { name: /System prompt/ });
     const disclosure = prompt.closest(".trace-disclosure")!;
     fireEvent.click(prompt);

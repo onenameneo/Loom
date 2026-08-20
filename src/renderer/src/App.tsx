@@ -480,7 +480,7 @@ export default function App() {
             main={
               <Active.Panel ctx={ctx} />
             }
-            right={<Workbench nodeId={activeNodeId} />}
+            right={<Workbench nodeId={activeNodeId} projectId={activeProjectId} />}
             workbenchOpen={workbenchOpen}
             onToggleWorkbench={() => setWorkbenchOpen((open) => !open)}
           />

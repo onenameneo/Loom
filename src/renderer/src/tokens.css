@@ -77,6 +77,13 @@
   --code-bg: #f6f7f9;
   --code-border: rgba(0, 0, 0, 0.09);
   --code-text: #24292f;
+  --code-selection: rgba(1, 105, 204, 0.16);
+  --code-selection-inactive: rgba(1, 105, 204, 0.1);
+  --code-line-highlight: rgba(20, 20, 20, 0.025);
+  --code-cursor: var(--accent);
+  --code-scrollbar: rgba(20, 20, 20, 0.16);
+  --code-scrollbar-hover: rgba(20, 20, 20, 0.28);
+  --code-widget-bg: var(--surface);
   --inline-code-bg: rgba(1, 105, 204, 0.09);
   --inline-code-text: #0550ae;
   --syntax-keyword: #cf222e;
@@ -130,6 +137,13 @@
   --code-bg: #1b1b1b;
   --code-border: rgba(255, 255, 255, 0.1);
   --code-text: #e6edf3;
+  --code-selection: rgba(51, 156, 255, 0.24);
+  --code-selection-inactive: rgba(51, 156, 255, 0.16);
+  --code-line-highlight: rgba(255, 255, 255, 0.04);
+  --code-cursor: var(--accent);
+  --code-scrollbar: rgba(255, 255, 255, 0.18);
+  --code-scrollbar-hover: rgba(255, 255, 255, 0.3);
+  --code-widget-bg: var(--surface);
   --inline-code-bg: rgba(51, 156, 255, 0.15);
   --inline-code-text: #a5d6ff;
   --syntax-keyword: #ff7b72;

@@ -1,8 +1,9 @@
-import { Activity, ChevronRight, Copy, Plus, X } from "lucide-react";
+import { Activity, ChevronRight, Copy, Files, Plus, X } from "lucide-react";
+import { DropdownMenu, Tabs } from "radix-ui";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import { readUsageFacts, type AgentMetricTotals, type UsageFacts } from "../../../common/telemetry";
 import { cn } from "../ui/styles";
+import { FilesPage } from "./files/FilesPage";
 import {
   applyTraceEvent,
   buildSpanTree,
@@ -13,7 +14,7 @@ import {
   type TraceSpanNode,
 } from "./traceState";
 
-type WorkbenchPageId = "trace";
+type WorkbenchPageId = "trace" | "files";
 type CompactionTracePayload = {
   state: string;
   trigger: string;
@@ -40,6 +41,7 @@ type CompactionTracePayload = {
 
 const WORKBENCH_PAGES: Record<WorkbenchPageId, { label: string; icon: typeof Activity }> = {
   trace: { label: "Trace", icon: Activity },
+  files: { label: "Files", icon: Files },
 };
 
 function restoredTabs(): WorkbenchPageId[] {
@@ -47,7 +49,7 @@ function restoredTabs(): WorkbenchPageId[] {
     const raw = localStorage.getItem("loom:workbench:tabs");
     if (raw !== null) {
       const saved = JSON.parse(raw);
-      if (Array.isArray(saved) && saved.every((item): item is WorkbenchPageId => item === "trace")) return [...new Set(saved)];
+      if (Array.isArray(saved) && saved.every((item): item is WorkbenchPageId => item === "trace" || item === "files")) return [...new Set(saved)];
     }
   } catch { /* fall back to legacy preference */ }
   return localStorage.getItem("loom:workbench:trace") === "1" ? ["trace"] : [];
@@ -372,16 +374,15 @@ function TraceRecordView({ record }: { record: TraceRecordDto }) {
   </TraceDisclosure>;
 }
 
-export function Workbench({ nodeId }: { nodeId: string | null }) {
+export function Workbench({ nodeId, projectId = null }: { nodeId: string | null; projectId?: string | null }) {
   const [tabs, setTabs] = useState<WorkbenchPageId[]>(restoredTabs);
   const [selectedTab, setSelectedTab] = useState<WorkbenchPageId | null>(() => restoredTabs()[0] ?? null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [trace, setTrace] = useState<TraceClientState | null>(null);
   const [metrics, setMetrics] = useState<AgentMetricTotals | null>(null);
   const [hasNewActivity, setHasNewActivity] = useState(false);
   const addRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const menuWasOpenRef = useRef(false);
   const inspectorRef = useRef<HTMLDivElement>(null);
   const readingHistoryRef = useRef(false);
   const open = (page: WorkbenchPageId = "trace") => {
@@ -403,10 +404,11 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
     localStorage.setItem("loom:workbench:trace", tabs.length ? "1" : "0");
   }, [tabs]);
   useEffect(() => {
-    if (menuOpen) menuRef.current?.focus();
+    if (menuWasOpenRef.current && !menuOpen) addRef.current?.focus();
+    menuWasOpenRef.current = menuOpen;
   }, [menuOpen]);
   useEffect(() => {
-    if (!nodeId || !tabs.length || !window.api) {
+    if (!nodeId || !tabs.includes("trace") || !window.api) {
       setTrace(null);
       setMetrics(null);
       setHasNewActivity(false);
@@ -440,26 +442,40 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
     }
     return () => { dead = true; off(); };
   }, [nodeId, tabs]);
-  if (!tabs.length) return <div className="grid h-full place-items-center p-loom-4"><div className="grid w-[min(100%,360px)] gap-loom-1" role="menu" aria-label="打开工作台页面"><button className="flex w-full cursor-pointer items-center gap-loom-3 rounded-loom-md border-0 bg-transparent p-loom-3 text-left text-[13px] font-medium text-loom-text hover:bg-loom-surface-2" role="menuitem" onClick={() => open()}><Activity size={18} /><span className="flex-1">Trace</span><kbd className="rounded-loom-pill bg-loom-surface-2 px-[7px] py-[2px] font-loom-mono text-[10px] text-loom-muted">⌘R</kbd></button></div></div>;
-  const menu = menuOpen && menuPosition ? createPortal(
-    <div ref={menuRef} className="fixed z-[2] w-40 rounded-loom-md border border-loom-border bg-loom-surface p-loom-1 shadow-loom-float" role="menu" tabIndex={-1} style={menuPosition} onKeyDown={(event) => { if (event.key === "Escape") { setMenuOpen(false); addRef.current?.focus(); } }}>
-      {(Object.keys(WORKBENCH_PAGES) as WorkbenchPageId[]).map((page) => {
-        const PageIcon = WORKBENCH_PAGES[page].icon;
-        return <button className="flex w-full cursor-pointer items-center gap-loom-2 rounded-loom-sm border-0 bg-transparent p-loom-2 text-left text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text focus-visible:outline-2 focus-visible:outline-loom-accent focus-visible:outline-offset-1" key={page} role="menuitem" onClick={() => open(page)}><PageIcon size={14} />{WORKBENCH_PAGES[page].label}</button>;
-      })}
-    </div>,
-    document.getElementById("app-overlay-root") ?? document.body,
-  ) : null;
-  return <div className="flex h-full min-w-0 flex-col">
-    <div className="flex min-h-11 flex-none items-center gap-loom-2 overflow-x-auto border-b border-loom-border p-loom-2" role="tablist">
+  if (!tabs.length) return <div className="grid h-full place-items-center p-loom-4"><div className="grid w-[min(100%,360px)] gap-loom-1" role="menu" aria-label="打开工作台页面">{(Object.keys(WORKBENCH_PAGES) as WorkbenchPageId[]).map((page) => { const PageIcon = WORKBENCH_PAGES[page].icon; return <button type="button" key={page} className="flex w-full cursor-pointer items-center gap-loom-3 rounded-loom-md border-0 bg-transparent p-loom-3 text-left text-[13px] font-medium text-loom-text hover:bg-loom-surface-2" role="menuitem" onClick={() => open(page)}><PageIcon size={18} /><span className="flex-1">{WORKBENCH_PAGES[page].label}</span>{page === "trace" && <kbd className="rounded-loom-pill bg-loom-surface-2 px-[7px] py-[2px] font-loom-mono text-[10px] text-loom-muted">⌘R</kbd>}</button>; })}</div></div>;
+  return <Tabs.Root className="flex h-full min-w-0 flex-col" value={selectedTab ?? tabs[0]} onValueChange={(value) => setSelectedTab(value as WorkbenchPageId)}>
+    <Tabs.List className="flex min-h-11 flex-none items-center gap-loom-2 overflow-x-auto border-b border-loom-border p-loom-2" aria-label="工作台页面">
       {tabs.map((page) => {
         const PageIcon = WORKBENCH_PAGES[page].icon;
-        return <div className={cn("inline-flex min-w-0 max-w-[180px] cursor-pointer items-center gap-loom-2 rounded-loom-md border border-transparent bg-loom-surface-2 px-2 py-1.5 text-[12px] text-loom-text focus-visible:outline focus-visible:outline-loom-accent focus-visible:outline-offset-2", selectedTab === page && "border-loom-border bg-loom-surface")} role="tab" tabIndex={0} aria-selected={selectedTab === page} key={page} onClick={() => setSelectedTab(page)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedTab(page); } }}><PageIcon size={14} /><span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{WORKBENCH_PAGES[page].label}</span><button className="rounded-loom-sm border-0 bg-transparent p-[2px] text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text focus-visible:outline focus-visible:outline-loom-accent" aria-label={`关闭 ${WORKBENCH_PAGES[page].label}`} onClick={(event) => { event.stopPropagation(); close(page); }}><X size={13} /></button></div>;
+        const isSelected = selectedTab === page;
+        return <div className={cn(
+          "inline-flex min-w-0 max-w-[180px] items-center gap-loom-1 rounded-loom-md border px-2 py-1.5 text-[12px] transition-[background-color,border-color,color] duration-150 ease-loom",
+          isSelected
+            ? "border-loom-border bg-loom-surface-2 text-loom-text"
+            : "border-transparent bg-transparent text-loom-muted hover:bg-loom-surface-2",
+        )} key={page}>
+          <Tabs.Trigger value={page} className="inline-flex min-w-0 cursor-pointer items-center gap-loom-2 border-0 bg-transparent p-0 text-left text-inherit outline-none focus-visible:outline-2 focus-visible:outline-loom-accent focus-visible:outline-offset-1">
+            <PageIcon size={14} /><span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{WORKBENCH_PAGES[page].label}</span>
+          </Tabs.Trigger>
+          <button type="button" className="cursor-pointer rounded-loom-sm border-0 bg-transparent p-[2px] text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text focus-visible:outline focus-visible:outline-loom-accent" aria-label={`关闭 ${WORKBENCH_PAGES[page].label}`} onClick={(event) => { event.stopPropagation(); close(page); }}><X size={13} /></button>
+        </div>;
       })}
-      <div className="relative"><button ref={addRef} className="grid h-7 w-7 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-[2px] text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text focus-visible:outline focus-visible:outline-loom-accent" aria-label="打开页面" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => { const rect = addRef.current?.getBoundingClientRect(); setMenuPosition(rect ? { top: rect.bottom + 4, left: Math.max(8, rect.right - 160) } : null); setMenuOpen((open) => !open); }}><Plus size={16} /></button></div>
-    </div>
-    {menu}
-    {selectedTab === "trace" && <div ref={inspectorRef} className="min-h-0 min-w-0 flex-1 overflow-auto p-loom-3 [&_p]:text-[12px] [&_p]:leading-[1.6] [&_p]:text-loom-muted" role="tabpanel" aria-label="Trace" onScroll={(event) => {
+      <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
+        <DropdownMenu.Trigger asChild>
+          <button ref={addRef} type="button" className="grid h-7 w-7 cursor-pointer place-items-center rounded-loom-sm border-0 bg-transparent p-[2px] text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text focus-visible:outline focus-visible:outline-loom-accent" aria-label="打开页面"><Plus size={16} /></button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal container={document.getElementById("app-overlay-root") ?? undefined}>
+          <DropdownMenu.Content className="z-[220] min-w-40 rounded-loom-md border border-loom-border bg-loom-surface p-loom-1 shadow-loom-float" sideOffset={4} align="end" collisionPadding={8} onCloseAutoFocus={(event) => { event.preventDefault(); addRef.current?.focus(); }}>
+            {(Object.keys(WORKBENCH_PAGES) as WorkbenchPageId[]).map((page) => {
+              const PageIcon = WORKBENCH_PAGES[page].icon;
+              return <DropdownMenu.Item className="flex cursor-pointer items-center gap-loom-2 rounded-loom-sm p-loom-2 text-loom-muted outline-none data-[highlighted]:bg-loom-surface-2 data-[highlighted]:text-loom-text" key={page} onSelect={() => open(page)}><PageIcon size={14} />{WORKBENCH_PAGES[page].label}</DropdownMenu.Item>;
+            })}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+    </Tabs.List>
+    <Tabs.Content value="files" className="min-h-0 min-w-0 flex-1" aria-label="Files"><FilesPage projectId={projectId} /></Tabs.Content>
+    <Tabs.Content value="trace" className="min-h-0 min-w-0 flex-1 overflow-auto p-loom-3 [&_p]:text-[12px] [&_p]:leading-[1.6] [&_p]:text-loom-muted" aria-label="Trace" onScroll={(event) => {
       const element = event.currentTarget;
       const atNewest = element.scrollTop <= 24;
       readingHistoryRef.current = !atNewest;
@@ -495,6 +511,6 @@ export function Workbench({ nodeId }: { nodeId: string | null }) {
         const record = trace.recordsByTurnId[turnId];
         return record ? <TraceRecordView key={record.turnId} record={record} /> : null;
       })}
-    </div>}
-  </div>;
+    </Tabs.Content>
+  </Tabs.Root>;
 }

@@ -29,6 +29,8 @@ function readStoredPanelWidth(key: string, fallback: number, min: number, max: n
 
 const ENDPOINT_EPSILON_PX = 0.5;
 const SHELL_TRANSITION_FALLBACK_MS = 360;
+const WORKBENCH_MIN_WIDTH = 300;
+const WORKBENCH_MAX_WIDTH = 800;
 
 function readPixelValue(value: string): number | null {
   const pixels = Number.parseFloat(value);
@@ -161,7 +163,7 @@ export function AppChrome({
     return readStoredPanelWidth("loom:ui:sidebar-width", 244, 200, 420);
   });
   const [workbenchWidth, setWorkbenchWidth] = useState(() => {
-    return readStoredPanelWidth("loom:ui:workbench-width", 380, 300, 560);
+    return readStoredPanelWidth("loom:ui:workbench-width", 380, WORKBENCH_MIN_WIDTH, WORKBENCH_MAX_WIDTH);
   });
   // macOS 窗口态：116px 预留红绿灯 + 开关（开关 left:80 + 28 + 8）；全屏后红绿灯消失，塌回到只容纳左移开关的 44px（与非 mac 同宽）。
   const workbenchMounted = right !== undefined;
@@ -178,8 +180,8 @@ export function AppChrome({
     const startX = event.clientX;
     const isSidebar = side === "sidebar";
     const startWidth = isSidebar ? sidebarWidth : workbenchWidth;
-    const min = isSidebar ? 200 : 300;
-    const max = isSidebar ? 420 : 560;
+    const min = isSidebar ? 200 : WORKBENCH_MIN_WIDTH;
+    const max = isSidebar ? 420 : WORKBENCH_MAX_WIDTH;
     const apply = (width: number) => shellRef.current?.style.setProperty(isSidebar ? "--sidebar-expanded-width" : "--workbench-width", `${width}px`);
     let latest = startWidth;
     const onMove = (move: PointerEvent) => { latest = Math.min(max, Math.max(min, startWidth + (isSidebar ? move.clientX - startX : startX - move.clientX))); apply(latest); };

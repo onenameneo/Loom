@@ -15,6 +15,16 @@ export default defineConfig({
   renderer: {
     root: "src/renderer",
     plugins: [react(), tailwindcss()],
+    // Monaco exposes Vite virtual `?worker` modules. Pre-bundling those modules
+    // produces stale `/node_modules/.vite/deps/*worker.js` URLs in dev.
+    optimizeDeps: {
+      exclude: ["monaco-editor"],
+    },
+    resolve: {
+      alias: {
+        "monaco-editor/esm": resolve(__dirname, "node_modules/monaco-editor/esm"),
+      },
+    },
     build: {
       rollupOptions: { input: resolve(__dirname, "src/renderer/index.html") },
     },

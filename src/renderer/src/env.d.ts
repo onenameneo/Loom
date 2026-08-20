@@ -1,5 +1,6 @@
 import type { AgentMetricTotals, LlmUsage } from "../../../common/telemetry";
 import type { ComposerBudgetPreviewInput } from "../../../common/composerBudget";
+import type { FileListResult, FilePreviewResult, FileSearchRequest, FileSearchResult, FileWorkspaceRequest } from "../../../common/filePreview";
 
 export {};
 
@@ -665,6 +666,12 @@ declare global {
         pin: (id: string, pinned: boolean) => Promise<{ ok: boolean }>;
         updateUi: (id: string, ui: { activeSessionId?: string }) => Promise<{ ok: boolean }>;
         pickSourceRoot: () => Promise<{ canceled: boolean; path?: string }>;
+      };
+      files: {
+        list: (request: FileWorkspaceRequest) => Promise<FileListResult>;
+        search: (request: FileSearchRequest) => Promise<FileSearchResult>;
+        preview: (request: FileWorkspaceRequest) => Promise<FilePreviewResult>;
+        open: (request: FileWorkspaceRequest) => Promise<{ ok: boolean; error?: string }>;
       };
       sessions: {
         list: (projectId: string) => Promise<SessionMeta[]>;

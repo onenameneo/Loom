@@ -21,6 +21,8 @@
     }
   },
   "scripts": {
+    "prepare:electron": "install-electron --no",
+    "predev": "pnpm run prepare:electron",
     "dev": "ELECTRON_RUN_AS_NODE= electron-vite dev",
     "build": "electron-vite build",
     "pack": "electron-vite build && electron-builder --dir",
@@ -29,6 +31,7 @@
     "dist:win": "electron-vite build && electron-builder --win",
     "dist:linux": "electron-vite build && electron-builder --linux",
     "postinstall": "electron-rebuild -f -v 43.2.0 -w better-sqlite3",
+    "prestart": "pnpm run prepare:electron",
     "start": "ELECTRON_RUN_AS_NODE= electron-vite preview",
     "test": "ELECTRON_RUN_AS_NODE=1 electron ./node_modules/vitest/vitest.mjs run",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
@@ -41,6 +44,7 @@
     "better-sqlite3": "^12.11.1",
     "dotenv": "^16.4.7",
     "lucide-react": "^1.24.0",
+    "monaco-editor": "^0.56.0",
     "prism-react-renderer": "^2.4.1",
     "radix-ui": "^1.6.2",
     "react-markdown": "^10.1.0",

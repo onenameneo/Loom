@@ -166,6 +166,23 @@ describe("adaptive AppChrome", () => {
     expect(screen.getByRole("button", { name: "关闭工作台" }).getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("allows the workbench panel to expand to 800px when dragged left", () => {
+    const { container } = renderChrome(expanded, "browser", false, {
+      right: <aside>工作台内容</aside>,
+      workbenchOpen: true,
+      onToggleWorkbench: vi.fn(),
+    });
+    const shell = container.querySelector(".app-shell") as HTMLElement;
+    const handle = screen.getByRole("separator", { name: "调整工作台宽度" });
+
+    fireEvent(handle, new MouseEvent("pointerdown", { bubbles: true, clientX: 1_000 }));
+    fireEvent(window, new MouseEvent("pointermove", { bubbles: true, clientX: 580 }));
+
+    expect(shell.style.getPropertyValue("--workbench-width")).toBe("800px");
+
+    fireEvent(window, new MouseEvent("pointerup", { bubbles: true, clientX: 580 }));
+  });
+
   it("moves the toggle to the left edge and shrinks the reserve when macOS is fullscreen", () => {
     const windowed = renderChrome(expanded, "darwin", false);
     const windowedChrome = windowed.container.querySelector(".window-controls-chrome")!;
