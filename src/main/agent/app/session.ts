@@ -64,6 +64,7 @@ import { createMetricsTelemetryHook } from "../hooks/events/metricsTelemetry";
 import { normalizeLlmUsage, type LlmUsage } from "../core/usage";
 import { createCompactionService, type CompactNodeResult, type CompactionServiceDeps } from "./compactionService";
 import { createApprovalGate } from "../hooks/tools/approvalGate";
+import type { McpToolProvider } from "../../mcp/provider";
 import {
   appendAssistantDeltaToSnapshot,
   appendAssistantThinkingToSnapshot,
@@ -167,6 +168,7 @@ export interface CanvasRuntimeDeps {
     handleCommand(text: string, context: { sessionId: string; nodeId: string; projectId?: string }): Promise<{ handled: boolean; ok: boolean; message?: string }>;
     afterTurn(input: { sessionId: string; nodeId: string; projectId?: string; userText: string; assistantText?: string; sourceKey?: string }): Promise<void>;
   };
+  mcp?: McpToolProvider;
   /** 注入引擎工厂：由组装根提供 pi 适配器；session 只认端口，引擎缓存持有于 runtime 记录。 */
   createEngine: (hooks: {
     buildContext: (nodeId: string, own: AgentMessage[]) => Message[] | Promise<Message[]>;
@@ -639,13 +641,17 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       try { return await updateTodoPlan(nodeId, args.todos, ctx); }
       finally { todoWriteInFlight = false; }
     });
-    return [...tools.list(), todoTool, ...skillTools, ...createProjectFileTools(sourceRoots, {
+    return [...tools.list(), ...deps.mcp?.toolsForSync(nodeId) ?? [], todoTool, ...skillTools, ...createProjectFileTools(sourceRoots, {
       memory,
       getSandboxMode: () => store.getSettings().permissions.sandboxMode,
     }), ...createProjectMutationTools(sourceRoots, {
       memory,
       getSandboxMode: () => store.getSettings().permissions.sandboxMode,
     }), ...commandTools];
+  }
+
+  async function prepareMcpTools(nodeId: string) {
+    await deps.mcp?.prepare(nodeId);
   }
 
   async function updateTodoPlan(nodeId: string, todos: TodoItem[], ctx: Parameters<NonNullable<ReturnType<typeof createWriteTodosTool>["execute"]>>[0]) {
@@ -1058,6 +1064,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   }
 
   async function retrySendAfterOverflow(node: CanvasNode, fromSeq: number) {
+    await prepareMcpTools(node.id);
     const existingHandle = engine.peek(node.id);
     if (node.messages.length > fromSeq) truncateTranscript(node, fromSeq, existingHandle);
     const compactionResult = await maybeCompactNode(node, "overflow", { handle: existingHandle });
@@ -1238,6 +1245,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
           "</loom-file-context>",
         ].join("\n\n")
       : "";
+    await prepareMcpTools(arg.nodeId);
     let activeTurn: { turnId: string; signal: AbortSignal } | undefined;
     let promptFromSeq = node.messages.length;
     const shouldNameSession = arg.text.trim().length > 0 && node.messages.length === 0;
@@ -1363,6 +1371,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     }
     const lastUser = [...node.messages].map(roleOf).lastIndexOf("user");
     if (lastUser < 0) return { ok: false };
+    await prepareMcpTools(nodeId);
     let activeTurn: { turnId: string; signal: AbortSignal } | undefined;
     const query = await queries.run({
       nodeId,
@@ -1401,6 +1410,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       events.emit(arg.nodeId, "error", getAgentMessage("apiKeyMissing"));
       return { ok: false };
     }
+    await prepareMcpTools(arg.nodeId);
     let activeTurn: { turnId: string; signal: AbortSignal } | undefined;
     const query = await queries.run({
       nodeId: arg.nodeId,
@@ -1486,6 +1496,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       runtime.markDisposed(id);
       approvals.cancelByNode(id, "node deleted");
       policies.clearNodeSession(id);
+      deps.mcp?.invalidate(id);
     }
     return { ok: true, deletedIds };
   }
@@ -1499,6 +1510,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     }));
     approvals.cancelByNode(nodeId, reason);
     policies.clearNodeSession(nodeId);
+    deps.mcp?.invalidate(nodeId);
   }
 
   function disposeSession(sessionId: string) {
@@ -1506,6 +1518,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       runtime.markDisposed(node.id);
       approvals.cancelByNode(node.id, "session deleted");
       policies.clearNodeSession(node.id);
+      deps.mcp?.invalidate(node.id);
     }
   }
 

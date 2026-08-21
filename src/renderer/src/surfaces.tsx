@@ -42,6 +42,10 @@ import { buttonClassName, iconButtonClassName } from "./ui/styles";
 import MemoryPanel from "./memory/MemoryPanel";
 import { useI18n, type TranslationKey } from "./i18n/I18nProvider";
 import { localizedSessionTitle } from "./i18n/titleLabels";
+import type { McpSafeServerDto, McpSettingsSnapshot } from "../../common/mcp";
+import { emptyMcpForm, formFromMcpServer, mcpFormToConfig, validateMcpForm, type McpFormState } from "./settings/mcpForm";
+import { McpKeyValueRows, McpStringRows } from "./settings/McpRepeatableRows";
+import { McpTransportToggle } from "./settings/McpTransportToggle";
 
 export interface SurfaceCtx {
   projects: ProjectMeta[];
@@ -636,6 +640,14 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [selectedSkillSource, setSelectedSkillSource] = useState<SkillCatalogDto["sources"][number] | null>(null);
   const [skillModalOpen, setSkillModalOpen] = useState(false);
   const [pendingDeleteModel, setPendingDeleteModel] = useState<{ providerId: string; modelId: string; name: string } | null>(null);
+  const [mcpSnapshot, setMcpSnapshot] = useState<McpSettingsSnapshot | null>(null);
+  const [mcpFormOpen, setMcpFormOpen] = useState(false);
+  const [mcpForm, setMcpForm] = useState<McpFormState>(() => emptyMcpForm());
+  const [editingMcp, setEditingMcp] = useState<McpSafeServerDto | null>(null);
+  const [pendingRemoveMcp, setPendingRemoveMcp] = useState<McpSafeServerDto | null>(null);
+  const [pendingConsentMcp, setPendingConsentMcp] = useState<McpSafeServerDto | null>(null);
+  const [mcpBusyId, setMcpBusyId] = useState<string | null>(null);
+  const [mcpError, setMcpError] = useState<string | null>(null);
   const titlebarContext = useMemo(() => ({ title: t("nav.settings") }), [t]);
   const permissionDefaults = {
     sandboxMode: "workspace-write" as const,
@@ -672,6 +684,24 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   useEffect(() => {
     void reloadSkills();
   }, [reloadSkills, s?.skills]);
+
+  const reloadMcp = useCallback(async () => {
+    if (!window.api?.mcp) {
+      setMcpSnapshot(null);
+      return;
+    }
+    try {
+      setMcpSnapshot(await window.api.mcp.list());
+      setMcpError(null);
+    } catch (cause) {
+      setMcpError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadMcp();
+    return window.api?.mcp?.onStatus(() => void reloadMcp());
+  }, [reloadMcp]);
 
   if (!s) return <div className="surface-empty">{t("settings.loading")}</div>;
 
@@ -835,6 +865,102 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
     await reloadSkills();
   }
 
+  const mcpServers = mcpSnapshot?.servers ?? [];
+  const mcpFormBusy = mcpBusyId === (mcpForm.id || "new");
+
+  function openMcpForm(server?: McpSafeServerDto) {
+    setEditingMcp(server ?? null);
+    setMcpForm(server ? formFromMcpServer(server) : emptyMcpForm());
+    setMcpError(null);
+    setMcpFormOpen(true);
+  }
+
+  async function saveMcp() {
+    const validation = validateMcpForm(mcpForm);
+    if (validation) {
+      setMcpError(t(`settings.mcpValidation.${validation}` as TranslationKey));
+      return;
+    }
+    const existing = mcpServers.find((server) => server.config.id === mcpFormToConfig(mcpForm).id);
+    setMcpBusyId(mcpForm.id || "new");
+    try {
+      const result = await window.api.mcp.save(mcpFormToConfig(mcpForm, existing ? existing.config.revision + 1 : 1));
+      if (!result.ok) {
+        setMcpError(result.issues?.map((issue) => `${issue.path}: ${issue.message}`).join(" · ") || t("settings.mcpConnectionFailed"));
+        return;
+      }
+      setMcpFormOpen(false);
+      await reloadMcp();
+    } catch (cause) {
+      setMcpError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setMcpBusyId(null);
+    }
+  }
+
+  async function toggleMcp(server: McpSafeServerDto) {
+    setMcpBusyId(server.config.id);
+    try {
+      await window.api.mcp.setEnabled(server.config.id, !server.config.enabled);
+      await reloadMcp();
+    } finally {
+      setMcpBusyId(null);
+    }
+  }
+
+  async function connectMcp(server: McpSafeServerDto, reconnect = false) {
+    setMcpBusyId(server.config.id);
+    setMcpError(null);
+    try {
+      const result = reconnect
+        ? await window.api.mcp.reconnect(server.config.id)
+        : await window.api.mcp.test(server.config.id);
+      const state = (result.status as { state?: string } | undefined)?.state;
+      if (state === "pending-consent") setPendingConsentMcp(server);
+      await reloadMcp();
+    } catch (cause) {
+      setMcpError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setMcpBusyId(null);
+    }
+  }
+
+  async function refreshMcp(server: McpSafeServerDto) {
+    setMcpBusyId(server.config.id);
+    setMcpError(null);
+    try {
+      const result = await window.api.mcp.refresh(server.config.id);
+      const state = (result.status as { state?: string } | undefined)?.state;
+      if (state === "pending-consent") setPendingConsentMcp(server);
+      await reloadMcp();
+    } catch (cause) {
+      setMcpError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setMcpBusyId(null);
+    }
+  }
+
+  async function consentMcp() {
+    if (!pendingConsentMcp) return;
+    setMcpBusyId(pendingConsentMcp.config.id);
+    try {
+      await window.api.mcp.consent(pendingConsentMcp.config.id, pendingConsentMcp.config.revision);
+      setPendingConsentMcp(null);
+      await reloadMcp();
+    } catch (cause) {
+      setMcpError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setMcpBusyId(null);
+    }
+  }
+
+  async function removeMcp() {
+    if (!pendingRemoveMcp) return;
+    await window.api.mcp.remove(pendingRemoveMcp.config.id);
+    setPendingRemoveMcp(null);
+    await reloadMcp();
+  }
+
   const providers = s.modelRegistry?.providers ?? [];
   const providerOptions = providers;
   const configuredProviders = providers
@@ -891,6 +1017,133 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
           {(skillCatalog?.sources.length ?? 0) === 0 && <div className="empty-state compact"><div className="empty-state__title">{t("settings.noSkillSources")}</div></div>}
         </div>
       </section>
+
+      <section className="model-config" data-testid="mcp-settings">
+        <div className="model-config__head">
+          <div>
+            <h3>{t("settings.mcp")}</h3>
+            <p>{t("settings.manageMcp")}</p>
+          </div>
+          <button className={iconButtonClassName("primary")} type="button" onClick={() => openMcpForm()} aria-label={t("settings.addMcp")} title={t("settings.addMcp")}><Plus size={17} /></button>
+        </div>
+        {mcpServers.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state__title">{t("settings.noMcp")}</div>
+            <div className="empty-state__body">{t("settings.noMcpBody")}</div>
+            <button className={buttonClassName("primary")} type="button" onClick={() => openMcpForm()}><Plus size={15} /> {t("settings.addMcp")}</button>
+          </div>
+        ) : (
+          <div className="connection-list">
+            {mcpServers.map((server) => {
+              const busy = mcpBusyId === server.config.id;
+              const statusClass = server.runtime.state === "connected" ? "available" : server.runtime.state === "failed" ? "unavailable" : "pending";
+              return (
+                <div key={server.config.id} className="connection-row">
+                  <div className="connection-main">
+                    <div className="connection-title-row">
+                      <div>
+                        <div className="connection-name">{server.config.name}</div>
+                        <div className="connection-meta">{server.config.transport.type === "stdio" ? "STDIO" : "流式 HTTP"} · {server.config.transport.displayTarget}</div>
+                      </div>
+                      <span className={`status-pill ${statusClass}`}>{server.runtime.state}</span>
+                    </div>
+                    <div className="model-chip-row">
+                      <span className="model-chip">{t("settings.mcpTools", { count: server.runtime.toolCount })}</span>
+                      {server.secrets.map((secret) => <span key={`${secret.source}:${secret.key}`} className={`model-chip ${secret.status === "missing" ? "empty" : ""}`}>{secret.status === "missing" ? t("settings.mcpSecretMissing") : t("settings.mcpSecretConfigured")}</span>)}
+                    </div>
+                    {server.runtime.tools && server.runtime.tools.length > 0 && <div className="connection-meta mt-loom-2">{server.runtime.tools.map((tool) => `${tool.exposed ? "✓" : "—"} ${tool.title ?? tool.name}`).join(" · ")}</div>}
+                    {server.runtime.diagnostics.length > 0 && <div className="warn-note">{server.runtime.diagnostics[server.runtime.diagnostics.length - 1].message}</div>}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-loom-1">
+                    <button className={iconButtonClassName()} type="button" disabled={busy} onClick={() => void toggleMcp(server)} aria-label={server.config.enabled ? t("settings.mcpEnabled") : t("settings.mcpTest")} title={server.config.enabled ? t("settings.mcpEnabled") : t("settings.mcpTest")}><Power size={14} /></button>
+                    <button className={iconButtonClassName()} type="button" disabled={busy || !server.config.enabled} onClick={() => void connectMcp(server)} aria-label={t("settings.mcpTest")} title={t("settings.mcpTest")}><Radio size={14} /></button>
+                    <button className={iconButtonClassName()} type="button" disabled={busy || !server.config.enabled} onClick={() => void connectMcp(server, true)} aria-label={t("settings.mcpReconnect")} title={t("settings.mcpReconnect")}><RefreshCw size={14} /></button>
+                    <button className={iconButtonClassName()} type="button" disabled={busy || !server.config.enabled} onClick={() => void refreshMcp(server)} aria-label={t("settings.mcpRefresh")} title={t("settings.mcpRefresh")}><RefreshCw size={14} /></button>
+                    <button className={iconButtonClassName()} type="button" onClick={() => openMcpForm(server)} aria-label={t("settings.edit")} title={t("settings.edit")}><Pencil size={14} /></button>
+                    <button className={iconButtonClassName("danger")} type="button" onClick={() => setPendingRemoveMcp(server)} aria-label={t("settings.mcpRemove")} title={t("settings.mcpRemove")}><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {mcpError && <div className="warn-note" role="alert">{mcpError}</div>}
+        {mcpSnapshot?.diagnostics.map((diagnostic) => <div key={`${diagnostic.code}:${diagnostic.path}`} className="ok-note">{diagnostic.path}: {diagnostic.message}</div>)}
+      </section>
+
+      <Modal open={mcpFormOpen} onOpenChange={(open) => { if (open || !mcpFormBusy) setMcpFormOpen(open); }} ariaLabel={editingMcp ? t("settings.editMcp") : "连接至自定义 MCP"}>
+        <div className="settings-modal__panel mcp-settings-modal__panel w-[min(960px,calc(100vw-48px))]">
+          <div className="settings-modal__head">
+            <div><h3 className="mcp-dialog-title">{editingMcp ? "编辑 MCP" : "连接至自定义 MCP"}</h3></div>
+            <button className={iconButtonClassName()} type="button" onClick={() => setMcpFormOpen(false)} disabled={mcpFormBusy} aria-label={t("settings.close")} title={t("settings.close")}><X size={16} /></button>
+          </div>
+          <form className="mcp-form" onSubmit={(event) => { event.preventDefault(); void saveMcp(); }}>
+          <div className="mcp-form-body">
+            <section className="mcp-form-card mcp-form-card--identity">
+              <label className="field"><span>名称</span><input value={mcpForm.name} onChange={(event) => setMcpForm((current) => ({ ...current, name: event.target.value }))} placeholder="MCP server name" autoFocus /></label>
+              <div className="mcp-type-row"><span>类型</span><McpTransportToggle value={mcpForm.transport} onChange={(transport) => setMcpForm((current) => ({ ...current, transport }))} /></div>
+            </section>
+            <section className="mcp-form-card mcp-form-card--details">
+              <div className="mcp-form-layout">
+                {mcpForm.transport === "stdio" ? (
+                  <>
+                    <div className="mcp-field-grid">
+                      <label className="field"><span>{t("settings.command")}</span><input value={mcpForm.command} onChange={(event) => setMcpForm((current) => ({ ...current, command: event.target.value }))} placeholder="npx" /></label>
+                      <label className="field"><span>{t("settings.workingDirectory")}</span><input value={mcpForm.cwd} onChange={(event) => setMcpForm((current) => ({ ...current, cwd: event.target.value }))} placeholder="/absolute/project/path" /></label>
+                    </div>
+                    <div className="mcp-field-grid mcp-field-grid--single">
+                      <McpStringRows label="参数" values={mcpForm.args} placeholder="-y" onChange={(args) => setMcpForm((current) => ({ ...current, args }))} />
+                    </div>
+                    <div className="mcp-field-grid mcp-field-grid--single">
+                      <McpKeyValueRows label="环境变量" values={mcpForm.env} valuePlaceholder="环境变量名" onChange={(env) => setMcpForm((current) => ({ ...current, env }))} />
+                    </div>
+                    <div className="mcp-field-grid mcp-field-grid--single">
+                      <McpStringRows label="环境变量传递" values={mcpForm.inheritEnv} placeholder="PATH" onChange={(inheritEnv) => setMcpForm((current) => ({ ...current, inheritEnv }))} />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="mcp-field-grid mcp-field-grid--single">
+                      <label className="field"><span>{t("settings.endpoint")}</span><input value={mcpForm.url} onChange={(event) => setMcpForm((current) => ({ ...current, url: event.target.value }))} placeholder="https://mcp.example.com/mcp" /></label>
+                    </div>
+                    <div className="mcp-field-grid mcp-field-grid--single">
+                      <label className="field"><span>Bearer 令牌环境变量</span><input value={mcpForm.bearerTokenEnv} onChange={(event) => setMcpForm((current) => ({ ...current, bearerTokenEnv: event.target.value }))} placeholder="MCP_BEARER_TOKEN" /></label>
+                    </div>
+                    <McpKeyValueRows label="标头" values={mcpForm.headers} valuePlaceholder="值" onChange={(headers) => setMcpForm((current) => ({ ...current, headers }))} />
+                    <McpKeyValueRows label="来自环境变量的标头" values={mcpForm.headerEnv} valuePlaceholder="环境变量名" onChange={(headerEnv) => setMcpForm((current) => ({ ...current, headerEnv }))} />
+                  </>
+                )}
+              </div>
+            </section>
+          </div>
+          <div className="mcp-form-error" role="alert" aria-live="polite">{mcpError ?? ""}</div>
+          <div className="mcp-form-actions">
+            <button className={buttonClassName("primary")} type="submit" disabled={mcpFormBusy}>
+              {mcpFormBusy ? t("settings.mcpSaving") : t("settings.mcpSave")}
+            </button>
+          </div>
+          </form>
+        </div>
+      </Modal>
+
+      <ConfirmDialog open={Boolean(pendingRemoveMcp)} onOpenChange={(open) => { if (!open) setPendingRemoveMcp(null); }} title={t("settings.mcpRemove")} description={pendingRemoveMcp ? t("settings.mcpRemoveDescription", { name: pendingRemoveMcp.config.name }) : undefined} onConfirm={() => void removeMcp()} />
+      <ConfirmDialog
+        open={Boolean(pendingConsentMcp)}
+        onOpenChange={(open) => { if (!open) setPendingConsentMcp(null); }}
+        title={t("settings.mcpConsentTitle")}
+        description={pendingConsentMcp ? (
+          <div className="grid gap-loom-2 whitespace-pre-wrap font-loom-mono text-[10.5px] text-loom-muted">
+            <p>{t("settings.mcpConsentBody")}</p>
+            <div><strong>{t("settings.mcpCommand")}:</strong> {pendingConsentMcp.config.transport.command ?? pendingConsentMcp.config.transport.url}</div>
+            {pendingConsentMcp.config.transport.args && <div><strong>{t("settings.mcpArgs")}:</strong> {pendingConsentMcp.config.transport.args.join(" ")}</div>}
+            {pendingConsentMcp.config.transport.cwd && <div><strong>{t("settings.mcpCwd")}:</strong> {pendingConsentMcp.config.transport.cwd}</div>}
+            {pendingConsentMcp.config.transport.environmentNames && <div><strong>{t("settings.mcpEnv")}:</strong> {pendingConsentMcp.config.transport.environmentNames.join(", ") || "—"}</div>}
+            {pendingConsentMcp.config.transport.privilegeWarning && <div className="text-loom-warn"><strong>{pendingConsentMcp.config.transport.privilegeWarning}</strong></div>}
+          </div>
+        ) : undefined}
+        confirmLabel={t("settings.mcpConsent")}
+        onConfirm={() => void consentMcp()}
+      />
 
       <section className="model-config">
         <div className="model-config__head">

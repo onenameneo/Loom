@@ -38,6 +38,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.2.1",
+    "@modelcontextprotocol/client": "2.0.0",
     "@earendil-works/pi-agent-core": "^0.84.2",
     "@earendil-works/pi-ai": "^0.84.2",
     "@xyflow/react": "^12.11.2",

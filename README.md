@@ -22,6 +22,47 @@ pnpm dev                              # 启动 Electron 应用
 - `pnpm build` 构建，`pnpm typecheck` 严格类型检查。
 - 注意：若你的 shell 全局设了 `ELECTRON_RUN_AS_NODE=1`，dev/start 脚本已自动清除它（否则 Electron 会以纯 Node 模式启动主进程而报错）。
 
+## MCP（pi-agent）
+
+设置 → MCP 服务器支持两类连接：本地 `stdio` 和远程 `Streamable HTTP`。MCP client、连接生命周期、工具目录和审批都在主进程完成，pi-agent 只接收 Loom 的中性工具；renderer 不会拿到 client、子进程句柄或凭证原文。
+
+配置位置：
+
+- 全局：`~/.loom/mcp.json`
+- 当前 Project：`<project-root>/.loom/mcp.json`
+
+本地 stdio 首次连接会显示命令、参数、工作目录和环境变量名称的授权确认。命令按 argv 启动，不经过 shell；远程地址必须使用 HTTPS，HTTP 仅允许 localhost。凭证只能配置为环境变量、Loom Secret key 或 OAuth profile 引用，不要把 token 写入配置文件。
+
+默认工具暴露采用 allowlist，工具调用继续经过 Loom/pi-agent 的 `beforeToolCall` 审批门；服务端 annotations 只作为不可信元数据，不能绕过审批。当前版本不会自动注入 MCP resources/prompts，也不会隐式读取 resource URI。
+
+最小本地示例（不含凭证）：
+
+```json
+{
+  "version": 1,
+  "servers": {
+    "filesystem": {
+      "version": 1,
+      "id": "filesystem",
+      "displayName": "Project files",
+      "scope": "project",
+      "enabled": true,
+      "trust": "untrusted",
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/absolute/project/path"]
+      },
+      "exposure": { "mode": "allowlist", "allow": ["read_*", "list_*"], "deny": [] },
+      "approval": { "mode": "on-request", "defaultScope": "once" },
+      "revision": 1
+    }
+  }
+}
+```
+
+开发测试使用 `src/main/mcp/fakeFixture.ts` 的内存 fixture；它不会启动进程或访问网络。
+
 ## Agent 权限
 
 本地命令工具采用 Codex 风格的两层权限模型：`sandboxMode` 控制技术边界，`approvalPolicy` 控制何时询问。默认配置是 `workspace-write + on-request + user reviewer + network disabled`；Bash、Python、Node、git 和包管理器都通过同一个主进程命令端口运行。

@@ -5,8 +5,95 @@ import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isDarwinRenderer, SettingsPanel, SURFACES, type SurfaceCtx } from "./surfaces";
 import { TitlebarProvider } from "./titlebar/Titlebar";
+import type { McpSafeServerDto } from "../../common/mcp";
 
 const originalPlatform = Object.getOwnPropertyDescriptor(navigator, "platform");
+
+function mcpTestServer(): McpSafeServerDto {
+  return {
+    config: {
+      version: 1,
+      id: "notes",
+      name: "Notes",
+      enabled: true,
+      exposure: { mode: "all", allow: [], deny: [] },
+      approval: { mode: "on-request", defaultScope: "once" },
+      revision: 1,
+      transport: {
+        type: "stdio",
+        displayTarget: "node server.js",
+        command: "node",
+        args: ["server.js"],
+        cwd: "/tmp/notes",
+        environmentNames: ["NOTES_TOKEN"],
+        privilegeWarning: "This local MCP server runs with the client's operating-system privileges.",
+      },
+    },
+    runtime: {
+      serverId: "notes",
+      state: "connected",
+      transport: "stdio",
+      catalogRevision: 2,
+      toolCount: 1,
+      diagnostics: [],
+      tools: [{ name: "read_note", readOnly: true, destructive: false, exposed: true }],
+      updatedAt: 1,
+    },
+    secrets: [{ source: "environment", key: "NOTES_TOKEN", status: "configured" }],
+  };
+}
+
+function settingsTestContext(): SurfaceCtx {
+  return {
+    projects: [],
+    sessions: [],
+    activeProjectId: null,
+    activeSessionId: null,
+    openCreateProject: vi.fn(),
+    createSession: vi.fn(),
+    goSettings: vi.fn(),
+    reloadSettings: vi.fn(),
+    theme: "light",
+    setActiveNodeId: vi.fn(),
+    sessionMode: "chat",
+    setSessionMode: vi.fn(),
+    treeVersion: 0,
+    bumpTreeVersion: vi.fn(),
+    agentCount: 0,
+    activitySessions: [],
+    agents: [],
+    activityStatus: null,
+    activeSessionKey: null,
+    setActiveSessionKey: vi.fn(),
+    activityNow: 0,
+    refreshActivityStatus: vi.fn(async () => undefined),
+    runActivityConfig: vi.fn(async () => undefined),
+    settings: {
+      access: { provider: "anthropic", baseUrl: "", model: "" },
+      appearance: { theme: "light", density: "comfortable" },
+      monitor: { notify: true },
+      modelRegistry: { providers: [] },
+      sources: { baseUrl: "default", model: "default", key: "none" },
+      hasKey: false,
+      keyStorage: "local",
+      resolvedModel: "claude-sonnet-4-5",
+      resolvedTheme: "light",
+      memory: { enabled: false, backgroundExtraction: false, autoDream: false },
+    },
+  } satisfies SurfaceCtx;
+}
+
+function installMcpApi(server: McpSafeServerDto | null, overrides: Record<string, unknown> = {}) {
+  window.api = {
+    platform: "darwin",
+    settings: {},
+    mcp: {
+      list: vi.fn(async () => ({ servers: server ? [server] : [], diagnostics: [], revision: 1 })),
+      onStatus: vi.fn(() => () => undefined),
+      ...overrides,
+    },
+  } as unknown as Window["api"];
+}
 
 afterEach(() => {
   cleanup();
@@ -79,6 +166,104 @@ describe("isDarwinRenderer", () => {
 });
 
 describe("SettingsPanel model registry", () => {
+  it("offers a refresh-tools action for a connected MCP server", async () => {
+    const server = mcpTestServer();
+    const refresh = vi.fn(async () => ({ ok: true, status: { state: "connected" }, catalog: { revision: 3, toolCount: 1 } }));
+    installMcpApi(server, { refresh });
+
+    render(
+      React.createElement(TitlebarProvider, {
+        defaultDescriptor: { title: "fallback" },
+        children: React.createElement(SettingsPanel, { ctx: settingsTestContext() }),
+      }),
+    );
+
+    const refreshButton = await screen.findByRole("button", { name: "刷新工具目录" });
+    await userEvent.click(refreshButton);
+
+    expect(refresh).toHaveBeenCalledWith("notes");
+  });
+
+  it("keeps the MCP form open and announces invalid stdio commands", async () => {
+    installMcpApi(null);
+    const user = userEvent.setup();
+
+    render(
+      React.createElement(TitlebarProvider, {
+        defaultDescriptor: { title: "fallback" },
+        children: React.createElement(SettingsPanel, { ctx: settingsTestContext() }),
+      }),
+    );
+
+    await user.click(screen.getAllByRole("button", { name: "添加 MCP 服务器" })[0]);
+    await user.type(screen.getByLabelText("名称"), "Notes");
+    await user.clear(screen.getByPlaceholderText("npx"));
+    await user.type(screen.getByPlaceholderText("npx"), "node && rm");
+    await user.click(screen.getByRole("button", { name: "保存 MCP 服务器" }));
+
+    expect(screen.getByRole("dialog", { name: "连接至自定义 MCP" }).getAttribute("aria-hidden")).toBe("false");
+    expect(screen.getAllByText("可执行文件只能是单个命令，不能包含空格或 shell 运算符。")).toHaveLength(2);
+  });
+
+  it("shows local connection consent details before approving a stdio server", async () => {
+    const server = mcpTestServer();
+    const test = vi.fn(async () => ({ ok: true, status: { state: "pending-consent" } }));
+    const consent = vi.fn(async () => ({ ok: true, status: { state: "connected" } }));
+    installMcpApi(server, { test, consent });
+    const user = userEvent.setup();
+
+    render(
+      React.createElement(TitlebarProvider, {
+        defaultDescriptor: { title: "fallback" },
+        children: React.createElement(SettingsPanel, { ctx: settingsTestContext() }),
+      }),
+    );
+
+    await user.click(await screen.findByRole("button", { name: "测试连接" }));
+    const consentDialog = await screen.findByRole("alertdialog");
+    expect(within(consentDialog).getByText("node")).toBeTruthy();
+    expect(within(consentDialog).getByText("server.js")).toBeTruthy();
+    expect(within(consentDialog).getByText("NOTES_TOKEN")).toBeTruthy();
+    await user.click(within(consentDialog).getByRole("button", { name: "授权并连接" }));
+
+    expect(consent).toHaveBeenCalledWith("notes", 1);
+  });
+
+  it("keeps MCP settings usable and reports a refresh failure", async () => {
+    const server = mcpTestServer();
+    const refresh = vi.fn(async () => { throw new Error("connection failed"); });
+    installMcpApi(server, { refresh });
+    const user = userEvent.setup();
+
+    render(
+      React.createElement(TitlebarProvider, {
+        defaultDescriptor: { title: "fallback" },
+        children: React.createElement(SettingsPanel, { ctx: settingsTestContext() }),
+      }),
+    );
+
+    await user.click(await screen.findByRole("button", { name: "刷新工具目录" }));
+
+    expect(screen.getByText("connection failed")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "添加 MCP 服务器" }).getAttribute("disabled")).toBeNull();
+  });
+
+  it("moves keyboard focus to the MCP name field when opening the dialog", async () => {
+    installMcpApi(null);
+    const user = userEvent.setup();
+
+    render(
+      React.createElement(TitlebarProvider, {
+        defaultDescriptor: { title: "fallback" },
+        children: React.createElement(SettingsPanel, { ctx: settingsTestContext() }),
+      }),
+    );
+
+    await user.click(screen.getAllByRole("button", { name: "添加 MCP 服务器" })[0]);
+
+    expect(document.activeElement).toBe(screen.getByLabelText("名称"));
+  });
+
   it("renders model configuration with connected providers and configured default models only", async () => {
     const setSettings = vi.fn();
     window.api = {

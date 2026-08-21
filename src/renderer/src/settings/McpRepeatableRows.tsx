@@ -1,0 +1,11 @@
+import { Trash2 } from "lucide-react";
+import { iconButtonClassName } from "../ui/styles";
+import type { McpKeyValueRow } from "./mcpForm";
+
+export function McpStringRows({ label, values, placeholder, onChange }: { label: string; values: string[]; placeholder: string; onChange: (values: string[]) => void }) {
+  return <div className="mcp-repeater"><span className="mcp-label">{label}</span>{values.map((value, index) => <div className="mcp-repeater-row" key={`${label}-${index}`}><input value={value} onChange={(event) => onChange(values.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} placeholder={placeholder} />{values.length > 1 && <button className={iconButtonClassName("danger", "mcp-row-delete")} type="button" onClick={() => onChange(values.filter((_item, itemIndex) => itemIndex !== index))} aria-label={`删除${label}`}><Trash2 size={14} /></button>}</div>)}<button className="mcp-add-row" type="button" onClick={() => onChange([...values, ""])}>＋ 添加{label}</button></div>;
+}
+
+export function McpKeyValueRows({ label, values, keyPlaceholder = "键", valuePlaceholder = "值", onChange }: { label: string; values: McpKeyValueRow[]; keyPlaceholder?: string; valuePlaceholder?: string; onChange: (values: McpKeyValueRow[]) => void }) {
+  return <div className="mcp-repeater"><span className="mcp-label">{label}</span>{values.map((row, index) => <div className="mcp-repeater-row mcp-pair-row" key={`${label}-${index}`}><input value={row.key} onChange={(event) => onChange(values.map((item, itemIndex) => itemIndex === index ? { ...item, key: event.target.value } : item))} placeholder={keyPlaceholder} /><input value={row.value} onChange={(event) => onChange(values.map((item, itemIndex) => itemIndex === index ? { ...item, value: event.target.value } : item))} placeholder={valuePlaceholder} />{values.length > 1 && <button className={iconButtonClassName("danger", "mcp-row-delete")} type="button" onClick={() => onChange(values.filter((_item, itemIndex) => itemIndex !== index))} aria-label={`删除${label}`}><Trash2 size={14} /></button>}</div>)}<button className="mcp-add-row" type="button" onClick={() => onChange([...values, { key: "", value: "" }])}>＋ 添加{label}</button></div>;
+}

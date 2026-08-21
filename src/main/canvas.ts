@@ -20,6 +20,9 @@ import type { ContextModelMetadata } from "./agent/core/budget";
 import type { MemoryRuntimePort } from "./memory/runtime";
 import type { FileMentionRef } from "../common/fileMentions";
 import type { ComposerBudgetPreviewInput } from "../common/composerBudget";
+import { createMcpConnectionManager } from "./mcp/connection";
+import { createMcpToolProvider } from "./mcp/provider";
+import { loadMcpConfiguration } from "./mcp/store";
 
 // ---------------------------------------------------------------------------
 // 画布引擎接线（主进程）：组装洋葱四圈 + 把 node:* IPC 绑定到 ② runtime。
@@ -33,7 +36,7 @@ import type { ComposerBudgetPreviewInput } from "../common/composerBudget";
 
 export type { Seed };
 
-export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store: Store; userDataDir?: string; memory?: MemoryRuntimePort; getLocale?: () => "zh-CN" | "en" }) {
+export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store: Store; userDataDir?: string; homeDir?: string; memory?: MemoryRuntimePort; getLocale?: () => "zh-CN" | "en" }) {
   const { getWin, store } = opts;
 
   const events = createIpcEventSink(getWin);
@@ -67,6 +70,15 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   const titleGenerator = createRuntimeTitleGenerator({
     loadRegistry: () => ModelRegistry.load(),
   });
+  let mcpProvider: ReturnType<typeof createMcpToolProvider>;
+  const mcpManager = createMcpConnectionManager({
+    onStatus: (status) => sendToWindow(getWin, "mcp:status", status),
+    onToolsChanged: (serverId) => mcpProvider?.markToolsChanged(serverId),
+  });
+  mcpProvider = createMcpToolProvider({
+    manager: mcpManager,
+    resolveServers: () => loadMcpConfiguration({ homeDir: opts.homeDir }).servers,
+  });
 
   const runtime = createCanvasRuntime({
     store,
@@ -99,6 +111,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     },
     titleGenerator,
     memory: opts.memory,
+    mcp: mcpProvider,
     // 注入 pi 引擎工厂：session 只认端口，pi 收敛在适配器。
     createEngine: (hooks) =>
       createPiEngine({
@@ -168,5 +181,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     invalidate: () => runtime.invalidate(),
     disposeSession: (sessionId: string) => runtime.disposeSession(sessionId),
     disposeProject: (projectId: string) => runtime.disposeProject(projectId),
+    closeMcp: () => mcpManager.closeAll(),
+    mcp: { manager: mcpManager, provider: mcpProvider },
   };
 }

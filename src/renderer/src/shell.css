@@ -1781,6 +1781,68 @@ button.activity-session-card {
   box-shadow: var(--shadow-float);
   animation: settings-panel-in 240ms var(--panel-motion-curve);
 }
+
+.mcp-settings-modal__panel {
+  height: min(900px, calc(100vh - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+  padding: var(--s5);
+  display: flex;
+  flex-direction: column;
+}
+.mcp-dialog-title { margin: 0; color: var(--text); font-size: 26px; font-weight: 650; letter-spacing: -0.02em; }
+
+.mcp-form { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.mcp-form-card {
+  display: grid;
+  gap: var(--s4);
+  padding: var(--s4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.mcp-form-body { display: grid; min-height: 0; flex: 1; align-content: start; gap: var(--s3); overflow-y: auto; padding: 2px; }
+.mcp-form-card--identity { gap: var(--s4); }
+.mcp-form-layout { display: grid; gap: var(--s4); }
+.mcp-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); min-width: 0; }
+.mcp-field-grid--single { grid-template-columns: minmax(0, 1fr); max-width: none; }
+.mcp-field-grid .field { min-width: 0; margin-bottom: 0; }
+.mcp-form-card .field input,
+.mcp-form-card .mcp-repeater-row input {
+  box-sizing: border-box;
+  min-height: 36px;
+  background: var(--surface-2);
+}
+
+.mcp-type-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); color: var(--text); font-size: 13px; font-weight: 600; }
+.mcp-segmented { display: inline-flex; padding: var(--s1); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
+.mcp-segmented__item { min-height: 32px; padding: 0 var(--s3); border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; font-family: var(--font-ui); font-size: 13px; font-weight: 600; outline: none; }
+.mcp-segmented__item:hover { color: var(--text); }
+.mcp-segmented__item[data-state="on"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px color-mix(in srgb, var(--text) 12%, transparent); }
+.mcp-segmented__item:focus-visible { box-shadow: 0 0 0 3px var(--accent-soft); }
+.mcp-label { display: block; margin-bottom: var(--s2); color: var(--text); font-size: 13px; font-weight: 600; }
+.mcp-repeater { display: grid; gap: var(--s2); }
+.mcp-repeater-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--s2); }
+.mcp-pair-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+.mcp-repeater-row input { width: 100%; min-width: 0; min-height: 36px; padding: 7px 11px; border: 1px solid var(--border); border-radius: var(--r-md); color: var(--text); font-family: var(--font-ui); font-size: 13px; outline: none; }
+.mcp-repeater-row input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.mcp-add-row { width: 100%; min-height: 36px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--surface-2); color: var(--muted); cursor: pointer; font-family: var(--font-ui); font-size: 13px; font-weight: 600; transition: background 120ms ease, color 120ms ease, border-color 120ms ease; }
+.mcp-add-row:hover { border-color: var(--border); background: color-mix(in srgb, var(--text) 5%, var(--surface)); color: var(--text); }
+.mcp-add-row:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); outline: none; }
+.mcp-row-delete { min-width: 32px; min-height: 32px; }
+.mcp-form-error { min-height: 18px; margin-top: var(--s3); color: var(--err); font-size: 12px; line-height: 1.5; }
+.mcp-form-actions { display: flex; flex-shrink: 0; justify-content: flex-end; gap: var(--s2); margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--border); }
+.mcp-form-actions > button { min-width: 128px; justify-content: center; }
+
+@media (max-width: 720px) {
+  .mcp-settings-modal__panel { width: min(100vw - 24px, 640px); height: calc(100vh - 24px); max-height: calc(100vh - 24px); padding: var(--s4); }
+  .mcp-field-grid,
+  .mcp-field-grid--single { grid-template-columns: 1fr; max-width: none; gap: var(--s4); }
+  .mcp-form-card { padding: var(--s4); }
+  .mcp-type-row { align-items: flex-start; flex-direction: column; }
+  .mcp-segmented { width: 100%; }
+  .mcp-segmented__item { flex: 1; }
+}
 .settings-modal__head {
   display: flex;
   align-items: center;

@@ -59,6 +59,17 @@ describe("permission policy", () => {
     })).toMatchObject({ action: "ask", reason: "network_access" });
   });
 
+  it("asks for untrusted MCP tools and fails closed under never", () => {
+    const request = {
+      capability: "mcp" as const,
+      target: "mcp://github/search",
+      normalizedTarget: "mcp://github/search",
+      trusted: false,
+    };
+    expect(evaluatePermission(DEFAULT_PERMISSION_CONTEXT, request)).toMatchObject({ action: "ask", reason: "mcp_untrusted_server" });
+    expect(evaluatePermission({ ...DEFAULT_PERMISSION_CONTEXT, approvalPolicy: "never" }, request)).toMatchObject({ action: "deny", reason: "mcp_untrusted_server" });
+  });
+
   it("allows network in full access mode", () => {
     expect(evaluatePermission({ sandboxMode: "danger-full-access", approvalPolicy: "never", networkAccess: false }, {
       capability: "network",

@@ -18,12 +18,12 @@ export function ConfirmDialog({
   open: boolean;
   onOpenChange: (o: boolean) => void;
   title: string;
-  description?: string;
+  description?: ReactNode;
   confirmLabel?: string;
   onConfirm: () => void;
 }) {
   const { t } = useI18n();
-  const [displayDescription, setDisplayDescription] = useState(description);
+  const [displayDescription, setDisplayDescription] = useState<ReactNode>(description);
   useEffect(() => {
     if (open) setDisplayDescription(description);
   }, [open, description]);
@@ -34,7 +34,11 @@ export function ConfirmDialog({
         <AlertDialog.Overlay forceMount className="dlg-overlay" aria-hidden={!open} />
         <AlertDialog.Content forceMount className="dlg-content" aria-hidden={!open}>
           <AlertDialog.Title className={cn("dlg-title", dialogTitleClassName)}>{title}</AlertDialog.Title>
-          {displayDescription && <AlertDialog.Description className={cn("dlg-desc", dialogDescriptionClassName)}>{displayDescription}</AlertDialog.Description>}
+          {displayDescription && (
+            <AlertDialog.Description asChild>
+              <div className={cn("dlg-desc", dialogDescriptionClassName)}>{displayDescription}</div>
+            </AlertDialog.Description>
+          )}
           <div className={cn("dlg-actions", dialogActionsClassName)}>
             <AlertDialog.Cancel asChild>
               <button className={buttonClassName()} onClick={() => onOpenChange(false)}>{t("common.cancel")}</button>

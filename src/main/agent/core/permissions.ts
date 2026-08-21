@@ -14,6 +14,7 @@ export type PermissionCapability =
   | "delete"
   | "network"
   | "external-mutation"
+  | "mcp"
   | "permission-escalation"
   | "command";
 
@@ -23,6 +24,7 @@ export type PermissionReason =
   | "destructive_command"
   | "external_mutation"
   | "mcp_side_effect"
+  | "mcp_untrusted_server"
   | "permission_escalation"
   | "untrusted_command"
   | "sandbox_unavailable";
@@ -122,8 +124,10 @@ function reasonForBoundary(request: PermissionRequest, context: PermissionContex
   ) {
     return "outside_workspace";
   }
+  if (request.capability === "mcp" && request.destructive) return "mcp_side_effect";
   if (request.capability === "delete" || request.destructive) return "destructive_command";
   if (request.capability === "external-mutation") return "external_mutation";
+  if (request.capability === "mcp" && request.trusted !== true) return "mcp_untrusted_server";
   if (request.capability === "permission-escalation") return "permission_escalation";
   if (request.capability === "command" && context.sandboxMode === "read-only") return "permission_escalation";
   if (request.capability === "command" && context.sandboxMode !== "danger-full-access" && request.targetInWorkspace !== true) {

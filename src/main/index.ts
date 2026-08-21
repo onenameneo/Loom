@@ -30,6 +30,7 @@ import { initializeProjectDirectories } from "./projectDirectory";
 import { parseFileSearchRequest, parseFileWorkspaceRequest } from "../common/filePreview";
 import { ProjectFileWorkspace } from "./projectFiles/fileWorkspace";
 import { assertRendererSender } from "./fileIpcAuthorization";
+import { registerMcpIpc } from "./mcp/ipc";
 
 // ---------------------------------------------------------------------------
 // 主进程：持久化(store) + 设置 + 会话 + 画布引擎(pi 多节点)。
@@ -45,6 +46,7 @@ let acp: ReturnType<typeof registerAcp> | null = null;
 let collector: ReturnType<typeof registerCollector> | null = null;
 let memory: MemoryRuntimeService | null = null;
 let menuLocale: "zh-CN" | "en" = app.getLocale().toLowerCase().startsWith("en") ? "en" : "zh-CN";
+let mcpIpcDispose: (() => void) | undefined;
 
 // productName 只在 electron-builder 打包时写入 Info.plist；开发态 Electron
 // 二进制没有 Info.plist，app.getName() 默认返回 "Electron"，必须显式覆盖。
@@ -164,6 +166,14 @@ function registerIpc() {
     return result;
   });
   ipcMain.handle("settings:openSkillSource", async (_e, path: string) => openSkillSource(path));
+  mcpIpcDispose = canvas
+      ? registerMcpIpc({
+        getWin: () => win,
+        manager: canvas.mcp.manager,
+        provider: canvas.mcp.provider,
+        homeDir: app.getPath("home"),
+      })
+    : undefined;
 
   // ---- projects / sessions ----
   const createProject = (input?: string | { name?: string; sourceRoots?: string[] }) => {
@@ -388,7 +398,7 @@ app.whenReady().then(() => {
   void memory.initialize();
   ensureLoomAgentDefaults({ homeDir: app.getPath("home"), legacyApiKeyPresent: Boolean(store.getApiKeyEnc()) });
   applyThemeSource();
-  canvas = registerCanvas({ getWin: () => win, store, userDataDir: app.getPath("userData"), memory, getLocale: () => menuLocale });
+  canvas = registerCanvas({ getWin: () => win, store, userDataDir: app.getPath("userData"), homeDir: app.getPath("home"), memory, getLocale: () => menuLocale });
   monitor = registerMonitor({ getWin: () => win, store });
   acp = registerAcp({ getWin: () => win, store });
   collector = registerCollector({ getWin: () => win, store });
@@ -401,6 +411,9 @@ app.whenReady().then(() => {
 });
 
 app.on("before-quit", () => {
+  mcpIpcDispose?.();
+  mcpIpcDispose = undefined;
+  void canvas?.closeMcp();
   collector?.stop();
   collector = null;
   acp?.stop();

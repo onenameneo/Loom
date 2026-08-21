@@ -1,6 +1,7 @@
 import type { AgentMetricTotals, LlmUsage } from "../../../common/telemetry";
 import type { ComposerBudgetPreviewInput } from "../../../common/composerBudget";
 import type { FileListResult, FilePreviewResult, FileSearchRequest, FileSearchResult, FileWorkspaceRequest } from "../../../common/filePreview";
+import type { McpConfigInput, McpSafeServerDto, McpSettingsSnapshot } from "../../../common/mcp";
 
 export {};
 
@@ -606,6 +607,18 @@ declare global {
         addSkillSource: (path: string) => Promise<{ ok: boolean; path: string }>;
         removeSkillSource: (path: string) => Promise<{ ok: boolean; path: string }>;
         openSkillSource: (path: string) => Promise<{ ok: boolean; path: string; error?: string }>;
+      };
+      mcp: {
+        list: () => Promise<McpSettingsSnapshot>;
+        get: (id: string) => Promise<McpSafeServerDto | undefined>;
+        save: (config: McpConfigInput) => Promise<{ ok: boolean; config?: McpConfigInput; issues?: Array<{ code: string; path: string; message: string }> }>;
+        remove: (id: string) => Promise<{ ok: boolean }>;
+        setEnabled: (id: string, enabled: boolean) => Promise<{ ok: boolean; config?: McpConfigInput }>;
+        consent: (id: string, revision: number) => Promise<{ ok: boolean; status: unknown }>;
+        test: (id: string, consented?: boolean) => Promise<{ ok: boolean; status: unknown; catalog?: { revision: number; toolCount: number } }>;
+        reconnect: (id: string, consented?: boolean) => Promise<{ ok: boolean; status: unknown; catalog?: { revision: number; toolCount: number } }>;
+        refresh: (id: string, consented?: boolean) => Promise<{ ok: boolean; status: unknown; catalog?: { revision: number; toolCount: number } }>;
+        onStatus: (listener: (status: unknown) => void) => () => void;
       };
       monitor: {
         list: () => Promise<AgentProc[]>;
