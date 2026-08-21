@@ -22,7 +22,8 @@ import type { FileMentionRef } from "../common/fileMentions";
 import type { ComposerBudgetPreviewInput } from "../common/composerBudget";
 import { createMcpConnectionManager } from "./mcp/connection";
 import { createMcpToolProvider } from "./mcp/provider";
-import { loadMcpConfiguration } from "./mcp/store";
+import { loadMcpConfiguration, loadMcpConsent, saveMcpConsent } from "./mcp/store";
+import { connectEnabledMcpServers } from "./mcp/startup";
 
 // ---------------------------------------------------------------------------
 // 画布引擎接线（主进程）：组装洋葱四圈 + 把 node:* IPC 绑定到 ② runtime。
@@ -72,12 +73,20 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   });
   let mcpProvider: ReturnType<typeof createMcpToolProvider>;
   const mcpManager = createMcpConnectionManager({
+    isConsentPersisted: (serverId, configRevision) => loadMcpConsent({ homeDir: opts.homeDir })[serverId] === configRevision,
+    persistConsent: (serverId, configRevision) => saveMcpConsent({ homeDir: opts.homeDir, serverId, configRevision }),
     onStatus: (status) => sendToWindow(getWin, "mcp:status", status),
     onToolsChanged: (serverId) => mcpProvider?.markToolsChanged(serverId),
   });
   mcpProvider = createMcpToolProvider({
     manager: mcpManager,
     resolveServers: () => loadMcpConfiguration({ homeDir: opts.homeDir }).servers,
+    homeDir: opts.homeDir,
+  });
+  void connectEnabledMcpServers({
+    servers: loadMcpConfiguration({ homeDir: opts.homeDir }).servers,
+    manager: mcpManager,
+    provider: mcpProvider,
   });
 
   const runtime = createCanvasRuntime({

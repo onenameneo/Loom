@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { isMcpToolExposed, loadMcpConfiguration, saveMcpServerConfig } from "./store";
+import { isMcpToolExposed, loadMcpConfiguration, loadMcpConsent, removeMcpConsent, saveMcpConsent, saveMcpServerConfig } from "./store";
 
 function writeJson(path: string, value: unknown) { mkdirSync(join(path, ".."), { recursive: true }); writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8"); }
 const tempRoots: string[] = [];
@@ -35,5 +35,14 @@ describe("MCP global configuration store", () => {
     const resolved = { config };
     expect(isMcpToolExposed(resolved, "read_notes")).toBe(true);
     expect(isMcpToolExposed(resolved, "danger_read")).toBe(false);
+  });
+
+  it("persists local server consent by server revision", () => {
+    const homeDir = tempRoot("loom-mcp-consent");
+    expect(loadMcpConsent({ homeDir })).toEqual({});
+    saveMcpConsent({ homeDir, serverId: "local-tools", configRevision: 3 });
+    expect(loadMcpConsent({ homeDir })).toEqual({ "local-tools": 3 });
+    removeMcpConsent({ homeDir, serverId: "local-tools" });
+    expect(loadMcpConsent({ homeDir })).toEqual({});
   });
 });

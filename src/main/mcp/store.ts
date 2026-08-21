@@ -7,9 +7,11 @@ export interface McpConfigStoreOptions { homeDir?: string; }
 export interface McpResolvedServer { config: McpServerConfig; }
 export interface LoadedMcpConfiguration { servers: McpResolvedServer[]; diagnostics: McpConfigIssue[]; source?: string; }
 interface McpConfigFile { version: 1; servers: Record<string, unknown>; }
+interface McpConsentFile { version: 1; servers: Record<string, number>; }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
 function globalMcpPath(homeDir: string): string { return join(homeDir, ".loom", "mcp.json"); }
+function consentPath(homeDir: string): string { return join(homeDir, ".loom", "mcp-consent.json"); }
 
 function readMcpFile(filePath: string): { configs: McpServerConfig[]; diagnostics: McpConfigIssue[] } {
   if (!existsSync(filePath)) return { configs: [], diagnostics: [] };
@@ -56,6 +58,45 @@ function readWritableConfig(filePath: string): McpConfigFile {
 function writeConfig(filePath: string, file: McpConfigFile): void {
   mkdirSync(dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.tmp`;
+  writeFileSync(tempPath, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+  renameSync(tempPath, filePath);
+}
+
+export function loadMcpConsent(options: McpConfigStoreOptions = {}): Record<string, number> {
+  const filePath = consentPath(options.homeDir ?? homedir());
+  if (!existsSync(filePath)) return {};
+  try {
+    const raw = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
+    if (!isRecord(raw) || raw.version !== 1 || !isRecord(raw.servers)) return {};
+    const result: Record<string, number> = {};
+    for (const [id, revision] of Object.entries(raw.servers)) {
+      if (/^[a-z][a-z0-9-]{0,63}$/.test(id) && typeof revision === "number" && Number.isInteger(revision) && revision >= 0) result[id] = revision;
+    }
+    return result;
+  } catch { return {}; }
+}
+
+export function saveMcpConsent(options: McpConfigStoreOptions & { serverId: string; configRevision: number }): void {
+  const homeDir = options.homeDir ?? homedir();
+  const filePath = consentPath(homeDir);
+  const current = loadMcpConsent({ homeDir });
+  current[options.serverId] = options.configRevision;
+  mkdirSync(dirname(filePath), { recursive: true });
+  const tempPath = `${filePath}.tmp`;
+  const file: McpConsentFile = { version: 1, servers: current };
+  writeFileSync(tempPath, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+  renameSync(tempPath, filePath);
+}
+
+export function removeMcpConsent(options: McpConfigStoreOptions & { serverId: string }): void {
+  const homeDir = options.homeDir ?? homedir();
+  const filePath = consentPath(homeDir);
+  const current = loadMcpConsent({ homeDir });
+  if (!(options.serverId in current)) return;
+  delete current[options.serverId];
+  mkdirSync(dirname(filePath), { recursive: true });
+  const tempPath = `${filePath}.tmp`;
+  const file: McpConsentFile = { version: 1, servers: current };
   writeFileSync(tempPath, `${JSON.stringify(file, null, 2)}\n`, "utf8");
   renameSync(tempPath, filePath);
 }

@@ -2,7 +2,7 @@ import { ipcMain, type BrowserWindow } from "electron";
 import { assertRendererSender } from "../fileIpcAuthorization";
 import { sendToWindow } from "../ipcSafeSend";
 import { normalizeMcpServerConfig, type McpSecretReference } from "./config";
-import { removeMcpServerConfig, loadMcpConfiguration, saveMcpServerConfig, type McpResolvedServer } from "./store";
+import { removeMcpConsent, removeMcpServerConfig, loadMcpConfiguration, saveMcpServerConfig, type McpResolvedServer } from "./store";
 import type { McpConnectionManager } from "./connection";
 import { createMcpSecretStore } from "./secrets";
 import type { McpServerSafeProjection } from "./types";
@@ -86,6 +86,7 @@ export function registerMcpIpc(options: McpIpcOptions): () => void {
     if (!/^[a-z][a-z0-9-]{0,63}$/.test(arg?.id ?? "")) throw new Error("Invalid MCP registration request.");
     await options.manager.close(arg.id);
     removeMcpServerConfig({ homeDir: options.homeDir, id: arg.id });
+    removeMcpConsent({ homeDir: options.homeDir, serverId: arg.id });
     return { ok: true };
   });
   ipcMain.handle("mcp:setEnabled", async (event, arg: { id: string; enabled: boolean }) => {

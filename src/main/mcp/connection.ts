@@ -56,6 +56,8 @@ export interface McpConnectionHandle {
 export interface McpConnectionManagerOptions {
   create?: McpClientFactory;
   requestConsent?: (consent: McpConnectionConsent) => boolean | Promise<boolean>;
+  isConsentPersisted?: (serverId: string, configRevision: number) => boolean;
+  persistConsent?: (serverId: string, configRevision: number) => void;
   onStatus?: (status: McpServerRuntimeStatus) => void;
   onToolsChanged?: (serverId: string, error?: Error) => void;
   timeoutMs?: number;
@@ -226,12 +228,15 @@ export function createMcpConnectionManager(options: McpConnectionManagerOptions 
 
     if (record.server.transport.type === "stdio") {
       const consentKey = `${record.server.id}:${record.server.revision}`;
-      if (!consented.has(consentKey)) {
+      const persistedConsent = options.isConsentPersisted?.(record.server.id, record.server.revision) === true;
+      if (persistedConsent) record.consentRevision = record.server.revision;
+      if (!consented.has(consentKey) && !persistedConsent) {
         setState(record, "pending-consent", diagnostic("consent-required", "Connection consent is required before starting this local MCP server.", false, Date.now()));
         const approved = await options.requestConsent?.(consentFor(record.server));
         if (!approved) return undefined;
         consented.add(consentKey);
         record.consentRevision = record.server.revision;
+        options.persistConsent?.(record.server.id, record.server.revision);
       }
     }
 
@@ -272,6 +277,7 @@ export function createMcpConnectionManager(options: McpConnectionManagerOptions 
   const manager: McpConnectionManager = {
     approveConsent(serverId, configRevision) {
       consented.add(`${serverId}:${configRevision}`);
+      options.persistConsent?.(serverId, configRevision);
     },
     async connect(server, connectOptions = {}) {
       let record = connections.get(server.id);

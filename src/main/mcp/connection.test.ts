@@ -29,6 +29,20 @@ describe("McpConnectionManager", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
+  it("reuses persisted consent for the same local configuration revision", async () => {
+    const create = vi.fn(async () => ({ client: fakeClient(), transport: fakeTransport(), transportKind: "stdio" as const }));
+    const manager = createMcpConnectionManager({ create, isConsentPersisted: () => true });
+    await expect(manager.connect(server())).resolves.toBeTruthy();
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reuse persisted consent after the configuration revision changes", async () => {
+    const create = vi.fn(async () => ({ client: fakeClient(), transport: fakeTransport(), transportKind: "stdio" as const }));
+    const manager = createMcpConnectionManager({ create, isConsentPersisted: (_id, revision) => revision === 1, requestConsent: async () => false });
+    await expect(manager.connect(server({ revision: 2 }))).resolves.toBeUndefined();
+    expect(manager.status("local-tools").state).toBe("pending-consent");
+  });
+
   it("fails with a bounded timeout and records a retryable diagnostic", async () => {
     const create = vi.fn(async () => ({ client: { ...fakeClient(), async connect() { await new Promise(() => {}); } }, transport: fakeTransport(), transportKind: "stdio" as const }));
     const manager = createMcpConnectionManager({ create, requestConsent: async () => true, timeoutMs: 5 });

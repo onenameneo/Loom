@@ -21,8 +21,8 @@ describe("McpToolProvider", () => {
     provider.markToolsChanged("notes");
     provider.invalidate("node-1");
     const refreshed = await provider.toolsFor("node-1");
-    expect(first.map((tool) => tool.name)).toEqual(["mcp__notes__read"]);
-    expect(stable.map((tool) => tool.name)).toEqual(["mcp__notes__read"]);
-    expect(refreshed).toEqual([]);
+    expect(first.map((tool) => tool.name)).toEqual(["mcp_save_config", "mcp__notes__read"]);
+    expect(stable.map((tool) => tool.name)).toEqual(["mcp_save_config", "mcp__notes__read"]);
+    expect(refreshed.map((tool) => tool.name)).toEqual(["mcp_save_config"]);
   });
 });
