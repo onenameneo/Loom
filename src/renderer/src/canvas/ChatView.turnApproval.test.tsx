@@ -139,7 +139,7 @@ describe("ChatView turn and approval controls", () => {
     await waitFor(() => expect(screen.getAllByText("background tail")).toHaveLength(1));
   });
 
-  it("defaults the selection toolbar to mounted ancestors", async () => {
+  it("keeps parent context included and offers selected text notes", async () => {
     const onBranch = vi.fn();
     render(
       <ChatView
@@ -167,10 +167,65 @@ describe("ChatView turn and approval controls", () => {
     } as any);
 
     fireEvent.mouseUp(target);
-    const toggle = await screen.findByRole("button", { name: "创建时包含父级上下文" });
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    const addNote = await screen.findByRole("button", { name: "添加到当前对话" });
+    expect(document.querySelector(".seltb small")).toBeNull();
+    expect(document.querySelectorAll(".selection-toolbar-actions > *")).toHaveLength(2);
+    await userEvent.setup().click(addNote);
+    expect(screen.queryByRole("button", { name: "添加到当前对话" })).toBeNull();
+    expect(screen.getByText("注释（可选）")).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole("button", { name: "取消" }));
     await userEvent.setup().click(screen.getByRole("button", { name: /从这里展开/ }));
     expect(onBranch).toHaveBeenCalledWith("parent response", true);
+    expect(screen.queryByRole("button", { name: /从这里展开/ })).toBeNull();
+  });
+
+  it("adds an empty-annotation selection to the current Composer draft", async () => {
+    render(
+      <ChatView
+        nodeId="n1"
+        initialMessages={[{ role: "assistant", text: "parent response", seq: 0 } as any]}
+        hasFrozenContext={false}
+        onBranch={vi.fn()}
+        onExpandCanvas={vi.fn()}
+        noKey={false}
+        goSettings={vi.fn()}
+      />,
+    );
+
+    const target = screen.getByText("parent response");
+    const range = {
+      commonAncestorContainer: target,
+      getBoundingClientRect: () => ({ left: 20, top: 20, bottom: 40, width: 100, height: 20 }),
+    };
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      toString: () => "parent response",
+      rangeCount: 1,
+      getRangeAt: () => range,
+      removeAllRanges: vi.fn(),
+    } as any);
+
+    fireEvent.mouseUp(target);
+    await userEvent.setup().click(screen.getByRole("button", { name: "添加到当前对话" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "确认" }));
+
+    expect(screen.getByRole("button", { name: "查看 1 条注释" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "添加到当前对话" })).toBeNull();
+  });
+
+  it("keeps pending selection notes isolated per node", () => {
+    localStorage.setItem("loom:selection-notes:node-a", JSON.stringify([{ id: "a", text: "A", annotation: "" }]));
+    localStorage.setItem("loom:selection-notes:node-b", JSON.stringify([{ id: "b", text: "B", annotation: "" }]));
+    const props = {
+      initialMessages: [], hasFrozenContext: false, onBranch: vi.fn(), onExpandCanvas: vi.fn(), noKey: false, goSettings: vi.fn(),
+    };
+    const view = render(<ChatView nodeId="node-a" {...props} />);
+    expect(screen.getByRole("button", { name: "查看 1 条注释" })).toBeTruthy();
+
+    view.rerender(<ChatView nodeId="node-b" {...props} />);
+    expect(screen.getByRole("button", { name: "查看 1 条注释" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "查看 1 条注释" }));
+    expect(screen.getByText("B")).toBeTruthy();
+    expect(screen.queryByText("A")).toBeNull();
   });
 
   it("closes the selection toolbar on an external pointer or focus event", async () => {
@@ -199,10 +254,10 @@ describe("ChatView turn and approval controls", () => {
     } as any);
 
     fireEvent.mouseUp(target);
-    expect(screen.getByRole("button", { name: "创建时包含父级上下文" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "添加到当前对话" })).toBeTruthy();
 
     fireEvent.pointerDown(document.body);
-    expect(screen.queryByRole("button", { name: "创建时包含父级上下文" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "添加到当前对话" })).toBeNull();
   });
 
   it("runs /compact and reports when there is nothing to compact", async () => {

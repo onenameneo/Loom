@@ -8,8 +8,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function Probe({ text }: { text: string }) {
-  const { budget } = useComposerBudget("n1", { text });
+function Probe({ text, selectionNotes = [] }: { text: string; selectionNotes?: Array<{ id: string; text: string; annotation: string }> }) {
+  const { budget } = useComposerBudget("n1", { text, selectionNotes });
   return <output>{budget?.projectedInputTokens ?? "pending"}</output>;
 }
 
@@ -32,5 +32,19 @@ describe("useComposerBudget", () => {
     resolveSecond({ projectedInputTokens: 2, safeInputBudget: 100, status: "ok", source: "estimated" });
     await waitFor(() => expect(screen.getByText("2")).toBeTruthy());
     expect(screen.queryByText("1")).toBeNull();
+  });
+
+  it("refreshes the preview when selection context changes", async () => {
+    const budget = vi.fn(async () => ({ projectedInputTokens: 8, safeInputBudget: 100, status: "ok", source: "estimated" }));
+    window.api = { canvas: { budget } } as any;
+    const notes = [{ id: "note-1", text: "selected", annotation: "focus" }];
+
+    const { rerender } = render(<Probe text="draft" selectionNotes={notes} />);
+    await new Promise((resolve) => window.setTimeout(resolve, 180));
+    expect(budget).toHaveBeenLastCalledWith("n1", expect.objectContaining({ selectionNotes: notes }));
+
+    rerender(<Probe text="draft" selectionNotes={[]} />);
+    await new Promise((resolve) => window.setTimeout(resolve, 180));
+    expect(budget).toHaveBeenLastCalledWith("n1", expect.objectContaining({ selectionNotes: [] }));
   });
 });

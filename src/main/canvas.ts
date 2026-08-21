@@ -20,6 +20,7 @@ import type { ContextModelMetadata } from "./agent/core/budget";
 import type { MemoryRuntimePort } from "./memory/runtime";
 import type { FileMentionRef } from "../common/fileMentions";
 import type { ComposerBudgetPreviewInput } from "../common/composerBudget";
+import type { SelectionContextNote } from "../common/selectionContext";
 import { createMcpConnectionManager } from "./mcp/connection";
 import { createMcpToolProvider } from "./mcp/provider";
 import { loadMcpConfiguration, loadMcpConsent, saveMcpConsent } from "./mcp/store";
@@ -155,7 +156,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   ipcMain.handle("node:branchFromMessage", (_e, arg: { nodeId: string; sourceSeq: number; mode: "new-session" | "canvas-node" }) =>
     runtime.branchFromMessage(arg),
   );
-  ipcMain.handle("node:send", (_e, arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[]; skillIds?: string[]; mentions?: FileMentionRef[] }) =>
+  ipcMain.handle("node:send", (_e, arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[]; skillIds?: string[]; mentions?: FileMentionRef[]; selectionNotes?: SelectionContextNote[] }) =>
     runtime.send(arg),
   );
   ipcMain.handle("node:fileCandidates", (_e, arg: { nodeId: string; query?: string }) => runtime.fileCandidates(arg));

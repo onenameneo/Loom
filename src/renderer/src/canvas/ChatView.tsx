@@ -2,10 +2,13 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { ChevronDown } from "lucide-react";
 import type { ApprovalRequestPayload, BranchSource, ModelSelection, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
 import type { FileMentionRef } from "../../../common/fileMentions";
+import type { SelectionContextNote } from "../../../common/selectionContext";
+import { normalizeSelectionContextNotes } from "../../../common/selectionContext";
 import { IconSplit, IconProject } from "../icons";
 import { Message } from "../message/Message";
 import type { MessageBranchMode } from "../ui/dialogs";
 import { Composer, type ComposerImage } from "../composer/Composer";
+import { SelectionNoteCapture, addSelectionContextNote } from "../composer/SelectionContextNotes";
 import { useTitlebarActions } from "../titlebar/Titlebar";
 import { ToolCallTimeline } from "./ToolCallTimeline";
 import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
@@ -106,7 +109,17 @@ export default function ChatView({
   const threadRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  const [tb, setTb] = useState<{ text: string; x: number; y: number; includeParentContext: boolean } | null>(null);
+  const [tb, setTb] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [selectionNoteCaptureOpen, setSelectionNoteCaptureOpen] = useState(false);
+  const [selectionNotes, setSelectionNotes] = useState<SelectionContextNote[]>(() => {
+    try {
+      return normalizeSelectionContextNotes(JSON.parse(localStorage.getItem(`loom:selection-notes:${nodeId}`) ?? "[]"));
+    } catch {
+      return [];
+    }
+  });
+  const selectionNotesNodeRef = useRef(nodeId);
+  const skipSelectionNotesSaveRef = useRef(false);
   const liveTurn = useWorkspaceStore((state) => selectNodeLiveTurn(state, nodeId));
 
   useEffect(() => {
@@ -119,11 +132,13 @@ export default function ChatView({
   useEffect(() => {
     if (!tb) return;
     const isInsideToolbar = (target: EventTarget | null) => target instanceof Node && Boolean(toolbarRef.current?.contains(target));
+    const isInsideSelectionNotePopup = (target: EventTarget | null) =>
+      target instanceof Element && Boolean(target.closest("[data-selection-note-popup]"));
     const onPointerDown = (event: PointerEvent) => {
-      if (!isInsideToolbar(event.target)) setTb(null);
+      if (!isInsideToolbar(event.target) && !isInsideSelectionNotePopup(event.target)) setTb(null);
     };
     const onFocusIn = (event: FocusEvent) => {
-      if (!isInsideToolbar(event.target)) setTb(null);
+      if (!isInsideToolbar(event.target) && !isInsideSelectionNotePopup(event.target)) setTb(null);
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("focusin", onFocusIn);
@@ -217,6 +232,15 @@ export default function ChatView({
     setThinking(false);
     setTurn(null);
     setApproval(null);
+    if (selectionNotesNodeRef.current !== nodeId) {
+      selectionNotesNodeRef.current = nodeId;
+      skipSelectionNotesSaveRef.current = true;
+      try {
+        setSelectionNotes(normalizeSelectionContextNotes(JSON.parse(localStorage.getItem(`loom:selection-notes:${nodeId}`) ?? "[]")));
+      } catch {
+        setSelectionNotes([]);
+      }
+    }
     setPersona(systemPrompt ?? "");
     setNodeModel(formatModelSelection(model));
     setThinkingLevelState(initialThinkingLevel);
@@ -231,6 +255,14 @@ export default function ChatView({
   useEffect(() => {
     localStorage.setItem(`loom:draft:${nodeId}`, input);
   }, [nodeId, input]);
+
+  useEffect(() => {
+    if (skipSelectionNotesSaveRef.current) {
+      skipSelectionNotesSaveRef.current = false;
+      return;
+    }
+    localStorage.setItem(`loom:selection-notes:${nodeId}`, JSON.stringify(selectionNotes));
+  }, [nodeId, selectionNotes]);
 
   useEffect(() => {
     if (!window.api) return;
@@ -315,11 +347,19 @@ export default function ChatView({
     }
     const r = range.getBoundingClientRect();
     const box = threadRef.current.getBoundingClientRect();
-    setTb({ text, x: r.left - box.left + r.width / 2, y: r.top - box.top - 6, includeParentContext: true });
+    setTb({ text, x: r.left - box.left + r.width / 2, y: r.top - box.top - 6 });
   }, []);
 
   const doBranch = () => {
-    if (tb) onBranch(tb.text, tb.includeParentContext);
+    if (tb) onBranch(tb.text, true);
+    setTb(null);
+    window.getSelection()?.removeAllRanges();
+  };
+
+  const addSelectedText = (annotation: string) => {
+    if (!tb) return;
+    setSelectionNotes((current) => addSelectionContextNote(current, tb.text, annotation));
+    setSelectionNoteCaptureOpen(false);
     setTb(null);
     window.getSelection()?.removeAllRanges();
   };
@@ -328,8 +368,8 @@ export default function ChatView({
   const streaming = isBusy && msgs[msgs.length - 1]?.role === "assistant";
   const awaitingApproval = turn?.state === "awaiting_approval" && approval;
 
-  async function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = [], mentions: FileMentionRef[] = []) {
-    if (isBusy || (!text && images.length === 0 && mentions.length === 0)) return { ok: false };
+  async function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = [], mentions: FileMentionRef[] = [], submittedSelectionNotes: SelectionContextNote[] = []) {
+    if (isBusy || (!text && images.length === 0 && mentions.length === 0 && submittedSelectionNotes.length === 0)) return { ok: false };
     const optimisticId = idRef.current++;
     setMsgs((m) => [...m, { id: optimisticId, role: "user", text, images, fileMentions: mentions }]);
     setInput("");
@@ -341,8 +381,8 @@ export default function ChatView({
     }
     setBusy(true);
     setThinking(true);
-    const result = mentions.length
-      ? await window.api.canvas.send(nodeId, text, images, skillIds, mentions)
+    const result = mentions.length || submittedSelectionNotes.length
+      ? await window.api.canvas.send(nodeId, text, images, skillIds, mentions, submittedSelectionNotes)
       : await window.api.canvas.send(nodeId, text, images, skillIds);
     if (!result.ok && result.reason === "file-mention-error") {
       const details = result.errors?.map((error) => `@${error.path}: ${error.message}`).join("; ") || "Unable to read file";
@@ -558,8 +598,9 @@ export default function ChatView({
           )}
           {tb && (
             <div
-              className="seltb"
+              className={`seltb ${selectionNoteCaptureOpen ? "seltb--selection-note-open" : ""}`}
               ref={toolbarRef}
+              aria-hidden={selectionNoteCaptureOpen}
               style={{ left: tb.x, top: tb.y }}
               onMouseDown={(e) => {
                 e.preventDefault();
@@ -568,19 +609,12 @@ export default function ChatView({
               onMouseUp={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
             >
-              <button onClick={doBranch}>
-                <span><IconSplit size={13} /> {t("chat.expandFromHere")}</span>
-                <small>{tb.text.length > 40 ? `${tb.text.slice(0, 40)}…` : tb.text}</small>
-              </button>
-              <button
-                className={`branch-mount-toggle ${tb.includeParentContext ? "on" : ""}`}
-                type="button"
-                aria-pressed={tb.includeParentContext}
-                onClick={() => setTb((current) => current && { ...current, includeParentContext: !current.includeParentContext })}
-              title={t("chat.freezeContext")}
-              >
-                {t("node.contextIncluded")}
-              </button>
+              <div className="selection-toolbar-actions">
+                <button className="selection-toolbar-action" onClick={doBranch}>
+                  <span><IconSplit size={13} /> {t("chat.expandFromHere")}</span>
+                </button>
+                <SelectionNoteCapture selectedText={tb.text} onConfirm={addSelectedText} onOpenChange={setSelectionNoteCaptureOpen} />
+              </div>
             </div>
           )}
         </div>
@@ -622,6 +656,8 @@ export default function ChatView({
           thinkingLevel={thinkingLevel}
           telemetryLine={<ComposerTelemetryLine metrics={metrics} />}
           onSubmit={submit}
+          selectionNotes={selectionNotes}
+          onSelectionNotesChange={setSelectionNotes}
           onStop={stop}
           onOpenPersona={() => setPersonaOpen(true)}
           onClearNode={clearNode}

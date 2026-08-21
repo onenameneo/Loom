@@ -76,6 +76,7 @@ import { createNodeRuntimeStore } from "./nodeRuntime";
 import type { FileCandidate, FileMentionRef } from "../../../common/fileMentions";
 import { findProjectFileCandidates, resolveProjectFileMentions } from "../tools/projectFiles/fileMentions";
 import type { ComposerBudgetPreviewInput } from "../../../common/composerBudget";
+import { normalizeSelectionContextNotes, selectionContextPrompt, type SelectionContextNote } from "../../../common/selectionContext";
 import type { RetrievalQuery } from "../../memory/retrieval";
 import type { MemoryFileAccess } from "../../memory/fileAccess";
 import {
@@ -189,6 +190,7 @@ interface CanvasMessageDto {
   thinking?: string;
   images?: { data: string; mimeType: string }[];
   fileMentions?: FileMentionRef[];
+  selectionNotes?: SelectionContextNote[];
   seq: number;
   usage?: LlmUsage;
   meta?: unknown;
@@ -789,6 +791,18 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return refs.length > 0 ? refs : undefined;
   }
 
+  function selectionNotesOf(meta: unknown): SelectionContextNote[] | undefined {
+    const notes = normalizeSelectionContextNotes(meta);
+    return notes.length > 0 ? notes : undefined;
+  }
+
+  function visibleTextOf(message: AgentMessage, meta: unknown): string {
+    if (meta && typeof meta === "object" && typeof (meta as { visibleText?: unknown }).visibleText === "string") {
+      return (meta as { visibleText: string }).visibleText;
+    }
+    return textOf(message);
+  }
+
   const dto = (n: CanvasNode) => ({
     id: n.id,
     sessionId: n.sessionId,
@@ -879,10 +893,11 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       const thinking = role === "assistant" ? thinkingOf(m) : "";
       return [{
         role,
-        text: textOf(m),
+        text: visibleTextOf(m, n.messageMeta[seq]),
         thinking: thinking || undefined,
         images: imagesOf(m),
         fileMentions: fileMentionsOf(n.messageMeta[seq]),
+        selectionNotes: selectionNotesOf(n.messageMeta[seq]),
         seq,
         usage,
         meta: n.messageMeta[seq],
@@ -1210,11 +1225,16 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return { ok: true, candidates: await findProjectFileCandidates(project.sourceRoots, arg.query ?? "") };
   }
 
-  async function send(arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[]; skillIds?: string[]; mentions?: FileMentionRef[] }) {
+  async function send(arg: { nodeId: string; text: string; images?: { data: string; mimeType: string }[]; skillIds?: string[]; mentions?: FileMentionRef[]; selectionNotes?: SelectionContextNote[] }) {
     const node = loadNode(arg.nodeId);
     if (!node) {
       events.emit(arg.nodeId, "error", getAgentMessage("nodeNotFound"));
       return { ok: false };
+    }
+    const selectionContext = selectionContextPrompt(arg.selectionNotes);
+    if (!selectionContext.ok) {
+      events.emit(arg.nodeId, "error", selectionContext.message);
+      return { ok: false as const, reason: "selection-context-error" as const };
     }
     const memoryCommand = await deps.memory?.handleCommand(arg.text, {
       sessionId: node.sessionId,
@@ -1262,13 +1282,14 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
           pendingSkillIds: [...new Set((arg.skillIds ?? []).map((id) => id.trim()).filter(Boolean))],
         }));
         const images = (arg.images ?? []).filter((img) => img.data && img.mimeType);
+        const modelText = [selectionContext.text, text].filter(Boolean).join("\n\n");
         const content =
           images.length > 0
             ? [
-                ...(text ? [{ type: "text", text } satisfies TextContent] : []),
+                ...(modelText ? [{ type: "text", text: modelText } satisfies TextContent] : []),
                 ...images.map((img) => ({ type: "image", data: img.data, mimeType: img.mimeType }) satisfies ImageContent),
               ]
-            : text;
+            : modelText;
         const userMessage: AgentMessage = { role: "user", content, timestamp: clock.now() };
         await refreshMemoryPrompt(node, handle, text, fileContext);
         await maybeCompactNode(node, "threshold", {
@@ -1277,12 +1298,14 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
           handle,
           pendingUserInput: userMessage,
         });
-        const persistedUser = persisted(
-          userMessage,
-          mentionResolution.files.length > 0
+        const persistedUser = persisted(userMessage, {
+          ...(mentionResolution.files.length > 0
             ? { fileMentions: mentionResolution.files.map(({ root, path }) => ({ root, path })) }
-            : undefined,
-        );
+            : {}),
+          ...(selectionContext.notes.length > 0
+            ? { selectionNotes: selectionContext.notes, visibleText: text }
+            : {}),
+        });
         store.appendMessages(arg.nodeId, [persistedUser]);
         node.messages.push(userMessage);
         node.messageMeta.push(persistedUser.meta);
@@ -1530,6 +1553,14 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     if (!preview) return budgetOf(nodeId);
     const node = loadNode(nodeId);
     if (!node) return budgetOf(nodeId);
+    const selectionContext = selectionContextPrompt(preview.selectionNotes);
+    if (!selectionContext.ok) {
+      const result = await budgetOf(nodeId);
+      return {
+        ...result,
+        preview: { files: 0, images: 0, skills: 0, selectionError: selectionContext.message },
+      };
+    }
     const roots = sourceRootsFor(nodeId);
     const mentionResolution = preview.mentions?.length
       ? await resolveProjectFileMentions(roots, preview.mentions)
@@ -1554,7 +1585,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
           "</loom-pending-skills>",
         ].join("\n\n")
       : "";
-    const text = [preview.text?.trim() ?? "", fileContext, skillContext, ...imageHints].filter(Boolean).join("\n\n");
+    const text = [selectionContext.text, preview.text?.trim() ?? "", fileContext, skillContext, ...imageHints].filter(Boolean).join("\n\n");
     const images = (preview.images ?? []).filter((image) => image.data && image.mimeType);
     const content = images.length
       ? [
@@ -1569,6 +1600,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
         files: mentionResolution.files.length,
         images: images.length,
         skills: selectedSkills.length,
+        selectionNotes: selectionContext.notes.length,
         errors: mentionResolution.errors.length > 0 ? mentionResolution.errors : undefined,
       },
     };

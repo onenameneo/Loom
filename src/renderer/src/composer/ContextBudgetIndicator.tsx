@@ -98,6 +98,11 @@ export function ContextBudgetIndicator({
               {budget.preview.errors.map((error) => `@${error.path}：${error.message}`).join("；")}
             </div>
           ) : null}
+          {budget?.preview?.selectionError ? (
+            <div className="context-budget-popover__diagnostic" role="alert">
+              {budget.preview.selectionError}
+            </div>
+          ) : null}
           {canCompact && (
             <button type="button" className="context-budget-popover__compact" onClick={() => void onCompact()}>
               {t("composer.compactContext")}

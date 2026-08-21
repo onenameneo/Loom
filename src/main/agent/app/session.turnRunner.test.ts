@@ -1372,6 +1372,28 @@ describe("createAgentSession turn runner integration", () => {
     expect(store.listMessages("n1")).toHaveLength(1);
   });
 
+  it("includes pending selection context in a budget preview without persisting it", async () => {
+    const store = new MemoryStore([user("short")]);
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "budget-preview-selection" },
+      clock: { now: () => 261 },
+      getApiKey: () => "key",
+      resolveContextModel: contextModel,
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    const before = await session.budget("n1");
+    const preview = await (session as any).budget("n1", {
+      selectionNotes: [{ id: "note-1", text: "选中的一段需要重点比较", annotation: "关注定义" }],
+    });
+
+    expect(preview.preview).toMatchObject({ selectionNotes: 1 });
+    expect(preview.projectedInputTokens).toBeGreaterThan(before.projectedInputTokens ?? 0);
+    expect(store.listMessages("n1")).toHaveLength(1);
+  });
+
   it("returns bounded file mention diagnostics in a preview without authorizing the send", async () => {
     const root = mkdtempSync(join(tmpdir(), "loom-budget-preview-mention-"));
     const store = new MemoryStore([user("short")]);
@@ -1396,6 +1418,60 @@ describe("createAgentSession turn runner integration", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("sends selection context as bounded model context while keeping visible user text separate", async () => {
+    const store = new MemoryStore();
+    const messages: AgentMessage[] = [];
+    const prompt = vi.fn(async (message: AgentMessage) => {
+      messages.push(message, assistant("ok"));
+    });
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "selection-note" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine({ ...createHandle(messages, prompt), setSystemPrompt: vi.fn() }),
+    });
+
+    await expect((session.send as any)({
+      nodeId: "n1",
+      text: "请比较这两点",
+      selectionNotes: [{ id: "note-1", text: "第一段", annotation: "重点看因果关系" }],
+    })).resolves.toMatchObject({ ok: true });
+
+    expect(prompt).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining("<loom-selection-context>"),
+    }));
+    expect(String((prompt.mock.calls[0]?.[0] as any).content)).toContain("请比较这两点");
+    expect(session.open("sess")[0]?.messages[0]).toMatchObject({
+      text: "请比较这两点",
+      selectionNotes: [{ id: "note-1", text: "第一段", annotation: "重点看因果关系" }],
+    });
+  });
+
+  it("rejects over-limit selection context without starting a turn", async () => {
+    const store = new MemoryStore();
+    const prompt = vi.fn(async () => undefined);
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "selection-note-limit" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle([], prompt)),
+    });
+
+    const result = await (session.send as any)({
+      nodeId: "n1",
+      text: "不会发送",
+      selectionNotes: Array.from({ length: 13 }, (_, index) => ({ id: `note-${index}`, text: `片段-${index}`, annotation: "" })),
+    });
+
+    expect(result).toMatchObject({ ok: false, reason: "selection-context-error" });
+    expect(prompt).not.toHaveBeenCalled();
+    expect(store.listMessages("n1")).toHaveLength(0);
   });
 
   it("lets manual compaction bypass the automatic threshold gate", async () => {

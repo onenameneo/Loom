@@ -3,7 +3,10 @@ import { Handle, NodeResizeControl, Position, type ResizeParams } from "@xyflow/
 import { Check, ChevronDown, MessageSquareText, Pencil, Trash2 } from "lucide-react";
 import type { ApprovalRequestPayload, ModelSelection, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
 import type { FileMentionRef } from "../../../common/fileMentions";
+import type { SelectionContextNote } from "../../../common/selectionContext";
+import { normalizeSelectionContextNotes } from "../../../common/selectionContext";
 import { Composer, type ComposerImage } from "../composer/Composer";
+import { SelectionNoteCapture, addSelectionContextNote } from "../composer/SelectionContextNotes";
 import { IconArrowUpRight, IconChevronRight, IconSplit } from "../icons";
 import { Message } from "../message/Message";
 import type { MessageBranchMode } from "../ui/dialogs";
@@ -22,7 +25,7 @@ import { useI18n } from "../i18n/I18nProvider";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
 type Msg = { id: number; role: Role; text: string; thinking?: string; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
-type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number; includeParentContext: boolean };
+type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number };
 type RectLike = Pick<DOMRect, "left" | "top" | "bottom" | "width" | "height">;
 
 function formatModelSelection(model?: ModelSelection) {
@@ -52,7 +55,7 @@ export function selectionToolbarFromRects({
   scrollTop: number;
   clientWidth: number;
   zoom: number;
-}): Omit<SelectionToolbar, "includeParentContext"> | null {
+}): SelectionToolbar | null {
   if (selection.width === 0 && selection.height === 0) return null;
   const scale = zoom > 0 ? zoom : 1;
   const toolbarWidth = Math.min(240, Math.max(0, clientWidth - 24));
@@ -111,16 +114,28 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   const [turn, setTurn] = useState<TurnCanvasEventPayload | null>(null);
   const [approval, setApproval] = useState<ApprovalState | null>(null);
   const [input, setInput] = useState(() => localStorage.getItem(`loom:draft:${id}`) ?? "");
+  const [selectionNotes, setSelectionNotes] = useState<SelectionContextNote[]>(() => {
+    try {
+      return normalizeSelectionContextNotes(JSON.parse(localStorage.getItem(`loom:selection-notes:${id}`) ?? "[]"));
+    } catch {
+      return [];
+    }
+  });
+  const selectionNotesNodeRef = useRef(id);
+  const skipSelectionNotesSaveRef = useRef(false);
   const { metrics, refresh: refreshMetrics } = useNodeMetrics(id);
   const [tb, setTb] = useState<SelectionToolbar | null>(null);
+  const [selectionNoteCaptureOpen, setSelectionNoteCaptureOpen] = useState(false);
   useEffect(() => {
     if (!tb) return;
     const isInsideToolbar = (target: EventTarget | null) => target instanceof Node && Boolean(toolbarRef.current?.contains(target));
+    const isInsideSelectionNotePopup = (target: EventTarget | null) =>
+      target instanceof Element && Boolean(target.closest("[data-selection-note-popup]"));
     const onPointerDown = (event: PointerEvent) => {
-      if (!isInsideToolbar(event.target)) setTb(null);
+      if (!isInsideToolbar(event.target) && !isInsideSelectionNotePopup(event.target)) setTb(null);
     };
     const onFocusIn = (event: FocusEvent) => {
-      if (!isInsideToolbar(event.target)) setTb(null);
+      if (!isInsideToolbar(event.target) && !isInsideSelectionNotePopup(event.target)) setTb(null);
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("focusin", onFocusIn);
@@ -215,6 +230,15 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
 
   useEffect(() => {
     setInput(localStorage.getItem(`loom:draft:${id}`) ?? "");
+    if (selectionNotesNodeRef.current !== id) {
+      selectionNotesNodeRef.current = id;
+      skipSelectionNotesSaveRef.current = true;
+      try {
+        setSelectionNotes(normalizeSelectionContextNotes(JSON.parse(localStorage.getItem(`loom:selection-notes:${id}`) ?? "[]")));
+      } catch {
+        setSelectionNotes([]);
+      }
+    }
     setBusy(false);
     setStopPending(false);
     setThinking(false);
@@ -225,6 +249,14 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   useEffect(() => {
     localStorage.setItem(`loom:draft:${id}`, input);
   }, [id, input]);
+
+  useEffect(() => {
+    if (skipSelectionNotesSaveRef.current) {
+      skipSelectionNotesSaveRef.current = false;
+      return;
+    }
+    localStorage.setItem(`loom:selection-notes:${id}`, JSON.stringify(selectionNotes));
+  }, [id, selectionNotes]);
 
   useEffect(() => {
     const el = bodyRef.current;
@@ -330,17 +362,25 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
       clientWidth: el.clientWidth,
       zoom,
     });
-    setTb(toolbar && { ...toolbar, includeParentContext: true });
+    setTb(toolbar);
   }, []);
 
   const doBranch = () => {
-    if (tb) branch?.onBranch(id, tb.text, tb.includeParentContext, tb.text);
+    if (tb) branch?.onBranch(id, tb.text, true, tb.text);
     setTb(null);
     window.getSelection()?.removeAllRanges();
   };
 
-  async function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = [], mentions: FileMentionRef[] = []) {
-    if (isBusy || (!text && images.length === 0 && mentions.length === 0)) return { ok: false };
+  const addSelectedText = (annotation: string) => {
+    if (!tb) return;
+    setSelectionNotes((current) => addSelectionContextNote(current, tb.text, annotation));
+    setSelectionNoteCaptureOpen(false);
+    setTb(null);
+    window.getSelection()?.removeAllRanges();
+  };
+
+  async function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = [], mentions: FileMentionRef[] = [], submittedSelectionNotes: SelectionContextNote[] = []) {
+    if (isBusy || (!text && images.length === 0 && mentions.length === 0 && submittedSelectionNotes.length === 0)) return { ok: false };
     const optimisticId = idRef.current++;
     setMsgs((m) => [...m, { id: optimisticId, role: "user", text, images, fileMentions: mentions }]);
     setInput("");
@@ -352,8 +392,8 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     }
     setBusy(true);
     setThinking(true);
-    const result = mentions.length
-      ? await window.api.canvas.send(id, text, images, skillIds, mentions)
+    const result = mentions.length || submittedSelectionNotes.length
+      ? await window.api.canvas.send(id, text, images, skillIds, mentions, submittedSelectionNotes)
       : await window.api.canvas.send(id, text, images, skillIds);
     if (!result.ok && result.reason === "file-mention-error") {
       const details = result.errors?.map((error) => `@${error.path}: ${error.message}`).join("; ") || "Unable to read file";
@@ -781,8 +821,9 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
 
           {tb && (
             <div
-              className={`seltb seltb--${tb.place}`}
+              className={`seltb seltb--${tb.place} ${selectionNoteCaptureOpen ? "seltb--selection-note-open" : ""}`}
               ref={toolbarRef}
+              aria-hidden={selectionNoteCaptureOpen}
               style={{ left: tb.x, top: tb.y, "--seltb-arrow-x": `${tb.arrowX}px` } as CSSProperties}
               onMouseDown={(e) => {
                 e.preventDefault();
@@ -791,19 +832,12 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
               onMouseUp={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
             >
-              <button onClick={doBranch}>
-                <span><IconSplit size={13} /> {t("node.expandHere")}</span>
-                <small>{tb.text.length > 40 ? `${tb.text.slice(0, 40)}…` : tb.text}</small>
-              </button>
-              <button
-                className={`branch-mount-toggle ${tb.includeParentContext ? "on" : ""}`}
-                type="button"
-                aria-pressed={tb.includeParentContext}
-                onClick={() => setTb((current) => current && { ...current, includeParentContext: !current.includeParentContext })}
-              title={t("chat.freezeContext")}
-              >
-                {t("node.contextIncluded")}
-              </button>
+              <div className="selection-toolbar-actions">
+                <button className="selection-toolbar-action" onClick={doBranch}>
+                  <span><IconSplit size={13} /> {t("node.expandHere")}</span>
+                </button>
+                <SelectionNoteCapture selectedText={tb.text} onConfirm={addSelectedText} onOpenChange={setSelectionNoteCaptureOpen} />
+              </div>
             </div>
           )}
           </>
@@ -854,6 +888,8 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           model={nodeModel}
           thinkingLevel={thinkingLevel}
           onSubmit={submit}
+          selectionNotes={selectionNotes}
+          onSelectionNotesChange={setSelectionNotes}
           onStop={stop}
           onOpenPersona={() => setPersonaOpen(true)}
           onClearNode={clearNode}

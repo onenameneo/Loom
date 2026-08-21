@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { FileMentionRef } from "../common/fileMentions";
 import type { ComposerBudgetPreviewInput } from "../common/composerBudget";
+import type { SelectionContextNote } from "../common/selectionContext";
 import type { AgentMetricTotals } from "../common/telemetry";
 import type { McpConfigInput, McpSafeServerDto, McpSettingsSnapshot } from "../common/mcp";
 import {
@@ -101,8 +102,8 @@ const api = {
       ipcRenderer.invoke("node:create", arg),
     branchFromMessage: (arg: { nodeId: string; sourceSeq: number; mode: "new-session" | "canvas-node" }): Promise<any> =>
       ipcRenderer.invoke("node:branchFromMessage", arg),
-    send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[], mentions?: FileMentionRef[]): Promise<{ ok: boolean; recovered?: "overflow"; reason?: string; errors?: Array<{ root: string; path: string; code: string; message: string }> }> =>
-      ipcRenderer.invoke("node:send", { nodeId, text, images, skillIds, mentions }),
+    send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[], mentions?: FileMentionRef[], selectionNotes?: SelectionContextNote[]): Promise<{ ok: boolean; recovered?: "overflow"; reason?: string; errors?: Array<{ root: string; path: string; code: string; message: string }> }> =>
+      ipcRenderer.invoke("node:send", { nodeId, text, images, skillIds, mentions, selectionNotes }),
     fileCandidates: (nodeId: string, query?: string): Promise<{ ok: boolean; candidates?: Array<{ root: string; rootName: string; path: string; kind: "file" }>; reason?: string }> =>
       ipcRenderer.invoke("node:fileCandidates", { nodeId, query }),
     abort: (nodeId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("node:abort", nodeId),
@@ -140,7 +141,7 @@ const api = {
       status?: "ok" | "needs-compaction" | "fixed-context-overflow" | "model-unavailable";
       source?: "exact" | "mixed" | "estimated";
       diagnostic?: string;
-      preview?: { files: number; images: number; skills: number; errors?: Array<{ root: string; path: string; code: string; message: string }> };
+      preview?: { files: number; images: number; skills: number; selectionNotes?: number; selectionError?: string; errors?: Array<{ root: string; path: string; code: string; message: string }> };
     }> =>
       ipcRenderer.invoke("node:budget", preview ? { nodeId, preview } : nodeId),
     trace: (nodeId: string): Promise<any> => ipcRenderer.invoke("node:trace", nodeId),

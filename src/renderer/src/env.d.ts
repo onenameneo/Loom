@@ -1,5 +1,6 @@
 import type { AgentMetricTotals, LlmUsage } from "../../../common/telemetry";
 import type { ComposerBudgetPreviewInput } from "../../../common/composerBudget";
+import type { SelectionContextNote } from "../../../common/selectionContext";
 import type { FileListResult, FilePreviewResult, FileSearchRequest, FileSearchResult, FileWorkspaceRequest } from "../../../common/filePreview";
 import type { McpConfigInput, McpSafeServerDto, McpSettingsSnapshot } from "../../../common/mcp";
 
@@ -23,6 +24,7 @@ export interface NodeMsg {
   thinking?: string;
   images?: { data: string; mimeType: string }[];
   fileMentions?: FileMentionRef[];
+  selectionNotes?: SelectionContextNote[];
   seq: number;
   usage?: Partial<LlmUsage>;
   meta?: unknown;
@@ -102,7 +104,7 @@ export interface NodeBudget {
   status?: "ok" | "needs-compaction" | "fixed-context-overflow" | "model-unavailable";
   source?: "exact" | "mixed" | "estimated";
   diagnostic?: string;
-  preview?: { files: number; images: number; skills: number; errors?: Array<{ root: string; path: string; code: string; message: string }> };
+  preview?: { files: number; images: number; skills: number; selectionNotes?: number; selectionError?: string; errors?: Array<{ root: string; path: string; code: string; message: string }> };
 }
 export interface CanvasEvent {
   nodeId: string;
@@ -557,7 +559,7 @@ declare global {
           source?: BranchSource;
           node?: CanvasNodeDto;
         }>;
-        send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[], mentions?: FileMentionRef[]) => Promise<{ ok: boolean; recovered?: "overflow"; reason?: string; errors?: Array<{ root: string; path: string; code: string; message: string }> }>;
+        send: (nodeId: string, text: string, images?: { data: string; mimeType: string }[], skillIds?: string[], mentions?: FileMentionRef[], selectionNotes?: SelectionContextNote[]) => Promise<{ ok: boolean; recovered?: "overflow"; reason?: string; errors?: Array<{ root: string; path: string; code: string; message: string }> }>;
         fileCandidates: (nodeId: string, query?: string) => Promise<{ ok: boolean; candidates?: FileCandidate[]; reason?: string }>;
         abort: (nodeId: string) => Promise<{ ok: boolean }>;
         compact: (nodeId: string) => Promise<{ ok: boolean; node?: CanvasNodeDto; reason?: string; error?: string }>;

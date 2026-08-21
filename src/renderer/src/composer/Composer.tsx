@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNod
 import { BookOpen, Brain, ChevronDown, FileText, Folder, FolderOpen, Square, X } from "lucide-react";
 import { Popover, Slider } from "radix-ui";
 import type { FileCandidate, FileMentionRef } from "../../../common/fileMentions";
+import type { SelectionContextNote } from "../../../common/selectionContext";
 import type { ModelListItem, SkillEffectiveDto, ThinkingLevel } from "../env";
 import { IconSend } from "../icons";
 import type { CmdCtx } from "./commands";
@@ -11,6 +12,7 @@ import { findFileMentionTrigger } from "./fileMentionParser";
 import { ContextBudgetIndicator } from "./ContextBudgetIndicator";
 import { useComposerBudget } from "./useComposerBudget";
 import { useI18n } from "../i18n/I18nProvider";
+import { SelectionNotesPopover } from "./SelectionContextNotes";
 
 export type ComposerImage = { data: string; mimeType: string };
 type ComposerSubmitResult = { ok: boolean; reason?: string; errors?: Array<{ path: string; message: string }> };
@@ -47,6 +49,8 @@ export function Composer({
   onEnableSkill,
   onDisableSkill,
   budgetRefreshKey,
+  selectionNotes = [],
+  onSelectionNotesChange = () => {},
 }: {
   nodeId: string;
   value: string;
@@ -60,7 +64,7 @@ export function Composer({
   telemetryLine?: ReactNode;
   activeSkills?: SkillEffectiveDto[];
   topAccessory?: ReactNode;
-  onSubmit: (text: string, images: ComposerImage[], skillIds: string[], mentions: FileMentionRef[]) => void | Promise<ComposerSubmitResult>;
+  onSubmit: (text: string, images: ComposerImage[], skillIds: string[], mentions: FileMentionRef[], selectionNotes?: SelectionContextNote[]) => void | Promise<ComposerSubmitResult>;
   onStop: () => void;
   onOpenPersona: () => void;
   onClearNode: () => void;
@@ -71,6 +75,8 @@ export function Composer({
   onEnableSkill?: (skillId: string) => void;
   onDisableSkill?: (skillId: string) => void;
   budgetRefreshKey?: string | number;
+  selectionNotes?: SelectionContextNote[];
+  onSelectionNotesChange?: (notes: SelectionContextNote[]) => void;
 }) {
   const { t } = useI18n();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -270,7 +276,8 @@ export function Composer({
     images,
     skillIds: (activeSkills ?? []).map((skill) => skill.id),
     mentions,
-  }), [activeSkills, images, mentions, value]);
+    selectionNotes,
+  }), [activeSkills, images, mentions, selectionNotes, value]);
   const { budget } = useComposerBudget(nodeId, budgetPreview, `${model ?? ""}:${busy ? "busy" : "idle"}:${budgetRefreshKey ?? ""}`);
 
   function selectThinkingIndex(index: number) {
@@ -284,24 +291,29 @@ export function Composer({
 
   function submit() {
     const text = value.trim();
-    if (busy || (!text && images.length === 0 && mentions.length === 0)) return;
+    if (busy || (!text && images.length === 0 && mentions.length === 0 && selectionNotes.length === 0)) return;
     const submittedImages = images;
     const submittedMentions = mentions;
-    const result = onSubmit(text, submittedImages, (activeSkills ?? []).map((skill) => skill.id), submittedMentions);
+    const submittedSelectionNotes = selectionNotes;
+    const result = submittedSelectionNotes.length > 0
+      ? onSubmit(text, submittedImages, (activeSkills ?? []).map((skill) => skill.id), submittedMentions, submittedSelectionNotes)
+      : onSubmit(text, submittedImages, (activeSkills ?? []).map((skill) => skill.id), submittedMentions);
     setImages([]);
     setMentions([]);
+    onSelectionNotesChange([]);
     setSlashOpen(false);
     if (result && typeof (result as Promise<ComposerSubmitResult>).then === "function") {
       void (result as Promise<ComposerSubmitResult>).then((response) => {
         if (response && !response.ok) {
           setImages(submittedImages);
           setMentions(submittedMentions);
+          onSelectionNotesChange(submittedSelectionNotes);
         }
       });
     }
   }
 
-  const sendDisabled = !busy && !value.trim() && images.length === 0 && mentions.length === 0;
+  const sendDisabled = !busy && !value.trim() && images.length === 0 && mentions.length === 0 && selectionNotes.length === 0;
 
   function selectFileCandidate(candidate: FileCandidate) {
     if (!fileMentionTrigger) return;
@@ -433,6 +445,7 @@ export function Composer({
             })}
           </div>
         )}
+        <SelectionNotesPopover notes={selectionNotes} onChange={onSelectionNotesChange} />
         <Popover.Root
           modal={false}
           open={fileMentionOpen}
