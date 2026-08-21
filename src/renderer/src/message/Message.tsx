@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BookOpen, Brain, Check, Copy, FileText, Pencil, RefreshCcw } from "lucide-react";
@@ -6,6 +6,7 @@ import type { FileMentionRef } from "../../../common/fileMentions";
 import type { NodeMsg } from "../env";
 import { IconSplit } from "../icons";
 import { MessageBranchDialog, type MessageBranchMode } from "../ui/dialogs";
+import { buttonClassName, cn, fieldClassName } from "../ui/styles";
 import { CodeBlock } from "./CodeBlock";
 import { useI18n } from "../i18n/I18nProvider";
 
@@ -170,6 +171,11 @@ export function Message({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);
   const [branchOpen, setBranchOpen] = useState(false);
+  const editFieldId = useId();
+  // Internal reasoning is a timeline state, not a user-facing answer. Keeping
+  // its action bar hidden prevents controls from landing between Thinking and
+  // the tool call that follows it.
+  const showActionBar = role !== "assistant" || Boolean(text.trim());
 
   async function copy() {
     try {
@@ -189,29 +195,7 @@ export function Message({
   }
 
   return (
-    <div className={`m m--${role} m--${density}`} data-message-seq={typeof messageSeq === "number" ? messageSeq : undefined}>
-      <div className="m__bar nodrag">
-        <button onClick={copy} title={t("common.copy")}>
-          {copied ? <Check size={13} /> : <Copy size={13} />}
-        </button>
-        {canRegenerate && (
-          <button onClick={onRegenerate} title={t("message.regenerate")}>
-            <RefreshCcw size={13} />
-          </button>
-        )}
-        {canEdit && (
-          <button onClick={() => setEditing((v) => !v)} title={t("message.editResend")}>
-            <Pencil size={13} />
-          </button>
-        )}
-        {role !== "user" && typeof sourceSeq === "number" && onBranch && (
-          <button onClick={() => setBranchOpen(true)} title={t("message.branch")} aria-label={t("message.branch")}>
-            <IconSplit size={13} />
-          </button>
-        )}
-        {meta && <span className="m__meta">{meta}</span>}
-      </div>
-
+    <div className={`m m--${role} m--${density} ${editing ? "m--editing" : ""}`} data-message-seq={typeof messageSeq === "number" ? messageSeq : undefined}>
       {images && images.length > 0 && (
         <div className="m__images">
           {images.map((image, index) => (
@@ -238,18 +222,25 @@ export function Message({
       )}
 
       {editing ? (
-        <div className="m__edit nodrag">
+        <div className={cn(fieldClassName, "m__edit nodrag")} data-state="open">
           <textarea
+            id={editFieldId}
             value={draft}
+            className="m__edit-input"
+            aria-label={t("message.editResend")}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitEdit();
             }}
             autoFocus
           />
-          <div>
-            <button onClick={() => setEditing(false)}>{t("common.cancel")}</button>
-            <button className="primary" onClick={submitEdit}>{t("message.resend")}</button>
+          <div className="m__edit-actions">
+            <button className={buttonClassName("default", "m__edit-cancel")} type="button" onClick={() => setEditing(false)}>
+              {t("common.cancel")}
+            </button>
+            <button className={buttonClassName("primary", "m__edit-submit")} type="button" onClick={submitEdit}>
+              {t("message.resend")}
+            </button>
           </div>
         </div>
       ) : role === "checkpoint" ? (
@@ -266,6 +257,29 @@ export function Message({
         </div>
       ) : (
         <span className="m__plain">{text}</span>
+      )}
+      {showActionBar && !editing && (
+        <div className="m__bar nodrag">
+          <button onClick={copy} title={t("common.copy")} aria-label={t("common.copy")}>
+            {copied ? <Check size={13} /> : <Copy size={13} />}
+          </button>
+          {canRegenerate && (
+            <button onClick={onRegenerate} title={t("message.regenerate")} aria-label={t("message.regenerate")}>
+              <RefreshCcw size={13} />
+            </button>
+          )}
+          {canEdit && (
+            <button onClick={() => setEditing((v) => !v)} title={t("message.editResend")} aria-label={t("message.editResend")}>
+              <Pencil size={13} />
+            </button>
+          )}
+          {role !== "user" && typeof sourceSeq === "number" && onBranch && (
+            <button onClick={() => setBranchOpen(true)} title={t("message.branch")} aria-label={t("message.branch")}>
+              <IconSplit size={13} />
+            </button>
+          )}
+          {meta && <span className="m__meta">{meta}</span>}
+        </div>
       )}
       {role === "error" && onRetry && (
         <button className="m__retry nodrag" onClick={onRetry}>{t("message.retry")}</button>

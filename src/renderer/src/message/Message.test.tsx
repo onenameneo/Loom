@@ -40,6 +40,29 @@ describe("Message thinking", () => {
     expect(screen.getByText("Final answer")).toBeTruthy();
     expect(screen.getByText("I should inspect the code path first.")).toBeTruthy();
   });
+
+  it("keeps message actions in the message flow instead of overlaying the next timeline item", () => {
+    expect(messageStyles).not.toMatch(/\.m__bar\s*\{[^}]*position:\s*absolute;/);
+    expect(messageStyles).not.toMatch(/\.m__bar\s*\{[^}]*display:\s*none;/);
+    expect(messageStyles).toMatch(/\.m__bar\s*\{[^}]*opacity:\s*0;/);
+    expect(messageStyles).toMatch(/\.m__bar\s*\{[^}]*transition:[^;]*(opacity|transform)/);
+
+    const { container } = render(
+      <Message role="assistant" text="Final answer" thinking="Internal notes" />,
+    );
+    const content = container.querySelector(".m__md");
+    const actions = container.querySelector(".m__bar");
+    expect(content && actions && Boolean(content.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
+  it("does not expose actions for an assistant message that only contains thinking", () => {
+    const { container } = render(
+      <Message role="assistant" text="" thinking="Internal notes" />,
+    );
+
+    expect(container.querySelector(".m__thinking")).toBeTruthy();
+    expect(container.querySelector(".m__bar")).toBeNull();
+  });
 });
 
 describe("Message checkpoint timeline item", () => {
@@ -146,6 +169,42 @@ describe("Message branching", () => {
     expect((option as HTMLButtonElement).disabled).toBe(true);
 
     await act(async () => resolve?.());
+  });
+});
+
+describe("Message edit mode", () => {
+  it("keeps the editor as one field with actions anchored in its lower-right corner", () => {
+    const onEditResend = vi.fn();
+    const { container } = render(
+      <Message role="user" text="Original question" canEdit onEditResend={onEditResend} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑重发" }));
+
+    const editor = container.querySelector(".m__edit");
+    const textarea = screen.getByRole("textbox");
+    const actions = container.querySelector(".m__edit-actions");
+    expect(container.querySelector(".m--editing")).toBeTruthy();
+    expect(editor?.className).toContain("rounded-loom-md");
+    expect(editor?.className).toContain("bg-loom-surface-2");
+    expect(container.querySelector(".m__edit-label")).toBeNull();
+    expect(editor?.contains(textarea)).toBe(true);
+    expect(editor?.contains(actions)).toBe(true);
+    expect(container.querySelector(".m__bar")).toBeNull();
+    expect(screen.getByRole("button", { name: "取消" }).className).toContain("border-loom-border-strong");
+    expect(screen.getByRole("button", { name: "重发" }).className).toContain("bg-loom-accent");
+  });
+
+  it("resends from the documented keyboard shortcut", () => {
+    const onEditResend = vi.fn();
+    render(<Message role="user" text="Original question" canEdit onEditResend={onEditResend} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑重发" }));
+    const textarea = screen.getByRole("textbox");
+    fireEvent.change(textarea, { target: { value: "Updated question" } });
+    fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+
+    expect(onEditResend).toHaveBeenCalledWith("Updated question");
   });
 });
 
