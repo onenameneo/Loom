@@ -118,6 +118,9 @@ describe("adaptive AppChrome", () => {
     // 关键回归防线：侧栏顶部拖拽区必须让出窗控宽度，否则它盖住开关、macOS 会把
     // 开关的真实鼠标事件当成窗口拖拽吃掉（hover/click 全无）。
     expect(css).toMatch(/\.platform-darwin \.sidebar-chrome\s*\{[^}]*margin-left:\s*var\(--window-controls-width\);/s);
+    expect(css).toMatch(/\.platform-win32 \.window-controls-chrome\s*\{[^}]*left:\s*max\(0px, var\(--sidebar-width\)\);/s);
+    expect(css).toMatch(/\.platform-win32 \.sidebar-chrome\s*\{[^}]*height:\s*0;/s);
+    expect(css).toMatch(/\.platform-win32 \.app-titlebar\s*\{[^}]*padding-left:\s*calc\(var\(--s4\) \+ var\(--window-controls-width\)\);/s);
     // 折叠态 backdrop 要补下边框，否则它盖住标题栏底线、左侧缺一段。
     expect(css).toMatch(/\.window-controls-chrome\.uses-content-surface \.window-controls-backdrop\s*\{[^}]*border-bottom:\s*1px solid var\(--border\);/s);
     expect(css).toMatch(/\.mac-window-controls\.fullscreen \.window-sidebar-toggle\s*\{[^}]*left:\s*8px;/s);

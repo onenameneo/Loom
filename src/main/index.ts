@@ -334,6 +334,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 560,
     show: false,
+    autoHideMenuBar: process.platform === "win32",
     ...platformWindowOptions(process.platform, resolvedTheme() === "dark"),
     webPreferences: { preload: join(__dirname, "../preload/index.js"), sandbox: false },
   });

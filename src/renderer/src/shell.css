@@ -97,6 +97,18 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
+/* Windows keeps the native caption buttons on the top-right.  Align the
+   sidebar toggle with the sidebar/content boundary instead of leaving it at
+   the unrelated top-left window edge.  When the sidebar is collapsed the
+   clamped position brings the toggle back to the content's leading edge. */
+.platform-win32 .window-controls-chrome {
+  left: max(0px, var(--sidebar-width));
+}
+/* Windows has native caption buttons above the client area, so it does not
+   need the macOS traffic-light spacer before the sidebar content. */
+.platform-win32 .sidebar-chrome {
+  height: 0;
+}
 .window-controls-backdrop,
 .chrome-drag-region {
   position: absolute;
@@ -255,6 +267,11 @@ body {
   background: var(--bg);
   user-select: none;
   -webkit-user-select: none;
+}
+/* The Windows sidebar toggle sits at the content titlebar's leading edge;
+   reserve its width so the title never renders underneath the button. */
+.platform-win32 .app-titlebar {
+  padding-left: calc(var(--s4) + var(--window-controls-width));
 }
 .titlebar-context,
 .titlebar-actions {
