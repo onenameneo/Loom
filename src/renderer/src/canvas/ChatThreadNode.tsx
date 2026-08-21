@@ -164,12 +164,15 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
 
   useEffect(() => {
     setMsgs(toMsgs(data.messages ?? []));
+  }, [data.messages, toMsgs]);
+
+  useEffect(() => {
     setTitle(String(data.title ?? ""));
     setPersona(String(data.systemPrompt ?? ""));
     setNodeModel(formatModelSelection(data.model));
     setThinkingLevelState(data.thinkingLevel);
     setSkillCount(Array.isArray(data.skills) ? data.skills.length : 0);
-  }, [data.messages, data.title, data.systemPrompt, data.model, data.thinkingLevel, data.skills, toMsgs]);
+  }, [data.title, data.systemPrompt, data.model, data.thinkingLevel, data.skills]);
 
   useEffect(() => {
     if (!liveTurn) return;

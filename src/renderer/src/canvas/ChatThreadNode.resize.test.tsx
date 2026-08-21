@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useLayoutEffect } from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { ReactFlowProvider, useStoreApi } from "@xyflow/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatThreadNode, selectionToolbarFromRects } from "./ChatThreadNode";
@@ -129,5 +129,25 @@ describe("ChatThreadNode resize preview", () => {
     expect(screen.getByLabelText("正在调整窗口")).toBeTruthy();
     expect(screen.getByText("1 条消息")).toBeTruthy();
     expect(document.querySelector(".m")).toBeNull();
+  });
+
+  it("keeps the first assistant reply when auto-title changes the node", async () => {
+    const messages: [] = [];
+    useWorkspaceStore.getState().applyLiveTurn({
+      type: "upsert",
+      snapshot: {
+        nodeId: "n1", sessionId: "session-a", turnId: "turn-a", operation: "send",
+        state: "running", revision: 1, assistantText: "first assistant reply",
+      },
+    });
+    const view = render(<ChatThreadNode id="n1" data={{ sessionId: "session-a", title: "起点", messages }} />);
+    await waitFor(() => expect(screen.getByText("first assistant reply")).toBeTruthy());
+
+    act(() => {
+      useWorkspaceStore.getState().applyLiveTurn({ type: "remove", nodeId: "n1", revision: 2 });
+    });
+    view.rerender(<ChatThreadNode id="n1" data={{ sessionId: "session-a", title: "自动生成的标题", messages }} />);
+
+    expect(screen.getByText("first assistant reply")).toBeTruthy();
   });
 });
