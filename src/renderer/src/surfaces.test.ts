@@ -179,6 +179,9 @@ describe("SettingsPanel model registry", () => {
     );
 
     const refreshButton = await screen.findByRole("button", { name: "刷新工具目录" });
+    const reconnectButton = screen.getByRole("button", { name: "重新连接" });
+    expect(reconnectButton.querySelector("svg")?.getAttribute("class")).toContain("rotate-ccw");
+    expect(refreshButton.querySelector("svg")?.getAttribute("class")).toContain("refresh-cw");
     await userEvent.click(refreshButton);
 
     expect(refresh).toHaveBeenCalledWith("notes");

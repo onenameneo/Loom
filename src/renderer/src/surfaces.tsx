@@ -11,6 +11,7 @@ import {
   Power,
   PowerOff,
   Radio,
+  RotateCcw,
   RefreshCw,
   Settings,
   Check,
@@ -1057,7 +1058,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                   <div className="flex shrink-0 items-center gap-loom-1">
                     <button className={iconButtonClassName()} type="button" disabled={busy} onClick={() => void toggleMcp(server)} aria-label={server.config.enabled ? t("settings.mcpEnabled") : t("settings.mcpTest")} title={server.config.enabled ? t("settings.mcpEnabled") : t("settings.mcpTest")}><Power size={14} /></button>
                     <button className={iconButtonClassName()} type="button" disabled={busy || !server.config.enabled} onClick={() => void connectMcp(server)} aria-label={t("settings.mcpTest")} title={t("settings.mcpTest")}><Radio size={14} /></button>
-                    <button className={iconButtonClassName()} type="button" disabled={busy || !server.config.enabled} onClick={() => void connectMcp(server, true)} aria-label={t("settings.mcpReconnect")} title={t("settings.mcpReconnect")}><RefreshCw size={14} /></button>
+                    <button className={iconButtonClassName()} type="button" disabled={busy || !server.config.enabled} onClick={() => void connectMcp(server, true)} aria-label={t("settings.mcpReconnect")} title={t("settings.mcpReconnect")}><RotateCcw size={14} /></button>
                     <button className={iconButtonClassName()} type="button" disabled={busy || !server.config.enabled} onClick={() => void refreshMcp(server)} aria-label={t("settings.mcpRefresh")} title={t("settings.mcpRefresh")}><RefreshCw size={14} /></button>
                     <button className={iconButtonClassName()} type="button" onClick={() => openMcpForm(server)} aria-label={t("settings.edit")} title={t("settings.edit")}><Pencil size={14} /></button>
                     <button className={iconButtonClassName("danger")} type="button" onClick={() => setPendingRemoveMcp(server)} aria-label={t("settings.mcpRemove")} title={t("settings.mcpRemove")}><Trash2 size={14} /></button>
