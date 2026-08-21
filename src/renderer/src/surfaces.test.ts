@@ -550,6 +550,22 @@ describe("SettingsPanel model registry", () => {
         modelFromProvider: true,
       }),
     );
+
+    await user.click(screen.getByRole("button", { name: "添加模型" }));
+    await user.click(screen.getByRole("button", { name: "添加自定义模型" }));
+    expect(screen.getByLabelText("Model")).toBeTruthy();
+    expect(screen.getByLabelText("Model name")).toBeTruthy();
+    await user.type(screen.getByLabelText("Model"), "my-local-model");
+    await user.type(screen.getByLabelText("Model name"), "My Local Model");
+    await user.click(screen.getByRole("button", { name: "保存模型" }));
+    expect(addProviderModel).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        providerId: "anthropic",
+        modelId: "my-local-model",
+        modelName: "My Local Model",
+        modelFromProvider: false,
+      }),
+    );
   });
 
   it("edits and deletes an added model from the configured model list", async () => {

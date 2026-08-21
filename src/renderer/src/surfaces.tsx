@@ -608,6 +608,7 @@ function defaultApiForProvider(providerId: string) {
 
 type RendererProvider = NonNullable<SettingsPayload["modelRegistry"]>["providers"][number];
 type RendererModel = RendererProvider["models"][number];
+type ModelEntryMode = "registry" | "custom";
 
 export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const { locale, setLocale, t } = useI18n();
@@ -620,6 +621,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [apiKey, setApiKey] = useState("");
   const [modelId, setModelId] = useState("");
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
+  const [modelEntryMode, setModelEntryMode] = useState<ModelEntryMode>("registry");
   const [modelName, setModelName] = useState("");
   const [api, setApi] = useState("openai-completions");
   const [contextWindow, setContextWindow] = useState("131072");
@@ -732,6 +734,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
     setApiKey("");
     setModelId("");
     setSelectedModelIds([]);
+    setModelEntryMode("registry");
     setModelName("");
     setApi("openai-completions");
     setContextWindow("131072");
@@ -755,6 +758,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
     const firstProvider = providerOptions[0];
     const firstModel = firstProvider?.models[0];
     setEditingModel(null);
+    setModelEntryMode("registry");
     setProviderId(firstProvider?.id ?? "");
     setBaseUrl(firstProvider?.baseUrl ?? "");
     applyModelDefaults(firstModel, firstProvider?.id ?? "");
@@ -763,6 +767,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
 
   function editProviderModel(provider: RendererProvider, model: RendererModel) {
     setEditingModel({ providerId: provider.id, modelId: model.id });
+    setModelEntryMode("registry");
     setProviderId(provider.id);
     setBaseUrl(provider.baseUrl ?? "");
     applyModelDefaults(model, provider.id);
@@ -772,6 +777,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
 
   function selectProvider(nextProviderId: string) {
     const nextProvider = providerOptions.find((provider) => provider.id === nextProviderId);
+    setModelEntryMode("registry");
     setProviderId(nextProviderId);
     setBaseUrl(nextProvider?.baseUrl ?? "");
     applyModelDefaults(nextProvider?.models[0], nextProviderId);
@@ -793,6 +799,18 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
     );
   }
 
+  function openCustomModelForm() {
+    setModelEntryMode("custom");
+    setSelectedModelIds([]);
+    setModelId("");
+    setModelName("");
+    setApi(defaultApiForProvider(providerId));
+    setContextWindow("131072");
+    setMaxTokens("8192");
+    setReasoning(false);
+    setImages(false);
+  }
+
   async function addProviderModel() {
     const cleanProviderId = providerId.trim();
     const cleanModelId = modelId.trim();
@@ -800,7 +818,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
     if (!cleanProviderId || !cleanBaseUrl) return;
     const selectedProviderConfig = providerOptions.find((provider) => provider.id === cleanProviderId);
     const providerModels = selectedProviderConfig?.models ?? [];
-    if (providerModels.length > 0) {
+    if (useRegistryModel) {
       const selectedModels = providerModels.filter((model) => selectedModelIds.includes(model.id));
       if (selectedModels.length === 0) return;
       for (const selectedModelConfig of selectedModels) {
@@ -972,7 +990,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const selectedProviderOption = providerOptions.find((provider) => provider.id === providerId);
   const providerModelOptions = selectedProviderOption?.models ?? [];
   const selectedModelOption = providerModelOptions.find((model) => model.id === modelId);
-  const useRegistryModel = providerModelOptions.length > 0;
+  const useRegistryModel = modelEntryMode === "registry" && providerModelOptions.length > 0;
   const selectedRegistryModels = providerModelOptions.filter((model) => selectedModelIds.includes(model.id));
   const canSaveModel = providerOptions.length > 0 && Boolean(providerId.trim()) && Boolean(baseUrl.trim()) && (useRegistryModel ? selectedModelIds.length > 0 : Boolean(modelId.trim()));
 
@@ -1263,10 +1281,11 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                         Model <em className="src">{selectedModelIds.length}/{providerModelOptions.length} {t("settings.selectedCount")}</em>
                       </span>
                       <div className="model-picker" role="group" aria-label="Model">
-                        {providerModelOptions.length > 1 && (
+                        {(providerModelOptions.length > 1 || (!editingModel && providerModelOptions.length > 0)) && (
                           <div className="model-picker__toolbar">
-                            <button type="button" onClick={() => setRegistryModelSelection(providerModelOptions.map((model) => model.id))}>{t("settings.selectAll")}</button>
-                            <button type="button" onClick={() => setRegistryModelSelection([])}>{t("settings.clear")}</button>
+                            {providerModelOptions.length > 1 && <button type="button" onClick={() => setRegistryModelSelection(providerModelOptions.map((model) => model.id))}>{t("settings.selectAll")}</button>}
+                            {providerModelOptions.length > 1 && <button type="button" onClick={() => setRegistryModelSelection([])}>{t("settings.clear")}</button>}
+                            {!editingModel && <button type="button" onClick={openCustomModelForm}>{t("settings.addCustomModel")}</button>}
                           </div>
                         )}
                         <div className="model-picker__list">
@@ -1316,6 +1335,16 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                 </>
               ) : (
                 <>
+                  {providerModelOptions.length > 0 && !editingModel && (
+                    <div className="model-entry-mode settings-grid__wide">
+                      <button type="button" onClick={() => {
+                        setModelEntryMode("registry");
+                        applyModelDefaults(providerModelOptions[0], providerId);
+                      }}>
+                        {t("settings.backToProviderModels")}
+                      </button>
+                    </div>
+                  )}
                   <label className="field">
                     <span>API type</span>
                     <LoomSelect value={api} onValueChange={setApi} placeholder={t("settings.chooseApiType")} ariaLabel="API type">

@@ -1498,6 +1498,8 @@ button.activity-session-card {
 }
 .field input,
 .field select {
+  box-sizing: border-box;
+  min-height: 44px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -1928,6 +1930,8 @@ button.activity-session-card {
 }
 .model-picker__toolbar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: var(--s2);
   padding: var(--s2);
@@ -1943,6 +1947,23 @@ button.activity-session-card {
   cursor: pointer;
 }
 .model-picker__toolbar button:hover {
+  color: var(--text);
+}
+.model-entry-mode {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--s2);
+}
+.model-entry-mode button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.model-entry-mode button:hover {
   color: var(--text);
 }
 .model-picker__list {
