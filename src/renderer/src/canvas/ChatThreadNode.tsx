@@ -1,7 +1,7 @@
-import { memo, useCallback, useContext, useEffect, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Handle, NodeResizeControl, Position, type ResizeParams } from "@xyflow/react";
 import { Check, ChevronDown, MessageSquareText, Pencil, Trash2 } from "lucide-react";
-import type { ApprovalRequestPayload, ModelSelection, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
+import type { ApprovalRequestPayload, LiveTurnContentPart, ModelSelection, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
 import type { FileMentionRef } from "../../../common/fileMentions";
 import type { SelectionContextNote } from "../../../common/selectionContext";
 import { normalizeSelectionContextNotes } from "../../../common/selectionContext";
@@ -13,6 +13,7 @@ import type { MessageBranchMode } from "../ui/dialogs";
 import { BranchContext } from "./branch";
 import { ToolCallTimeline } from "./ToolCallTimeline";
 import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
+import { appendLiveTurnMessage } from "./liveTurnMessages";
 import { useComposerHeightVar } from "./useComposerHeightVar";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { type NodeUpdate } from "./nodeUpdates";
@@ -24,7 +25,7 @@ import { useNodeMetrics } from "../composer/useNodeMetrics";
 import { useI18n } from "../i18n/I18nProvider";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
-type Msg = { id: number; role: Role; text: string; thinking?: string; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
+type Msg = { id: number; role: Role; text: string; thinking?: string; contentParts?: LiveTurnContentPart[]; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; selectionNotes?: SelectionContextNote[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
 type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number };
 type RectLike = Pick<DOMRect, "left" | "top" | "bottom" | "width" | "height">;
 
@@ -101,13 +102,14 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   const idRef = useRef(1);
 
   const toMsgs = useCallback((items: NodeMsg[] = []) => (
-    items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, fileMentions: m.fileMentions, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }))
+    items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, fileMentions: m.fileMentions, selectionNotes: m.selectionNotes, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }))
   ), []);
 
   const [msgs, setMsgs] = useState<Msg[]>(() => toMsgs(data.messages ?? []));
   const [busy, setBusy] = useState(false);
   const [stopPending, setStopPending] = useState(false);
   const liveTurn = useWorkspaceStore((state) => selectNodeLiveTurn(state, id));
+  const isBusy = busy || Boolean(liveTurn);
   const todoPlan = useWorkspaceStore((state) => selectNodeTodoPlan(state, id));
   const hydrateTodoPlan = useWorkspaceStore((state) => state.hydrateTodoPlan);
   const [thinking, setThinking] = useState(false);
@@ -178,15 +180,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   useEffect(() => {
     if (!liveTurn) return;
     setThinking(false);
-    setMsgs((current) => {
-      const last = current[current.length - 1];
-      if (last?.role === "assistant") {
-        return last.text === liveTurn.assistantText && last.thinking === liveTurn.assistantThinking
-          ? current
-          : [...current.slice(0, -1), { ...last, text: liveTurn.assistantText, thinking: liveTurn.assistantThinking }];
-      }
-      return [...current, { id: idRef.current++, role: "assistant", text: liveTurn.assistantText, thinking: liveTurn.assistantThinking }];
-    });
+    setMsgs((current) => appendLiveTurnMessage(current, liveTurn, (text, thinking) => ({ id: idRef.current++, role: "assistant", text, thinking })));
   }, [liveTurn]);
 
   useEffect(() => {
@@ -208,7 +202,11 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     const list = await window.api.canvas.list(data.sessionId);
     const next = list.find((n) => n.id === id);
     if (next) {
-      setMsgs(toMsgs(next.messages));
+      const restored: Msg[] = toMsgs(next.messages);
+      const live = useWorkspaceStore.getState().turnsByNodeId[id];
+      setMsgs(live
+        ? appendLiveTurnMessage(restored, live, (text, thinking) => ({ id: idRef.current++, role: "assistant", text, thinking }))
+        : restored);
       setTitle(next.title);
       setPersona(next.systemPrompt ?? "");
       setNodeModel(formatModelSelection(next.model));
@@ -317,10 +315,6 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           reloadNode();
           data.onTreeChange?.();
           break;
-        case "assistant_start":
-        case "delta":
-          // The workspace snapshot owns the active assistant tail.
-          break;
         case "done":
           setThinking(false);
           setBusy(false);
@@ -392,7 +386,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   async function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = [], mentions: FileMentionRef[] = [], submittedSelectionNotes: SelectionContextNote[] = []) {
     if (isBusy || (!text && images.length === 0 && mentions.length === 0 && submittedSelectionNotes.length === 0)) return { ok: false };
     const optimisticId = idRef.current++;
-    setMsgs((m) => [...m, { id: optimisticId, role: "user", text, images, fileMentions: mentions }]);
+    setMsgs((m) => [...m, { id: optimisticId, role: "user", text, images, fileMentions: mentions, selectionNotes: submittedSelectionNotes }]);
     setInput("");
     setDraftSkills([]);
     localStorage.removeItem(`loom:draft:${id}`);
@@ -428,7 +422,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     }
   }
 
-  async function regenerate() {
+  const regenerate = useCallback(async () => {
     if (!window.api || isBusy) return;
     setBusy(true);
     setThinking(true);
@@ -438,9 +432,9 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     });
     await window.api.canvas.regenerate(id);
     await reloadNode();
-  }
+  }, [id, isBusy, reloadNode]);
 
-  async function editResend(seq: number | undefined, text: string) {
+  const editResend = useCallback(async (seq: number | undefined, text: string) => {
     if (!window.api || seq == null || isBusy) return;
     setBusy(true);
     setThinking(true);
@@ -450,7 +444,11 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     });
     await window.api.canvas.editResend({ nodeId: id, seq, text });
     await reloadNode();
-  }
+  }, [id, isBusy, reloadNode]);
+
+  const handleMessageBranch = useCallback((mode: MessageBranchMode, sourceSeq: number) => {
+    return data.onMessageBranch?.(id, sourceSeq, mode);
+  }, [data.onMessageBranch, id]);
 
   async function saveTitle() {
     const next = title.trim();
@@ -548,6 +546,8 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
   }
 
+  const renderItems = useMemo(() => groupToolTimelineMessages(msgs), [msgs]);
+
   const seedText = String(data.seed?.text ?? "");
   const seedPreview = seedText.length > 42 ? `${seedText.slice(0, 42)}…` : seedText;
   const frozenContextMessageCount = Number(data.frozenContextMessageCount ?? 0);
@@ -557,7 +557,6 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     : `${frozenContextTokens}`;
   const titleEditUnits = Array.from(title || "标题").reduce((sum, char) => sum + (char.charCodeAt(0) > 255 ? 2 : 1), 0);
   const titleEditWidth = `${Math.min(Math.max(titleEditUnits + 2, 8), 36)}ch`;
-  const isBusy = busy || Boolean(liveTurn);
   const streaming = isBusy && msgs[msgs.length - 1]?.role === "assistant";
   const awaitingApproval = turn?.state === "awaiting_approval" && approval;
   const hasChildren = Boolean(data.hasChildren);
@@ -785,7 +784,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
             <div className="empty">{data.seed ? t("node.seedPrompt") : t("node.startThinking")}</div>
           )}
 
-          {groupToolTimelineMessages(msgs).map((item) => (
+          {renderItems.map((item) => (
             item.kind === "tools" ? (
               <ToolCallTimeline key={item.key} calls={item.calls} density="compact" />
             ) : (
@@ -794,8 +793,10 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
                 role={item.message.role}
                 text={item.message.text}
                 thinking={item.message.thinking}
+                contentParts={item.message.contentParts}
                 images={item.message.images}
                 fileMentions={item.message.fileMentions}
+                selectionNotes={item.message.selectionNotes}
                 density="compact"
                 streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1]?.id}
                 meta={item.message.role === "assistant" ? metaFor(item.message) : undefined}
@@ -804,9 +805,9 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
                 canEdit={item.message.role === "user" && !isBusy}
                 sourceSeq={item.message.seq}
                 messageSeq={item.message.seq}
-                onBranch={(mode: MessageBranchMode, sourceSeq) => data.onMessageBranch?.(id, sourceSeq, mode)}
+                onBranch={handleMessageBranch}
                 onRegenerate={regenerate}
-                onEditResend={(text) => editResend(item.message.seq, text)}
+                onEditResendWithSeq={editResend}
                 onRetry={item.message.role === "error" ? regenerate : undefined}
               />
             )

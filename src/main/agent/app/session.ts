@@ -280,7 +280,14 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
           return { liveSnapshot: applyLifecycleToSnapshot(r.liveSnapshot, lifecycle) };
         });
       }
-      eventSink.emit(nodeId, type, payload);
+      // Assistant content is projected through the live-turn snapshot/patch
+      // channel. Forwarding the same deltas through the generic canvas event
+      // channel creates a second renderer input path and invites duplicate
+      // messages. Lifecycle, tool, approval, and other non-content events
+      // continue to use the generic channel.
+      if (type !== "assistant_start" && type !== "delta" && type !== "thinking_delta") {
+        eventSink.emit(nodeId, type, payload);
+      }
     },
   };
 
@@ -1720,6 +1727,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     decideApproval,
     listSkills,
     liveTurns: () => runtime.listLive(),
+    liveTurn: (nodeId: string) => runtime.get(nodeId)?.liveSnapshot,
     listApprovals: () => approvals.listPending(),
     onApproval: (listener: Parameters<typeof approvals.subscribe>[0]) => approvals.subscribe(listener),
     plan,

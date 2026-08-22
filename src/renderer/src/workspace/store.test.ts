@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { ApprovalRequestPayload, LiveTurnSnapshot, ProjectMeta, SessionMeta } from "../env";
+import type { ApprovalRequestPayload, LiveTurnPatch, LiveTurnSnapshot, ProjectMeta, SessionMeta } from "../env";
 import {
   resetWorkspaceStore,
   selectNodesForSession,
@@ -53,6 +53,47 @@ describe("workspace store", () => {
 
     expect(useWorkspaceStore.getState().turnsByNodeId["node-a"]?.revision).toBe(3);
     expect(useWorkspaceStore.getState().turnsByNodeId["node-a"]?.assistantText).toBe("new");
+  });
+
+  it("applies ordered live patches without receiving cumulative text", () => {
+    const store = useWorkspaceStore.getState();
+    store.applyLiveTurn({ type: "upsert", snapshot: turn({ revision: 1, contentParts: [], contentSequence: 0 }) });
+    const patch: LiveTurnPatch = {
+      type: "patch",
+      nodeId: "node-a",
+      sessionId: "session-a",
+      turnId: "turn-a",
+      operation: "send",
+      state: "running",
+      revision: 2,
+      sequenceStart: 1,
+      sequenceEnd: 1,
+      sequence: 1,
+      parts: [{ partId: "turn-a:part:1", kind: "text", delta: "hello", sequence: 1 }],
+    };
+
+    expect(store.applyLiveTurn(patch)).toBe("applied");
+    expect(useWorkspaceStore.getState().turnsByNodeId["node-a"]).toMatchObject({ assistantText: "hello", contentSequence: 1 });
+  });
+
+  it("requests recovery instead of applying a patch with a sequence gap", () => {
+    const store = useWorkspaceStore.getState();
+    store.applyLiveTurn({ type: "upsert", snapshot: turn({ revision: 1, contentParts: [], contentSequence: 0 }) });
+
+    expect(store.applyLiveTurn({
+      type: "patch",
+      nodeId: "node-a",
+      sessionId: "session-a",
+      turnId: "turn-a",
+      operation: "send",
+      state: "running",
+      revision: 3,
+      sequenceStart: 2,
+      sequenceEnd: 2,
+      sequence: 2,
+      parts: [{ partId: "turn-a:part:2", kind: "text", delta: "gap", sequence: 2 }],
+    })).toBe("recovery");
+    expect(useWorkspaceStore.getState().turnsByNodeId["node-a"]?.assistantText).toBe("");
   });
 
   it("keeps another Session's Node relation while one Session refreshes", () => {

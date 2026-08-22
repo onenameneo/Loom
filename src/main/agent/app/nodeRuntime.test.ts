@@ -17,7 +17,7 @@ function runningSnapshot(nodeId: string, turnId = "t1") {
 }
 
 describe("createNodeRuntimeStore", () => {
-  it("publishes a revisioned upsert when liveSnapshot changes", () => {
+  it("publishes a revisioned snapshot then patches subsequent content", () => {
     const publishLive = vi.fn();
     const store = createNodeRuntimeStore({ publishLive });
     store.set("n1", { node: node("n1"), pendingSkillIds: [] });
@@ -35,10 +35,11 @@ describe("createNodeRuntimeStore", () => {
     );
 
     expect(publishLive).toHaveBeenCalledTimes(2);
-    expect(publishLive).toHaveBeenLastCalledWith({
-      type: "upsert",
-      snapshot: expect.objectContaining({ revision: 2, assistantText: "hi" }),
-    });
+    expect(publishLive).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "patch",
+      revision: 2,
+      parts: [expect.objectContaining({ delta: "hi" })],
+    }));
     expect(store.listLive()).toEqual([
       expect.objectContaining({ nodeId: "n1", revision: 2, assistantText: "hi" }),
     ]);

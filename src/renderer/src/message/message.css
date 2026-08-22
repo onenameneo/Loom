@@ -40,6 +40,47 @@
   padding: 7px 11px;
   border-radius: var(--r-md);
 }
+.m__selection-notes {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: min(100%, 520px);
+  margin-bottom: 6px;
+}
+.m__selection-note {
+  max-width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+}
+.m__selection-note blockquote {
+  max-height: 120px;
+  margin: 0;
+  overflow: auto;
+  border-left: 2px solid var(--accent);
+  color: var(--muted);
+  font-size: calc(var(--m-fs) - 1px);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.m__selection-note-annotation {
+  margin-top: 6px;
+  color: var(--text);
+  font-size: calc(var(--m-fs) - 1px);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.m__selection-note-annotation span {
+  color: var(--faint);
+}
+.m--compact .m__selection-note {
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+}
 
 /* 助手：全宽靠左，Markdown */
 .m--assistant {

@@ -4,6 +4,7 @@ import type { ComposerBudgetPreviewInput } from "../common/composerBudget";
 import type { SelectionContextNote } from "../common/selectionContext";
 import type { AgentMetricTotals } from "../common/telemetry";
 import type { McpConfigInput, McpSafeServerDto, McpSettingsSnapshot } from "../common/mcp";
+import type { LiveTurnEvent, LiveTurnSnapshot } from "../common/liveTurns";
 import {
   parseFileListResult,
   parseFilePreviewResult,
@@ -16,8 +17,6 @@ import {
 } from "../common/filePreview";
 
 type CanvasEvent = { nodeId: string; type: string; payload?: unknown };
-type LiveTurnSnapshot = { nodeId: string; sessionId: string; turnId: string; operation: "send" | "regenerate" | "edit-resend"; state: "running" | "awaiting_approval"; revision: number; assistantText: string; approval?: { requestId: string; toolName: string; toolCallId: string; reason?: string; sandboxMode?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "untrusted" | "on-request" | "never" } };
-type LiveTurnEvent = { type: "upsert"; snapshot: LiveTurnSnapshot } | { type: "remove"; nodeId: string; revision: number };
 type ApprovalScope = "once" | "node-session" | "persistent";
 type ApprovalDecision = {
   requestId: string;
@@ -190,6 +189,7 @@ const api = {
       return () => ipcRenderer.removeListener("canvas:event", l);
     },
     liveTurns: (): Promise<LiveTurnSnapshot[]> => ipcRenderer.invoke("turns:list"),
+    liveTurn: (nodeId: string): Promise<LiveTurnSnapshot | undefined> => ipcRenderer.invoke("turn:current", nodeId),
     listApprovals: (): Promise<ApprovalRequest[]> => ipcRenderer.invoke("approval:list"),
     onApproval: (cb: (event: ApprovalCenterEvent) => void) => {
       const listener = (_event: unknown, data: ApprovalCenterEvent) => cb(data);

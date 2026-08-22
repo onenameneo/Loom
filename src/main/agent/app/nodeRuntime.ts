@@ -1,7 +1,7 @@
 import type { EngineCacheEntry } from "../ports";
 import type { ToolResultBudgetState } from "../core/toolResultBudget";
 import type { ToolResultMicroCompactState } from "../core/toolResultMicroCompact";
-import type { LiveTurnEvent, LiveTurnSnapshot } from "./liveTurns";
+import { createLiveTurnEvent, type LiveTurnEvent, type LiveTurnSnapshot } from "./liveTurns";
 import type { CanvasNode } from "./session";
 import type { ActiveTurn } from "./turnRunner";
 import type { TodoPlanSnapshot } from "../core/todoPlan";
@@ -90,9 +90,9 @@ export function createNodeRuntimeStore(deps: NodeRuntimeStoreDeps): NodeRuntimeS
       const rev = (revisions.get(nodeId) ?? 0) + 1;
       revisions.set(nodeId, rev);
       if (next.liveSnapshot) {
-        const stamped = { ...next.liveSnapshot, revision: rev };
-        next.liveSnapshot = stamped;
-        deps.publishLive({ type: "upsert", snapshot: stamped });
+        const event = createLiveTurnEvent(cur.liveSnapshot, next.liveSnapshot, rev);
+        next.liveSnapshot = { ...next.liveSnapshot, revision: rev };
+        deps.publishLive(event);
       } else {
         deps.publishLive({ type: "remove", nodeId, revision: rev });
       }

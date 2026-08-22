@@ -1,6 +1,6 @@
-import { existsSync } from "fs";
-import { spawn } from "child_process";
-import { isAbsolute } from "path";
+import { existsSync, realpathSync } from "fs";
+import { execFile, spawn } from "child_process";
+import { delimiter, dirname, isAbsolute, join, sep, win32 } from "path";
 import type { CommandExecutionRequest, CommandExecutionResult, CommandPort } from "../ports";
 
 export interface CommandSandboxAdapter {
@@ -12,8 +12,57 @@ function quoteProfilePath(path: string): string {
   return path.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+export function augmentWindowsRuntimePath(pathValue: string | undefined, environment: NodeJS.ProcessEnv = process.env): string | undefined {
+  const pathEntries = pathValue?.split(win32.delimiter).filter(Boolean) ?? [];
+  const candidates = [
+    environment.PNPM_HOME,
+    environment.APPDATA && win32.join(environment.APPDATA, "npm"),
+    environment.APPDATA && win32.join(environment.APPDATA, "pnpm"),
+    environment.LOCALAPPDATA && win32.join(environment.LOCALAPPDATA, "pnpm"),
+    environment.USERPROFILE && win32.join(environment.USERPROFILE, ".bun", "bin"),
+    environment.FNM_DIR,
+    environment.USERPROFILE && win32.join(environment.USERPROFILE, ".fnm"),
+    environment.LOCALAPPDATA && win32.join(environment.LOCALAPPDATA, "fnm"),
+    environment.VOLTA_HOME && win32.join(environment.VOLTA_HOME, "bin"),
+    environment.NVM_HOME,
+    environment.NVM_SYMLINK,
+    environment.ProgramFiles && win32.join(environment.ProgramFiles, "nodejs"),
+    environment.ChocolateyInstall && win32.join(environment.ChocolateyInstall, "bin"),
+    environment.USERPROFILE && win32.join(environment.USERPROFILE, "scoop", "shims"),
+  ].filter((value): value is string => Boolean(value));
+  const entries = [...new Set([...pathEntries, ...candidates])];
+  return entries.length > 0 ? entries.join(win32.delimiter) : undefined;
+}
+
+function commandRuntimeRoots(request: CommandExecutionRequest): string[] {
+  const pathEntries = (request.env?.PATH ?? "").split(delimiter).filter(isAbsolute);
+  const candidates = isAbsolute(request.argv[0] ?? "")
+    ? [request.argv[0]!]
+    : pathEntries.map((entry) => join(entry, request.argv[0]!));
+  const roots = new Set(pathEntries);
+  const home = process.env.HOME ? `${process.env.HOME}${sep}` : undefined;
+  for (const candidate of candidates) {
+    try {
+      const realExecutable = realpathSync(candidate);
+      roots.add(dirname(realExecutable));
+      if (home && realExecutable.startsWith(home)) {
+        let current = dirname(realExecutable);
+        for (let depth = 0; current !== process.env.HOME && depth < 6; depth += 1) {
+          roots.add(current);
+          current = dirname(current);
+        }
+      } else if (realExecutable.startsWith("/opt/homebrew/") || realExecutable.startsWith("/usr/local/")) {
+        roots.add(realExecutable.startsWith("/opt/homebrew/") ? "/opt/homebrew" : "/usr/local");
+      }
+    } catch {
+      // Let spawn report the actual command error if the executable is absent.
+    }
+  }
+  return [...roots];
+}
+
 function macSandboxProfile(request: CommandExecutionRequest): string {
-  const readableRoots = [...new Set([request.cwd, ...request.workspaceRoots, ...(request.writableRoots ?? [])])]
+  const readableRoots = [...new Set([request.cwd, ...request.workspaceRoots, ...(request.writableRoots ?? []), ...commandRuntimeRoots(request)])]
     .filter(isAbsolute)
     .map((root) => `(allow file-read* (subpath "${quoteProfilePath(root)}"))`)
     .join(" ");
@@ -62,8 +111,8 @@ export function createDefaultCommandSandboxAdapter(platform = process.platform):
   };
 }
 
-function safeEnvironment(overrides: Record<string, string | undefined> | undefined): NodeJS.ProcessEnv {
-  const allowed = /^(PATH|HOME|TMPDIR|TMP|TEMP|LANG|LC_[A-Z_]+|CI|TERM|SHELL|ELECTRON_RUN_AS_NODE)$/;
+function safeEnvironment(overrides?: Record<string, string | undefined>): NodeJS.ProcessEnv {
+  const allowed = /^(PATH|HOME|TMPDIR|TMP|TEMP|LANG|LC_[A-Z_]+|CI|TERM|SHELL|ELECTRON_RUN_AS_NODE|NVM_DIR|NVM_HOME|NVM_SYMLINK|FNM_DIR|PNPM_HOME|VOLTA_HOME|ASDF_DIR|ASDF_DATA_DIR|USERPROFILE|APPDATA|LOCALAPPDATA|PROGRAMDATA|ProgramFiles|ProgramFiles\(x86\)|SystemRoot|ComSpec|PATHEXT|ChocolateyInstall)$/i;
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (allowed.test(key) && value !== undefined) env[key] = value;
@@ -72,6 +121,43 @@ function safeEnvironment(overrides: Record<string, string | undefined> | undefin
     if (allowed.test(key)) env[key] = value;
   }
   return env;
+}
+
+export async function discoverRuntimePath(platform: NodeJS.Platform = process.platform): Promise<string | undefined> {
+  if (platform === "win32") return augmentWindowsRuntimePath(process.env.PATH ?? process.env.Path);
+  const shell = process.env.SHELL || (platform === "darwin" ? "/bin/zsh" : undefined);
+  if (!shell || !isAbsolute(shell) || !existsSync(shell)) return undefined;
+  const marker = "__LOOM_PATH__";
+  return new Promise((resolve) => {
+    execFile(shell, ["-ilc", `printf '\\n${marker}%s\\n' \"$PATH\"`], {
+      env: safeEnvironment(),
+      timeout: 5_000,
+      maxBuffer: 64 * 1024,
+    }, (error, stdout) => {
+      if (error) {
+        resolve(undefined);
+        return;
+      }
+      const path = String(stdout).match(new RegExp(`${marker}([^\\r\\n]*)`))?.[1]?.trim();
+      resolve(path || undefined);
+    });
+  });
+}
+
+async function resolveCommandEnvironment(
+  request: CommandExecutionRequest,
+  resolveRuntimePath: () => Promise<string | undefined>,
+  platform: NodeJS.Platform = process.platform,
+): Promise<NodeJS.ProcessEnv> {
+  const env = safeEnvironment(request.env);
+  if (platform === "win32") {
+    const pathValue = request.env?.PATH ?? request.env?.Path ?? env.PATH ?? env.Path;
+    const augmented = augmentWindowsRuntimePath(pathValue, env);
+    return augmented ? { ...env, PATH: augmented, Path: augmented } : env;
+  }
+  if (request.env?.PATH || request.env?.Path) return env;
+  const runtimePath = await resolveRuntimePath();
+  return runtimePath ? { ...env, PATH: runtimePath } : env;
 }
 
 function blockedResult(request: CommandExecutionRequest, reason: "sandbox_unavailable"): CommandExecutionResult {
@@ -91,20 +177,29 @@ function blockedResult(request: CommandExecutionRequest, reason: "sandbox_unavai
 export function createCommandPort(options: {
   sandbox?: CommandSandboxAdapter;
   platform?: NodeJS.Platform;
+  resolveRuntimePath?: () => Promise<string | undefined>;
 } = {}): CommandPort {
-  const sandbox = options.sandbox ?? createDefaultCommandSandboxAdapter(options.platform ?? process.platform);
+  const platform = options.platform ?? process.platform;
+  const sandbox = options.sandbox ?? createDefaultCommandSandboxAdapter(platform);
+  let runtimePathPromise: Promise<string | undefined> | undefined;
+  const resolveRuntimePath = options.resolveRuntimePath ?? (() => {
+    runtimePathPromise ??= discoverRuntimePath(platform);
+    return runtimePathPromise;
+  });
 
   return {
-    execute(request) {
+    async execute(request) {
       if (request.argv.length === 0 || !request.argv[0]) throw new Error("Command argv must not be empty.");
       if (!isAbsolute(request.cwd)) throw new Error("Command cwd must be absolute.");
       if (request.permission.sandboxAvailable === false || (request.permission.sandboxMode !== "danger-full-access" && !sandbox.available)) {
-        return Promise.resolve(blockedResult(request, "sandbox_unavailable"));
+        return blockedResult(request, "sandbox_unavailable");
       }
 
+      const env = await resolveCommandEnvironment(request, resolveRuntimePath, platform);
+      const executionRequest = { ...request, env };
       const wrapped = request.permission.sandboxMode === "danger-full-access"
-        ? { command: request.argv[0], args: request.argv.slice(1) }
-        : sandbox.wrap(request);
+        ? { command: executionRequest.argv[0], args: executionRequest.argv.slice(1) }
+        : sandbox.wrap(executionRequest);
       const maxOutputChars = Math.max(1_024, Math.floor(request.maxOutputChars));
       const timeoutMs = Math.max(100, Math.floor(request.timeoutMs ?? 120_000));
 
@@ -116,9 +211,9 @@ export function createCommandPort(options: {
         let cancelled = false;
         let settled = false;
         const child = spawn(wrapped.command, wrapped.args, {
-          cwd: request.cwd,
-          env: safeEnvironment(request.env),
-          detached: process.platform !== "win32",
+          cwd: executionRequest.cwd,
+          env,
+          detached: platform !== "win32",
           stdio: ["ignore", "pipe", "pipe"],
         });
 
@@ -131,7 +226,7 @@ export function createCommandPort(options: {
         };
         const kill = () => {
           if (child.killed) return;
-          if (process.platform !== "win32") {
+          if (platform !== "win32") {
             try {
               process.kill(-child.pid!, "SIGTERM");
             } catch {

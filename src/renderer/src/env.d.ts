@@ -3,6 +3,7 @@ import type { ComposerBudgetPreviewInput } from "../../../common/composerBudget"
 import type { SelectionContextNote } from "../../../common/selectionContext";
 import type { FileListResult, FilePreviewResult, FileSearchRequest, FileSearchResult, FileWorkspaceRequest } from "../../../common/filePreview";
 import type { McpConfigInput, McpSafeServerDto, McpSettingsSnapshot } from "../../../common/mcp";
+import type { LiveTurnContentPart, LiveTurnEvent, LiveTurnPatch, LiveTurnSnapshot } from "../../../common/liveTurns";
 
 export {};
 
@@ -140,25 +141,7 @@ export interface TodoPlanEventPayload {
 
 export type TurnOperationKind = "send" | "regenerate" | "edit-resend";
 export type TurnState = "running" | "awaiting_approval" | "completed" | "aborted" | "failed";
-export interface LiveTurnSnapshot {
-  nodeId: string;
-  sessionId: string;
-  turnId: string;
-  operation: TurnOperationKind;
-  state: Extract<TurnState, "running" | "awaiting_approval">;
-  revision: number;
-  assistantText: string;
-  assistantThinking?: string;
-  approval?: {
-    requestId: string;
-    toolName: string;
-    toolCallId: string;
-    reason?: string;
-    sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
-    approvalPolicy?: "untrusted" | "on-request" | "never";
-  };
-}
-export type LiveTurnEvent = { type: "upsert"; snapshot: LiveTurnSnapshot } | { type: "remove"; nodeId: string; revision: number };
+export type { LiveTurnContentPart, LiveTurnEvent, LiveTurnPatch, LiveTurnSnapshot } from "../../../common/liveTurns";
 export type ApprovalScope = "once" | "node-session" | "persistent";
 
 export interface TurnCanvasEventPayload {
@@ -593,6 +576,7 @@ declare global {
         metrics: (nodeId: string) => Promise<AgentMetricTotals | undefined>;
         onTrace: (listener: (event: import("./workbench/traceState").TraceEventDto) => void) => () => void;
         liveTurns: () => Promise<LiveTurnSnapshot[]>;
+        liveTurn: (nodeId: string) => Promise<LiveTurnSnapshot | undefined>;
         onLiveTurn: (listener: (event: LiveTurnEvent) => void) => () => void;
         listApprovals: () => Promise<ApprovalRequestPayload[]>;
         onApproval: (listener: (event: ApprovalCenterEvent) => void) => () => void;

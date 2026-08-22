@@ -1,5 +1,7 @@
 import { create } from "zustand";
-import type { ApprovalCenterEvent, ApprovalRequestPayload, CanvasNodeDto, LiveTurnEvent, LiveTurnSnapshot, ProjectMeta, SessionMeta, TodoPlanEventPayload, TodoPlanSnapshot } from "../env";
+import type { ApprovalCenterEvent, ApprovalRequestPayload, CanvasNodeDto, LiveTurnContentPart, LiveTurnEvent, LiveTurnPatch, LiveTurnSnapshot, ProjectMeta, SessionMeta, TodoPlanEventPayload, TodoPlanSnapshot } from "../env";
+
+export type LiveTurnApplyResult = "applied" | "ignored" | "recovery";
 
 export type WorkspaceStore = {
   projectIds: string[];
@@ -24,7 +26,7 @@ export type WorkspaceStore = {
   selectProject: (projectId: string | null) => void;
   selectSession: (sessionId: string | null) => void;
   selectNode: (nodeId: string | null) => void;
-  applyLiveTurn: (event: LiveTurnEvent) => void;
+  applyLiveTurn: (event: LiveTurnEvent) => LiveTurnApplyResult;
   hydrateApprovals: (requests: ApprovalRequestPayload[]) => void;
   applyApproval: (event: ApprovalCenterEvent) => void;
   applyTodoPlan: (payload: TodoPlanEventPayload) => void;
@@ -62,6 +64,40 @@ function replaceEntities<T extends { id: string }>(
   for (const id of previousIds) delete next[id];
   for (const entity of nextEntities) next[entity.id] = entity;
   return next;
+}
+
+function legacyContentParts(snapshot: LiveTurnSnapshot): LiveTurnContentPart[] {
+  if (snapshot.contentParts?.length) return snapshot.contentParts;
+  const parts: LiveTurnContentPart[] = [];
+  if (snapshot.assistantThinking) parts.push({ partId: `${snapshot.turnId}:legacy:thinking`, kind: "thinking", text: snapshot.assistantThinking, sequence: 1 });
+  if (snapshot.assistantText) parts.push({ partId: `${snapshot.turnId}:legacy:text`, kind: "text", text: snapshot.assistantText, sequence: parts.length + 1 });
+  return parts;
+}
+
+function applyLivePatch(snapshot: LiveTurnSnapshot, event: LiveTurnPatch): LiveTurnSnapshot | undefined {
+  const currentSequence = snapshot.contentSequence ?? 0;
+  if (event.sequenceStart !== currentSequence + (event.parts.length > 0 ? 1 : 0)) return undefined;
+  const contentParts = legacyContentParts(snapshot).map((part) => ({ ...part }));
+  for (const patch of event.parts) {
+    const index = contentParts.findIndex((part) => part.partId === patch.partId);
+    if (index >= 0) {
+      const current = contentParts[index];
+      if (current.kind !== patch.kind) return undefined;
+      contentParts[index] = { ...current, text: `${current.text}${patch.delta}` };
+    } else {
+      contentParts.push({ partId: patch.partId, kind: patch.kind, text: patch.delta, sequence: patch.sequence });
+    }
+  }
+  return {
+    ...snapshot,
+    state: event.state,
+    approval: event.approval,
+    revision: event.revision,
+    contentParts,
+    contentSequence: event.sequenceEnd,
+    assistantText: contentParts.filter((part) => part.kind === "text").map((part) => part.text).join(""),
+    assistantThinking: contentParts.filter((part) => part.kind === "thinking").map((part) => part.text).join("") || undefined,
+  };
 }
 
 export const useWorkspaceStore = create<WorkspaceStore>()((set) => ({
@@ -122,18 +158,38 @@ export const useWorkspaceStore = create<WorkspaceStore>()((set) => ({
     set({ activeNodeId: nodeId });
   },
   applyLiveTurn(event) {
+    let result: LiveTurnApplyResult = "ignored";
     set((state) => {
       const nodeId = event.type === "upsert" ? event.snapshot.nodeId : event.nodeId;
       const revision = event.type === "upsert" ? event.snapshot.revision : event.revision;
       if (revision <= (state.latestLiveRevisionByNodeId[nodeId] ?? 0)) return state;
+      if (event.type === "patch") {
+        const current = state.turnsByNodeId[nodeId];
+        if (!current || current.turnId !== event.turnId) {
+          result = "recovery";
+          return state;
+        }
+        const next = applyLivePatch(current, event);
+        if (!next) {
+          result = "recovery";
+          return state;
+        }
+        result = "applied";
+        return {
+          turnsByNodeId: { ...state.turnsByNodeId, [nodeId]: next },
+          latestLiveRevisionByNodeId: { ...state.latestLiveRevisionByNodeId, [nodeId]: revision },
+        };
+      }
       const turnsByNodeId = { ...state.turnsByNodeId };
-      if (event.type === "upsert") turnsByNodeId[nodeId] = event.snapshot;
+      if (event.type === "upsert" || event.type === "replace") turnsByNodeId[nodeId] = event.snapshot;
       else delete turnsByNodeId[nodeId];
+      result = "applied";
       return {
         turnsByNodeId,
         latestLiveRevisionByNodeId: { ...state.latestLiveRevisionByNodeId, [nodeId]: revision },
       };
     });
+    return result;
   },
   hydrateApprovals(requests) {
     set((state) => {

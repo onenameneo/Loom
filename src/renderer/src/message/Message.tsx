@@ -1,14 +1,17 @@
-import { useId, useState } from "react";
+import { memo, useId, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BookOpen, Brain, Check, Copy, FileText, Pencil, RefreshCcw } from "lucide-react";
 import type { FileMentionRef } from "../../../common/fileMentions";
+import type { LiveTurnContentPart } from "../../../common/liveTurns";
+import type { SelectionContextNote } from "../../../common/selectionContext";
 import type { NodeMsg } from "../env";
 import { IconSplit } from "../icons";
 import { MessageBranchDialog, type MessageBranchMode } from "../ui/dialogs";
 import { buttonClassName, cn, fieldClassName } from "../ui/styles";
 import { CodeBlock } from "./CodeBlock";
 import { useI18n } from "../i18n/I18nProvider";
+import { splitMarkdownBlocks } from "./markdownBlocks";
 
 export type MsgRole = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
 export type Density = "compact" | "comfortable";
@@ -128,31 +131,49 @@ function ThinkingView({ text }: { text: string }) {
   );
 }
 
-// 共用消息组件：画布节点与 ChatView 都用它。助手消息渲染 Markdown，其余纯文本。
-export function Message({
-  role,
+function AssistantContent({
   text,
   thinking,
-  images,
-  fileMentions,
-  density = "comfortable",
-  streaming = false,
-  meta,
-  checkpoint,
-  canRegenerate = false,
-  canEdit = false,
-  onRegenerate,
-  onEditResend,
-  onRetry,
-  sourceSeq,
-  onBranch,
-  messageSeq,
+  contentParts,
+  streaming,
 }: {
+  text: string;
+  thinking?: string;
+  contentParts?: LiveTurnContentPart[];
+  streaming: boolean;
+}) {
+  const parts = contentParts?.length
+    ? contentParts
+    : [
+        ...(thinking ? [{ partId: "legacy-thinking", kind: "thinking" as const, text: thinking, sequence: 0 }] : []),
+        { partId: "legacy-text", kind: "text" as const, text, sequence: 1 },
+      ];
+  return (
+    <div className="m__md">
+      {parts.map((part) => part.kind === "thinking" ? (
+        <ThinkingView key={part.partId} text={part.text} />
+      ) : (
+        <div key={part.partId} className="m__md-part">
+          {splitMarkdownBlocks(part.text).map((block, index) => (
+            <ReactMarkdown key={`${part.partId}:block:${index}`} remarkPlugins={[remarkGfm]} components={mdComponents}>
+              {block}
+            </ReactMarkdown>
+          ))}
+        </div>
+      ))}
+      {streaming && <span className="m__caret" />}
+    </div>
+  );
+}
+
+type MessageProps = {
   role: MsgRole;
   text: string;
   thinking?: string;
+  contentParts?: LiveTurnContentPart[];
   images?: { data: string; mimeType: string }[];
   fileMentions?: FileMentionRef[];
+  selectionNotes?: SelectionContextNote[];
   density?: Density;
   streaming?: boolean;
   meta?: string;
@@ -161,11 +182,59 @@ export function Message({
   canEdit?: boolean;
   onRegenerate?: () => void;
   onEditResend?: (text: string) => void;
+  onEditResendWithSeq?: (seq: number | undefined, text: string) => void;
   onRetry?: () => void;
   sourceSeq?: number;
   onBranch?: (mode: MessageBranchMode, sourceSeq: number) => void | Promise<void>;
   messageSeq?: number;
-}) {
+};
+
+function equalMessageProps(previous: MessageProps, next: MessageProps) {
+  return previous.role === next.role &&
+    previous.text === next.text &&
+    previous.thinking === next.thinking &&
+    previous.contentParts === next.contentParts &&
+    previous.images === next.images &&
+    previous.fileMentions === next.fileMentions &&
+    previous.selectionNotes === next.selectionNotes &&
+    previous.density === next.density &&
+    previous.streaming === next.streaming &&
+    previous.meta === next.meta &&
+    previous.checkpoint === next.checkpoint &&
+    previous.canRegenerate === next.canRegenerate &&
+    previous.canEdit === next.canEdit &&
+    previous.sourceSeq === next.sourceSeq &&
+    previous.messageSeq === next.messageSeq &&
+    previous.onRegenerate === next.onRegenerate &&
+    previous.onEditResend === next.onEditResend &&
+    previous.onEditResendWithSeq === next.onEditResendWithSeq &&
+    previous.onRetry === next.onRetry &&
+    previous.onBranch === next.onBranch;
+}
+
+// 共用消息组件：画布节点与 ChatView 都用它。助手消息渲染 Markdown，其余纯文本。
+export const Message = memo(function Message({
+  role,
+  text,
+  thinking,
+  contentParts,
+  images,
+  fileMentions,
+  selectionNotes,
+  density = "comfortable",
+  streaming = false,
+  meta,
+  checkpoint,
+  canRegenerate = false,
+  canEdit = false,
+  onRegenerate,
+  onEditResend,
+  onEditResendWithSeq,
+  onRetry,
+  sourceSeq,
+  onBranch,
+  messageSeq,
+}: MessageProps) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -190,7 +259,8 @@ export function Message({
   function submitEdit() {
     const next = draft.trim();
     if (!next) return;
-    onEditResend?.(next);
+    if (onEditResendWithSeq) onEditResendWithSeq(sourceSeq, next);
+    else onEditResend?.(next);
     setEditing(false);
   }
 
@@ -221,6 +291,21 @@ export function Message({
         </div>
       )}
 
+      {selectionNotes && selectionNotes.length > 0 && (
+        <div className="m__selection-notes" aria-label={t("selection.contextNotes")}>
+          {selectionNotes.map((note, index) => (
+            <div className="m__selection-note" key={note.id || index}>
+              <blockquote>{note.text}</blockquote>
+              {note.annotation && (
+                <div className="m__selection-note-annotation">
+                  <span>{t("selection.annotationLabel")}：</span>{note.annotation}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {editing ? (
         <div className={cn(fieldClassName, "m__edit nodrag")} data-state="open">
           <textarea
@@ -248,16 +333,10 @@ export function Message({
       ) : role === "skill" ? (
         <span className="m__plain m__skill"><BookOpen size={13} /> {text}</span>
       ) : role === "assistant" ? (
-        <div className="m__md">
-          {thinking && <ThinkingView text={thinking} />}
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-            {text}
-          </ReactMarkdown>
-          {streaming && <span className="m__caret" />}
-        </div>
-      ) : (
+        <AssistantContent text={text} thinking={thinking} contentParts={contentParts} streaming={streaming} />
+      ) : text || !selectionNotes?.length ? (
         <span className="m__plain">{text}</span>
-      )}
+      ) : null}
       {showActionBar && !editing && (
         <div className="m__bar nodrag">
           <button onClick={copy} title={t("common.copy")} aria-label={t("common.copy")}>
@@ -293,4 +372,4 @@ export function Message({
       )}
     </div>
   );
-}
+}, equalMessageProps);

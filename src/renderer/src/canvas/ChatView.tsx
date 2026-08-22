@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import type { ApprovalRequestPayload, BranchSource, ModelSelection, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
+import type { ApprovalRequestPayload, BranchSource, LiveTurnContentPart, ModelSelection, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
 import type { FileMentionRef } from "../../../common/fileMentions";
 import type { SelectionContextNote } from "../../../common/selectionContext";
 import { normalizeSelectionContextNotes } from "../../../common/selectionContext";
@@ -12,6 +12,7 @@ import { SelectionNoteCapture, addSelectionContextNote } from "../composer/Selec
 import { useTitlebarActions } from "../titlebar/Titlebar";
 import { ToolCallTimeline } from "./ToolCallTimeline";
 import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
+import { appendLiveTurnMessage } from "./liveTurnMessages";
 import { useComposerHeightVar } from "./useComposerHeightVar";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { selectNodeApproval, selectNodeLiveTurn, selectNodeTodoPlan, useWorkspaceStore } from "../workspace/store";
@@ -21,7 +22,7 @@ import { useNodeMetrics } from "../composer/useNodeMetrics";
 import { useI18n } from "../i18n/I18nProvider";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
-type Msg = { id: number; role: Role; text: string; thinking?: string; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
+type Msg = { id: number; role: Role; text: string; thinking?: string; contentParts?: LiveTurnContentPart[]; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; selectionNotes?: SelectionContextNote[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
 
 function formatModelSelection(model?: ModelSelection) {
   if (!model) return undefined;
@@ -81,6 +82,7 @@ export default function ChatView({
     thinking: m.thinking,
     images: m.images,
     fileMentions: m.fileMentions,
+    selectionNotes: m.selectionNotes,
     seq: m.seq,
     usage: m.usage,
     meta: m.meta,
@@ -177,21 +179,14 @@ export default function ChatView({
   useTitlebarActions(titlebarActions);
 
   const reloadFromInitial = useCallback((items: NodeMsg[], targetNodeId: string) => {
-    const restored: Msg[] = items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, fileMentions: m.fileMentions, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }));
+    const restored: Msg[] = items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, fileMentions: m.fileMentions, selectionNotes: m.selectionNotes, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }));
     // A tree refresh can race an in-flight Node. Merge the authoritative live
     // snapshot into the refreshed transcript instead of briefly replacing it
     // with an older persisted copy.
     const live = useWorkspaceStore.getState().turnsByNodeId[targetNodeId];
-    if (live) {
-      const last = restored[restored.length - 1];
-      if (last?.role === "assistant") {
-        last.text = live.assistantText;
-        last.thinking = live.assistantThinking;
-      } else {
-        restored.push({ id: idRef.current++, role: "assistant", text: live.assistantText, thinking: live.assistantThinking });
-      }
-    }
-    setMsgs(restored);
+    setMsgs(live
+      ? appendLiveTurnMessage(restored, live, (text, thinking) => ({ id: idRef.current++, role: "assistant", text, thinking }))
+      : restored);
   }, []);
 
   const upsertToolMessage = useCallback((payload: Parameters<typeof upsertToolTimelineMessage<Msg>>[1]) => {
@@ -215,15 +210,7 @@ export default function ChatView({
   useEffect(() => {
     if (!liveTurn) return;
     setThinking(false);
-    setMsgs((current) => {
-      const last = current[current.length - 1];
-      if (last?.role === "assistant") {
-        return last.text === liveTurn.assistantText && last.thinking === liveTurn.assistantThinking
-          ? current
-          : [...current.slice(0, -1), { ...last, text: liveTurn.assistantText, thinking: liveTurn.assistantThinking }];
-      }
-      return [...current, { id: idRef.current++, role: "assistant", text: liveTurn.assistantText, thinking: liveTurn.assistantThinking }];
-    });
+    setMsgs((current) => appendLiveTurnMessage(current, liveTurn, (text, thinking) => ({ id: idRef.current++, role: "assistant", text, thinking })));
   }, [liveTurn]);
 
   useEffect(() => {
@@ -307,10 +294,6 @@ export default function ChatView({
         case "node_updated":
           onTreeChange?.();
           break;
-        case "assistant_start":
-        case "delta":
-          // Assistant text is rendered from the workspace live snapshot.
-          break;
         case "done":
           setThinking(false);
           setBusy(false);
@@ -378,7 +361,7 @@ export default function ChatView({
   async function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = [], mentions: FileMentionRef[] = [], submittedSelectionNotes: SelectionContextNote[] = []) {
     if (isBusy || (!text && images.length === 0 && mentions.length === 0 && submittedSelectionNotes.length === 0)) return { ok: false };
     const optimisticId = idRef.current++;
-    setMsgs((m) => [...m, { id: optimisticId, role: "user", text, images, fileMentions: mentions }]);
+    setMsgs((m) => [...m, { id: optimisticId, role: "user", text, images, fileMentions: mentions, selectionNotes: submittedSelectionNotes }]);
     setInput("");
     setDraftSkills([]);
     localStorage.removeItem(`loom:draft:${nodeId}`);
@@ -414,7 +397,7 @@ export default function ChatView({
     }
   }
 
-  async function regenerate() {
+  const regenerate = useCallback(async () => {
     if (!window.api || isBusy) return;
     setBusy(true);
     setThinking(true);
@@ -423,9 +406,9 @@ export default function ChatView({
       return lastUser >= 0 ? m.slice(0, lastUser + 1) : m;
     });
     await window.api.canvas.regenerate(nodeId);
-  }
+  }, [isBusy, nodeId]);
 
-  async function editResend(seq: number | undefined, text: string) {
+  const editResend = useCallback(async (seq: number | undefined, text: string) => {
     if (!window.api || seq == null || isBusy) return;
     setBusy(true);
     setThinking(true);
@@ -434,7 +417,11 @@ export default function ChatView({
       return idx >= 0 ? [...m.slice(0, idx), { id: idRef.current++, role: "user", text, seq }] : m;
     });
     await window.api.canvas.editResend({ nodeId, seq, text });
-  }
+  }, [isBusy, nodeId]);
+
+  const handleMessageBranch = useCallback((mode: MessageBranchMode, sourceSeq: number) => {
+    return onMessageBranch?.(sourceSeq, mode);
+  }, [onMessageBranch]);
 
   async function clearNode() {
     setMsgs([]);
@@ -529,6 +516,8 @@ export default function ChatView({
     setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
   }
 
+  const renderItems = useMemo(() => groupToolTimelineMessages(msgs), [msgs]);
+
   return (
     <div className="chatview" ref={rootRef}>
       <div className="scroll" ref={scrollRef} onScroll={onScroll}>
@@ -555,7 +544,7 @@ export default function ChatView({
               <span className="mono">{t("chat.branchHint")}</span>
             </div>
           )}
-          {groupToolTimelineMessages(msgs).map((item) => (
+          {renderItems.map((item) => (
             <Fragment key={item.kind === "tools" ? item.key : item.message.id}>
               {item.kind === "tools" ? (
                 <ToolCallTimeline calls={item.calls} density="comfortable" />
@@ -564,8 +553,10 @@ export default function ChatView({
                   role={item.message.role}
                   text={item.message.text}
                   thinking={item.message.thinking}
+                  contentParts={item.message.contentParts}
                   images={item.message.images}
                   fileMentions={item.message.fileMentions}
+                  selectionNotes={item.message.selectionNotes}
                   density="comfortable"
                   streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1].id}
                   meta={item.message.role === "assistant" ? metaFor(item.message) : undefined}
@@ -574,9 +565,9 @@ export default function ChatView({
                   canEdit={item.message.role === "user" && !isBusy}
                   sourceSeq={item.message.seq}
                   messageSeq={item.message.seq}
-                  onBranch={onMessageBranch ? (mode, sourceSeq) => onMessageBranch(sourceSeq, mode) : undefined}
+                  onBranch={onMessageBranch ? handleMessageBranch : undefined}
                   onRegenerate={regenerate}
-                  onEditResend={(text) => editResend(item.message.seq, text)}
+                  onEditResendWithSeq={editResend}
                   onRetry={item.message.role === "error" ? regenerate : undefined}
                 />
               )}

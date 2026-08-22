@@ -185,6 +185,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   ipcMain.handle("node:enableSkill", (_e, arg: { nodeId: string; skillId: string }) => runtime.enableSkill(arg));
   ipcMain.handle("node:disableSkill", (_e, arg: { nodeId: string; skillId: string }) => runtime.disableSkill(arg));
   ipcMain.handle("turns:list", () => runtime.liveTurns());
+  ipcMain.handle("turn:current", (_e, nodeId: string) => runtime.liveTurn(nodeId));
   ipcMain.handle("approval:list", () => runtime.listApprovals());
   ipcMain.handle("approval:decide", (_e, decision: ApprovalDecision) => runtime.decideApproval(decision));
 

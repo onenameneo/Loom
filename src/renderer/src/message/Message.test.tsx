@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Message } from "./Message";
 import "./message.css";
+import type { LiveTurnContentPart } from "../../../common/liveTurns";
+import type { SelectionContextNote } from "../../../common/selectionContext";
 
 const messageStyles = readFileSync("src/renderer/src/message/message.css", "utf8");
 
@@ -62,6 +64,17 @@ describe("Message thinking", () => {
 
     expect(container.querySelector(".m__thinking")).toBeTruthy();
     expect(container.querySelector(".m__bar")).toBeNull();
+  });
+
+  it("renders ordered live content parts without moving later thinking before text", () => {
+    const parts: LiveTurnContentPart[] = [
+      { partId: "text-1", kind: "text", text: "First answer", sequence: 1 },
+      { partId: "thinking-2", kind: "thinking", text: "Later check", sequence: 2 },
+    ];
+    const { container } = render(<Message role="assistant" text="First answer" thinking="Later check" contentParts={parts} />);
+    const answer = screen.getByText("First answer");
+    const thinking = container.querySelector(".m__thinking");
+    expect(answer.compareDocumentPosition(thinking as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 
@@ -221,5 +234,17 @@ describe("Message file references", () => {
     expect(screen.getByText("@titleDefaults.ts")).toBeTruthy();
     expect(screen.getByText("src/common/titleDefaults.ts")).toBeTruthy();
     expect(container.querySelector(".m__file-mentions")).toBeTruthy();
+  });
+});
+
+describe("Message selection notes", () => {
+  it("shows selected text and its annotation when sent without a typed prompt", () => {
+    const notes: SelectionContextNote[] = [{ id: "note-1", text: "被选中的原文", annotation: "重点关注这个定义" }];
+
+    const { container } = render(<Message role="user" text="" selectionNotes={notes} />);
+
+    expect(screen.getByText("被选中的原文")).toBeTruthy();
+    expect(screen.getByText("重点关注这个定义")).toBeTruthy();
+    expect(container.querySelector(".m__selection-notes")).toBeTruthy();
   });
 });
