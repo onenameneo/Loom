@@ -1,7 +1,7 @@
 import type { ApprovalPort, AgentHook, BlockDecision, HookToolCallContext } from "../../ports";
 import type { ApprovalPolicyStore } from "../../app/approvalPolicy";
 import type { AgentTool } from "../../core/tool";
-import { DEFAULT_PERMISSION_CONTEXT, evaluatePermission, type PermissionContext, type PermissionReason, type SandboxMode, type ApprovalPolicy } from "../../core/permissions";
+import { DEFAULT_PERMISSION_CONTEXT, evaluatePermission, type PermissionCapability, type PermissionContext, type PermissionReason, type PermissionRisk, type SandboxMode, type ApprovalPolicy } from "../../core/permissions";
 
 export function createApprovalGate(deps: {
   approvals: ApprovalPort;
@@ -14,16 +14,20 @@ export function createApprovalGate(deps: {
 }): AgentHook {
   async function onToolCall(ctx: HookToolCallContext): Promise<BlockDecision | void> {
     const tool = deps.getTool(ctx.nodeId, ctx.toolName);
-    if (!tool?.approval?.required && !tool?.permission) return undefined;
+    if (!tool?.permission) return undefined;
     if (!ctx.turnId) return { block: true, reason: "approval unavailable" };
 
     const args = ctx.args as never;
     const permission = { ...DEFAULT_PERMISSION_CONTEXT, ...(deps.getPermissionContext?.(ctx.nodeId) ?? {}) };
-    let target: string;
-    let reason = tool.approval?.reason ?? "external_mutation";
-    let preview: { title: string; description?: string; args?: unknown };
+    let target = "";
+    let reason: PermissionReason = "external_mutation";
+    let capability: PermissionCapability | undefined;
+    let risk: PermissionRisk | undefined;
+    let preview: { title: string; description?: string; args?: unknown } = { title: ctx.toolName };
     if (tool.permission) {
       const request = await tool.permission.request(args);
+      capability = request.capability;
+      risk = request.risk;
       const evaluated = evaluatePermission(permission, request);
       if (evaluated.action === "allow") return undefined;
       if (evaluated.action === "deny") {
@@ -41,37 +45,23 @@ export function createApprovalGate(deps: {
       target = evaluated.normalizedTarget;
       reason = evaluated.reason ?? reason;
       preview = tool.permission.preview(args);
-    } else {
-      target = await tool.approval!.normalizeTarget(args);
-      preview = tool.approval!.preview(args);
     }
     if (deps.policies.isAllowed({ nodeId: ctx.nodeId, toolName: ctx.toolName, target })) return undefined;
-    if (tool.approval?.required && permission.approvalPolicy === "never") {
-      deps.emitPermission?.(ctx.nodeId, {
-        state: "denied",
-        toolName: ctx.toolName,
-        toolCallId: ctx.toolCallId,
-        target,
-        reason: "permission_escalation",
-        sandboxMode: permission.sandboxMode,
-        approvalPolicy: permission.approvalPolicy,
-      });
-      return { block: true, reason: "approval policy never" };
-    }
-
     const pending = deps.approvals.request({
       nodeId: ctx.nodeId,
       turnId: ctx.turnId,
       toolCallId: ctx.toolCallId,
       toolName: ctx.toolName,
+      capability,
+      risk,
       target,
       normalizedTarget: target,
       reason,
       sandboxMode: permission.sandboxMode,
       approvalPolicy: permission.approvalPolicy,
-      reviewer: "user",
+      reviewer: permission.approvalsReviewer ?? "user",
       preview,
-      defaultScope: tool.approval?.defaultScope ?? "once",
+      defaultScope: "once",
     });
 
     deps.setAwaitingApproval(ctx.nodeId, ctx.turnId, {
@@ -90,7 +80,7 @@ export function createApprovalGate(deps: {
       nodeId: ctx.nodeId,
       toolName: ctx.toolName,
       target,
-      scope: decision.scope ?? tool.approval?.defaultScope ?? "once",
+      scope: decision.scope ?? "once",
     });
     return undefined;
   }

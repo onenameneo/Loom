@@ -58,8 +58,11 @@ describe("MemoryFileAccess", () => {
       content: "Use Markdown as the source of truth.",
     });
     const saved = await access.write({ root: "memory:project", path: "project/project_fact.md", content: markdownForRecord(project) });
-    const edited = await access.edit({ root: "memory:project", path: "project/project_fact.md", oldText: "Markdown as the source", newText: "Markdown is the canonical" });
+    await expect(access.edit({ root: "memory:project", path: "project/project_fact.md", oldText: "Markdown as the source", newText: "Markdown is the canonical" })).rejects.toThrow(/expectedVersion/i);
+    const version = (await access.read({ root: "memory:project", path: "project/project_fact.md" })).version;
+    const edited = await access.edit({ root: "memory:project", path: "project/project_fact.md", oldText: "Markdown as the source", newText: "Markdown is the canonical", expectedVersion: version });
     expect(edited.record?.content).toContain("Markdown is the canonical");
+    expect(edited.version).toBeTruthy();
     expect(saved.record?.scope).toEqual({ kind: "project", projectId: "project-a" });
     expect((await store.readOperationalState({ version: 1 })).version).toBe(1);
     await expect(access.write({
@@ -67,6 +70,42 @@ describe("MemoryFileAccess", () => {
       path: "project/other.md",
       content: markdownForRecord({ ...project, id: "other", scope: { kind: "project", projectId: "project-b" } }),
     })).rejects.toThrow(/scope|path/i);
+  });
+
+  it("requires a current version when overwriting an existing memory file", async () => {
+    const root = await tempRoot();
+    const store = new MemoryStore({ rootDir: root });
+    const access = new MemoryFileAccess(store, "project-a");
+    const input = markdownForRecord(record({ id: "memory_write_guard" }));
+
+    await access.write({ root: "memory:user", path: "user/memory_write_guard.md", content: input });
+    await expect(access.write({ root: "memory:user", path: "user/memory_write_guard.md", content: input, overwrite: true })).rejects.toThrow(/expectedVersion/i);
+  });
+
+  it("serializes concurrent memory edits and rejects the stale second version", async () => {
+    const root = await tempRoot();
+    const store = new MemoryStore({ rootDir: root });
+    const access = new MemoryFileAccess(store, "project-a");
+    const path = "user/memory_concurrent.md";
+    await access.write({
+      root: "memory:user",
+      path,
+      content: markdownForRecord(
+        record({
+          id: "memory_concurrent",
+          content: "original value",
+          dedupeKey: "memory-concurrent-key",
+        }),
+      ),
+    });
+    const version = (await access.read({ root: "memory:user", path })).version;
+
+    const results = await Promise.allSettled([
+      access.edit({ root: "memory:user", path, oldText: "original value", newText: "first value", expectedVersion: version }),
+      access.edit({ root: "memory:user", path, oldText: "original value", newText: "second value", expectedVersion: version }),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
   });
 
   it("keeps candidate/archive lifecycle rules and rejects malformed or escaping paths", async () => {

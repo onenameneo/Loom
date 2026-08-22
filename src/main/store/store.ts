@@ -9,9 +9,11 @@ export type { AgentMetricKind, AgentMetricRecord, AgentMetricTotals } from "../.
 import {
   isApprovalPolicy,
   isApprovalsReviewer,
-  isSandboxMode,
+  isPermissionProfile,
+  normalizePermissionProfile,
   type ApprovalPolicy,
   type ApprovalsReviewer,
+  type PermissionProfileName,
   type SandboxMode,
 } from "../agent/core/permissions";
 
@@ -50,6 +52,7 @@ export interface SkillsSettings {
 }
 
 export interface PermissionSettings {
+  profile: PermissionProfileName;
   sandboxMode: SandboxMode;
   approvalPolicy: ApprovalPolicy;
   approvalsReviewer: ApprovalsReviewer;
@@ -77,14 +80,19 @@ export function normalizeMemorySettings(value: unknown): MemorySettings {
 
 export function normalizePermissionSettings(value: unknown): PermissionSettings {
   const raw = value && typeof value === "object" ? value as Partial<PermissionSettings> : {};
+  const profile = isPermissionProfile(raw.profile)
+    ? raw.profile
+    : raw.sandboxMode === "read-only" ? "suggest" : raw.sandboxMode === "danger-full-access" ? "full-access" : "auto-edit";
+  const compiled = normalizePermissionProfile({ profile, sandboxMode: raw.sandboxMode, approvalPolicy: raw.approvalPolicy, networkAccess: raw.networkAccess });
   const commandOutputLimit = typeof raw.commandOutputLimit === "number" && Number.isFinite(raw.commandOutputLimit)
     ? Math.max(1_024, Math.min(1_000_000, Math.floor(raw.commandOutputLimit)))
     : DEFAULT_SETTINGS.permissions.commandOutputLimit;
   return {
-    sandboxMode: isSandboxMode(raw.sandboxMode) ? raw.sandboxMode : DEFAULT_SETTINGS.permissions.sandboxMode,
-    approvalPolicy: isApprovalPolicy(raw.approvalPolicy) ? raw.approvalPolicy : DEFAULT_SETTINGS.permissions.approvalPolicy,
+    profile: compiled.mode,
+    sandboxMode: compiled.sandboxMode,
+    approvalPolicy: isApprovalPolicy(raw.approvalPolicy) ? raw.approvalPolicy : compiled.approvalPolicy,
     approvalsReviewer: isApprovalsReviewer(raw.approvalsReviewer) ? raw.approvalsReviewer : DEFAULT_SETTINGS.permissions.approvalsReviewer,
-    networkAccess: raw.networkAccess === true,
+    networkAccess: compiled.networkAccess,
     writableRoots: Array.isArray(raw.writableRoots)
       ? [...new Set(raw.writableRoots.filter((item): item is string => typeof item === "string" && item.trim().length > 0))]
       : [],
@@ -278,6 +286,7 @@ export const DEFAULT_SETTINGS: Settings = {
   activity: {},
   skills: { globalSources: [] },
   permissions: {
+    profile: "auto-edit",
     sandboxMode: "workspace-write",
     approvalPolicy: "on-request",
     approvalsReviewer: "user",

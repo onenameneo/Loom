@@ -1,14 +1,74 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PERMISSION_CONTEXT,
+  compilePermissionProfile,
   evaluatePermission,
   normalizePermissionContext,
+  normalizePermissionProfile,
+  permissionInstructionsFor,
 } from "./permissions";
 
 const inside = { target: "src/index.ts", normalizedTarget: "project:src/index.ts", targetInWorkspace: true };
 const outside = { target: "/tmp/result.txt", normalizedTarget: "path:/tmp/result.txt", targetInWorkspace: false };
 
 describe("permission policy", () => {
+  it("normalizes a Codex-style auto-edit profile", () => {
+    expect(normalizePermissionProfile({ mode: "auto-edit" })).toMatchObject({
+      mode: "auto-edit",
+      sandboxMode: "workspace-write",
+      approvalPolicy: "on-request",
+      networkAccess: false,
+    });
+  });
+
+  it("maps legacy full access settings to the full-access profile", () => {
+    expect(normalizePermissionContext({ sandboxMode: "danger-full-access" })).toMatchObject({
+      profile: "full-access",
+      sandboxMode: "danger-full-access",
+    });
+  });
+
+  it("compiles profile behavior without forcing ordinary mutations through approval", () => {
+    expect(compilePermissionProfile({ mode: "auto-edit" })).toMatchObject({
+      mutation: "allow-in-boundary",
+      command: "ask",
+    });
+    expect(compilePermissionProfile({ mode: "full-auto" })).toMatchObject({
+      mutation: "allow-in-boundary",
+      command: "allow-in-boundary",
+    });
+    expect(compilePermissionProfile({ mode: "full-access" })).toMatchObject({
+      mutation: "allow",
+      command: "allow",
+    });
+  });
+
+  it("allows an in-boundary edit under auto-edit", () => {
+    expect(evaluatePermission({ profile: "auto-edit" }, { capability: "write", ...inside })).toMatchObject({ action: "allow" });
+  });
+
+  it("allows an external edit under full-access", () => {
+    expect(evaluatePermission({ profile: "full-access" }, { capability: "write", ...outside })).toMatchObject({ action: "allow" });
+  });
+
+  it("asks for an in-boundary command under auto-edit", () => {
+    expect(evaluatePermission({ profile: "auto-edit" }, {
+      capability: "command",
+      target: "pnpm test",
+      normalizedTarget: "command:pnpm",
+      trusted: true,
+      targetInWorkspace: true,
+    })).toMatchObject({ action: "ask", reason: "permission_escalation" });
+  });
+
+  it("generates model instructions from the effective profile", () => {
+    expect(permissionInstructionsFor({ mode: "full-access" })).toContain("Full Access");
+    expect(permissionInstructionsFor({ mode: "full-access" })).toContain("ordinary file edits are allowed");
+    expect(permissionInstructionsFor({ mode: "auto-edit" })).toContain("ask for approval before running commands");
+    expect(permissionInstructionsFor({ mode: "suggest" })).toContain("do not modify files automatically");
+    expect(permissionInstructionsFor({ mode: "auto-edit", approvalPolicy: "never" })).toContain("Actions that require approval are denied");
+  });
+
   it("allows in-workspace writes in the default workspace preset", () => {
     expect(evaluatePermission(DEFAULT_PERMISSION_CONTEXT, { capability: "write", ...inside })).toMatchObject({
       action: "allow",

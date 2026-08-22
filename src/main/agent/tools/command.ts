@@ -47,6 +47,7 @@ export function createCommandTool(input: {
         const cwd = args.cwd ? resolve(args.cwd) : input.cwd;
         return {
           capability: "command",
+          risk: "elevated",
           target: args.argv.join(" ").slice(0, 400),
           normalizedTarget: commandTarget(args.argv),
           trusted: isTrustedCommand(args.argv),

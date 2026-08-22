@@ -6,6 +6,23 @@ import type { MemoryRecord, MemoryScope } from "./types";
 
 export type MemoryRootId = "memory:user" | "memory:project" | "memory:candidates" | "memory:archive";
 
+interface MemoryWriteInput {
+  root: MemoryRootId;
+  path: string;
+  content: string;
+  overwrite?: boolean;
+  expectedVersion?: string;
+}
+
+interface MemoryEditInput {
+  root: MemoryRootId;
+  path: string;
+  oldText: string;
+  newText: string;
+  replaceAll?: boolean;
+  expectedVersion?: string;
+}
+
 export interface MemoryRootDescriptor {
   id: MemoryRootId;
   kind: "user" | "project" | "candidates" | "archive";
@@ -72,6 +89,8 @@ function boundedText(content: string, offset = 1, limit = 400): { text: string; 
 }
 
 export class MemoryFileAccess {
+  private readonly mutationQueues = new Map<string, Promise<void>>();
+
   constructor(
     private readonly store: MemoryStore,
     private readonly projectId?: string,
@@ -187,7 +206,30 @@ export class MemoryFileAccess {
     };
   }
 
-  async write(input: { root: MemoryRootId; path: string; content: string; overwrite?: boolean; expectedVersion?: string }): Promise<{ path: string; operation: "create" | "overwrite"; bytes: number; version?: string; record?: MemoryRecord }> {
+  private async withMutationQueue<T>(root: MemoryRootId, path: string, operation: () => Promise<T>): Promise<T> {
+    const resolved = await this.safeTarget(root, path, false);
+    const key = `${root}\u0000${resolve(resolved.target)}`;
+    const previous = this.mutationQueues.get(key) ?? Promise.resolve();
+    let releaseNext!: () => void;
+    const next = new Promise<void>((resolveNext) => {
+      releaseNext = resolveNext;
+    });
+    const chained = previous.then(() => next);
+    this.mutationQueues.set(key, chained);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      releaseNext();
+      if (this.mutationQueues.get(key) === chained) this.mutationQueues.delete(key);
+    }
+  }
+
+  async write(input: MemoryWriteInput): Promise<{ path: string; operation: "create" | "overwrite"; bytes: number; version: string; record?: MemoryRecord }> {
+    return this.withMutationQueue(input.root, input.path, () => this.writeUnlocked(input));
+  }
+
+  private async writeUnlocked(input: MemoryWriteInput): Promise<{ path: string; operation: "create" | "overwrite"; bytes: number; version: string; record?: MemoryRecord }> {
     const resolved = await this.safeTarget(input.root, input.path, false);
     let current: { version: string } | undefined;
     try {
@@ -198,6 +240,7 @@ export class MemoryFileAccess {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
     if (current && input.overwrite !== true) throw new Error("Memory target already exists; pass overwrite: true to replace it.");
+    if (current && input.expectedVersion === undefined) throw new Error("Read the memory file first and pass expectedVersion before writing.");
     if (input.expectedVersion !== undefined && input.expectedVersion !== current?.version) throw new Error("Memory target changed since it was read; read it again before writing.");
     const record = recordFromMarkdown(input.content, resolved.target);
     this.assertRecordTarget(input.root, resolved.target, record);
@@ -205,7 +248,8 @@ export class MemoryFileAccess {
       const saved = current ? await this.store.edit(record.id, this.inputFromRecord(record)) : await this.store.createCandidate({ ...this.inputFromRecord(record), source: record.source });
       if (!saved) throw new Error("Candidate memory could not be saved.");
       this.onPrimaryWrite?.(saved);
-      return { path: resolved.relativePath, operation: current ? "overwrite" : "create", bytes: Buffer.byteLength(input.content, "utf8"), record: saved };
+      const stat = await fs.stat(saved.path ?? resolved.target);
+      return { path: resolved.relativePath, operation: current ? "overwrite" : "create", bytes: Buffer.byteLength(input.content, "utf8"), version: fileVersion(stat), record: saved };
     }
     const saved = await this.store.remember(this.inputFromRecord(record));
     const stat = await fs.stat(saved.path!);
@@ -213,18 +257,23 @@ export class MemoryFileAccess {
     return { path: resolved.relativePath, operation: current ? "overwrite" : "create", bytes: Buffer.byteLength(input.content, "utf8"), version: fileVersion(stat), record: saved };
   }
 
-  async edit(input: { root: MemoryRootId; path: string; oldText: string; newText: string; replaceAll?: boolean; expectedVersion?: string }): Promise<{ path: string; replacements: number; bytes: number; record?: MemoryRecord }> {
+  async edit(input: MemoryEditInput): Promise<{ path: string; replacements: number; bytes: number; version: string; record?: MemoryRecord }> {
+    return this.withMutationQueue(input.root, input.path, () => this.editUnlocked(input));
+  }
+
+  private async editUnlocked(input: MemoryEditInput): Promise<{ path: string; replacements: number; bytes: number; version: string; record?: MemoryRecord }> {
     const resolved = await this.safeTarget(input.root, input.path, true);
     const stat = await fs.stat(resolved.target);
     const version = fileVersion(stat);
-    if (input.expectedVersion !== undefined && input.expectedVersion !== version) throw new Error("Memory target changed since it was read; read it again before editing.");
+    if (input.expectedVersion === undefined) throw new Error("Read the memory file first and pass expectedVersion before editing.");
+    if (input.expectedVersion !== version) throw new Error("Memory target changed since it was read; read it again before editing.");
     const before = await fs.readFile(resolved.target, "utf8");
     if (!input.oldText) throw new Error("oldText must not be empty.");
     const matches = before.split(input.oldText).length - 1;
     if (matches === 0) throw new Error("oldText was not found in the memory target.");
     if (!input.replaceAll && matches !== 1) throw new Error(`oldText matched ${matches} times; set replaceAll: true to replace all matches.`);
     const content = input.replaceAll ? before.split(input.oldText).join(input.newText) : before.replace(input.oldText, input.newText);
-    const result = await this.write({ root: input.root, path: input.path, content, overwrite: true, expectedVersion: version });
-    return { path: result.path, replacements: input.replaceAll ? matches : 1, bytes: result.bytes, record: result.record };
+    const result = await this.writeUnlocked({ root: input.root, path: input.path, content, overwrite: true, expectedVersion: version });
+    return { path: result.path, replacements: input.replaceAll ? matches : 1, bytes: result.bytes, version: result.version, record: result.record };
   }
 }

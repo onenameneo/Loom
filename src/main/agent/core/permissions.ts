@@ -7,6 +7,9 @@
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type ApprovalPolicy = "untrusted" | "on-request" | "never";
 export type ApprovalsReviewer = "user" | "auto-review";
+export type PermissionProfileName = "suggest" | "auto-edit" | "full-auto" | "full-access";
+export type PermissionRule = "ask" | "allow-in-boundary" | "allow";
+export type PermissionRisk = "low" | "elevated" | "high";
 
 export type PermissionCapability =
   | "read"
@@ -31,6 +34,7 @@ export type PermissionReason =
 
 export interface PermissionRequest {
   capability: PermissionCapability;
+  risk?: PermissionRisk;
   target: string;
   /** Canonical target used for approval policy persistence. */
   normalizedTarget: string;
@@ -45,37 +49,51 @@ export interface PermissionRequest {
 }
 
 export interface PermissionContext {
+  /** User-facing autonomy preset. The legacy fields below remain as a compatibility projection. */
+  profile?: PermissionProfileName;
   sandboxMode: SandboxMode;
   approvalPolicy: ApprovalPolicy;
   networkAccess: boolean;
+  writableRoots?: string[];
+  approvalsReviewer?: ApprovalsReviewer;
+  commandOutputLimit?: number;
   /** A full-access adapter is still allowed to fail closed if unavailable. */
   sandboxAvailable?: boolean;
 }
 
+export interface PermissionProfileInput {
+  mode?: PermissionProfileName;
+  profile?: PermissionProfileName;
+  sandboxMode?: SandboxMode;
+  approvalPolicy?: ApprovalPolicy;
+  networkAccess?: boolean;
+  writableRoots?: string[];
+  approvalsReviewer?: ApprovalsReviewer;
+  commandOutputLimit?: number;
+}
+
+export interface CompiledPermissionProfile {
+  mode: PermissionProfileName;
+  sandboxMode: SandboxMode;
+  approvalPolicy: ApprovalPolicy;
+  networkAccess: boolean;
+  mutation: PermissionRule;
+  command: PermissionRule;
+  writableRoots?: string[];
+  approvalsReviewer?: ApprovalsReviewer;
+  commandOutputLimit?: number;
+}
+
 export interface PermissionDecision {
   action: "allow" | "deny" | "ask";
+  risk?: PermissionRisk;
   reason?: PermissionReason;
   target: string;
   normalizedTarget: string;
 }
 
-export interface PermissionPreview {
-  title: string;
-  description?: string;
-  args?: unknown;
-}
-
-export interface PermissionRequestEnvelope extends PermissionRequest {
-  requestId: string;
-  toolName: string;
-  sandboxMode: SandboxMode;
-  approvalPolicy: ApprovalPolicy;
-  reviewer: ApprovalsReviewer;
-  reason: PermissionReason;
-  preview: PermissionPreview;
-}
-
 export const DEFAULT_PERMISSION_CONTEXT: PermissionContext = {
+  profile: "auto-edit",
   sandboxMode: "workspace-write",
   approvalPolicy: "on-request",
   networkAccess: false,
@@ -94,11 +112,91 @@ export function isApprovalsReviewer(value: unknown): value is ApprovalsReviewer 
   return value === "user" || value === "auto-review";
 }
 
-export function normalizePermissionContext(value: Partial<PermissionContext> | undefined): PermissionContext {
+export function isPermissionProfile(value: unknown): value is PermissionProfileName {
+  return value === "suggest" || value === "auto-edit" || value === "full-auto" || value === "full-access";
+}
+
+function profileDefaults(mode: PermissionProfileName): Omit<CompiledPermissionProfile, "mode"> {
+  switch (mode) {
+    case "suggest":
+      return { sandboxMode: "read-only", approvalPolicy: "on-request", networkAccess: false, mutation: "ask", command: "ask" };
+    case "full-auto":
+      return { sandboxMode: "workspace-write", approvalPolicy: "on-request", networkAccess: false, mutation: "allow-in-boundary", command: "allow-in-boundary" };
+    case "full-access":
+      return { sandboxMode: "danger-full-access", approvalPolicy: "on-request", networkAccess: true, mutation: "allow", command: "allow" };
+    case "auto-edit":
+    default:
+      return { sandboxMode: "workspace-write", approvalPolicy: "on-request", networkAccess: false, mutation: "allow-in-boundary", command: "ask" };
+  }
+}
+
+function legacyProfile(value: Partial<PermissionProfileInput> | undefined): PermissionProfileName | undefined {
+  if (isPermissionProfile(value?.mode)) return value.mode;
+  if (isPermissionProfile(value?.profile)) return value.profile;
+  if (value?.sandboxMode === "read-only") return "suggest";
+  if (value?.sandboxMode === "danger-full-access") return "full-access";
+  if (value?.sandboxMode === "workspace-write") return "auto-edit";
+  return undefined;
+}
+
+export function normalizePermissionProfile(value: Partial<PermissionProfileInput> | undefined): CompiledPermissionProfile {
+  const mode = legacyProfile(value) ?? "auto-edit";
+  const defaults = profileDefaults(mode);
   return {
-    sandboxMode: isSandboxMode(value?.sandboxMode) ? value!.sandboxMode : DEFAULT_PERMISSION_CONTEXT.sandboxMode,
-    approvalPolicy: isApprovalPolicy(value?.approvalPolicy) ? value!.approvalPolicy : DEFAULT_PERMISSION_CONTEXT.approvalPolicy,
-    networkAccess: value?.networkAccess === true,
+    mode,
+    ...defaults,
+    approvalPolicy: isApprovalPolicy(value?.approvalPolicy) ? value.approvalPolicy : defaults.approvalPolicy,
+    networkAccess: mode === "full-access" ? true : value?.networkAccess === true,
+    writableRoots: Array.isArray(value?.writableRoots) ? value.writableRoots.filter((root): root is string => typeof root === "string") : undefined,
+    approvalsReviewer: isApprovalsReviewer(value?.approvalsReviewer) ? value.approvalsReviewer : undefined,
+    commandOutputLimit: typeof value?.commandOutputLimit === "number" && Number.isFinite(value.commandOutputLimit)
+      ? value.commandOutputLimit
+      : undefined,
+  };
+}
+
+export function compilePermissionProfile(value: Partial<PermissionProfileInput> | undefined): CompiledPermissionProfile {
+  return normalizePermissionProfile(value);
+}
+
+export function permissionInstructionsFor(value: Partial<PermissionProfileInput> | undefined): string {
+  const profile = compilePermissionProfile(value);
+  const name = profile.mode === "auto-edit" ? "Auto Edit" : profile.mode === "full-auto" ? "Full Auto" : profile.mode === "full-access" ? "Full Access" : "Suggest";
+  const mutation = profile.mutation === "allow"
+    ? "ordinary file edits are allowed"
+    : profile.mutation === "allow-in-boundary"
+      ? "ordinary file edits inside the workspace are allowed"
+      : "do not modify files automatically";
+  const command = profile.command === "allow"
+    ? "commands are allowed"
+    : profile.command === "allow-in-boundary"
+      ? "commands inside the workspace are allowed"
+      : profile.approvalPolicy === "never" ? "commands requiring escalation are denied" : "ask for approval before running commands";
+  const network = profile.networkAccess
+    ? "network access is available"
+    : profile.approvalPolicy === "never" ? "network access is disabled" : "network access requires approval when requested";
+  const roots = profile.writableRoots?.length ? profile.writableRoots.join(", ") : "configured Project roots";
+  return [
+    "## Permission profile",
+    `- Effective mode: ${name}.`,
+    `- ${mutation}; ${command}; ${network}.`,
+    `- Writable boundary: ${roots}.`,
+    ...(profile.approvalPolicy === "never" ? ["- Actions that require approval are denied; do not claim or imply that the model can self-approve them."] : []),
+    "- Stay within the declared workspace and preserve bounded previews, exact targets, and expected-version checks for file mutations.",
+    "- Never claim that an operation succeeded until the tool returns a successful result.",
+  ].join("\n");
+}
+
+export function normalizePermissionContext(value: Partial<PermissionContext> | undefined): PermissionContext {
+  const profile = normalizePermissionProfile(value);
+  return {
+    profile: profile.mode,
+    sandboxMode: profile.sandboxMode,
+    approvalPolicy: profile.approvalPolicy,
+    networkAccess: profile.networkAccess,
+    writableRoots: profile.writableRoots,
+    approvalsReviewer: profile.approvalsReviewer,
+    commandOutputLimit: profile.commandOutputLimit,
     sandboxAvailable: value?.sandboxAvailable !== false,
   };
 }
@@ -114,26 +212,33 @@ function denyIfUnavailable(context: PermissionContext, request: PermissionReques
 }
 
 function reasonForBoundary(request: PermissionRequest, context: PermissionContext): PermissionReason | undefined {
-  if (request.capability === "network" && !context.networkAccess && context.sandboxMode !== "danger-full-access") {
+  const profile = compilePermissionProfile(context);
+  if (request.capability === "network" && !profile.networkAccess && profile.sandboxMode !== "danger-full-access") {
     return "network_access";
   }
   if (
     (request.capability === "write" || request.capability === "delete" || request.capability === "read") &&
-    context.sandboxMode !== "danger-full-access" &&
+    profile.sandboxMode !== "danger-full-access" &&
     request.targetInWorkspace !== true
   ) {
     return "outside_workspace";
+  }
+  if ((request.capability === "write" || request.capability === "delete") && profile.mutation === "ask") {
+    return "permission_escalation";
   }
   if (request.capability === "mcp" && request.destructive) return "mcp_side_effect";
   if (request.capability === "delete" || request.destructive) return "destructive_command";
   if (request.capability === "external-mutation") return "external_mutation";
   if (request.capability === "mcp" && request.trusted !== true) return "mcp_untrusted_server";
   if (request.capability === "permission-escalation") return "permission_escalation";
-  if (request.capability === "command" && context.sandboxMode === "read-only") return "permission_escalation";
-  if (request.capability === "command" && context.sandboxMode !== "danger-full-access" && request.targetInWorkspace !== true) {
+  if (request.capability === "command" && profile.sandboxMode === "read-only") return "permission_escalation";
+  if (request.capability === "command" && profile.sandboxMode !== "danger-full-access" && request.targetInWorkspace !== true) {
     return "outside_workspace";
   }
   if (request.capability === "command" && request.trusted === false && context.approvalPolicy === "untrusted") return "untrusted_command";
+  if (request.capability === "command" && profile.command === "ask" && request.targetInWorkspace === true && context.approvalPolicy !== "untrusted") {
+    return "permission_escalation";
+  }
   return undefined;
 }
 

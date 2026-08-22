@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CanvasNodeDto, LiveTurnEvent, LiveTurnSnapshot, ProjectMeta, SessionMeta, TodoPlanEventPayload, TodoPlanSnapshot } from "../env";
+import type { ApprovalCenterEvent, ApprovalRequestPayload, CanvasNodeDto, LiveTurnEvent, LiveTurnSnapshot, ProjectMeta, SessionMeta, TodoPlanEventPayload, TodoPlanSnapshot } from "../env";
 
 export type WorkspaceStore = {
   projectIds: string[];
@@ -13,6 +13,8 @@ export type WorkspaceStore = {
   activeNodeId: string | null;
   turnsByNodeId: Record<string, LiveTurnSnapshot>;
   latestLiveRevisionByNodeId: Record<string, number>;
+  approvalsById: Record<string, ApprovalRequestPayload>;
+  latestApprovalRevision: number;
   plansByNodeId: Record<string, TodoPlanSnapshot>;
   latestTodoRevisionByNodeId: Record<string, number>;
   hydrateProjects: (projects: ProjectMeta[]) => void;
@@ -23,12 +25,14 @@ export type WorkspaceStore = {
   selectSession: (sessionId: string | null) => void;
   selectNode: (nodeId: string | null) => void;
   applyLiveTurn: (event: LiveTurnEvent) => void;
+  hydrateApprovals: (requests: ApprovalRequestPayload[]) => void;
+  applyApproval: (event: ApprovalCenterEvent) => void;
   applyTodoPlan: (payload: TodoPlanEventPayload) => void;
   hydrateTodoPlan: (nodeId: string, snapshot?: TodoPlanSnapshot) => void;
 };
 
 type WorkspaceData = Omit<WorkspaceStore,
-  "hydrateProjects" | "hydrateSessions" | "hydrateNodes" | "patchNode" | "selectProject" | "selectSession" | "selectNode" | "applyLiveTurn" | "applyTodoPlan" | "hydrateTodoPlan"
+  "hydrateProjects" | "hydrateSessions" | "hydrateNodes" | "patchNode" | "selectProject" | "selectSession" | "selectNode" | "applyLiveTurn" | "hydrateApprovals" | "applyApproval" | "applyTodoPlan" | "hydrateTodoPlan"
 >;
 
 const emptyWorkspace = (): WorkspaceData => ({
@@ -43,6 +47,8 @@ const emptyWorkspace = (): WorkspaceData => ({
   activeNodeId: null,
   turnsByNodeId: {},
   latestLiveRevisionByNodeId: {},
+  approvalsById: {},
+  latestApprovalRevision: 0,
   plansByNodeId: {},
   latestTodoRevisionByNodeId: {},
 });
@@ -129,6 +135,28 @@ export const useWorkspaceStore = create<WorkspaceStore>()((set) => ({
       };
     });
   },
+  hydrateApprovals(requests) {
+    set((state) => {
+      const approvalsById = { ...state.approvalsById };
+      for (const request of requests) {
+        if (request.revision > state.latestApprovalRevision) approvalsById[request.requestId] = request;
+      }
+      return {
+        approvalsById,
+        latestApprovalRevision: Math.max(state.latestApprovalRevision, ...requests.map((request) => request.revision)),
+      };
+    });
+  },
+  applyApproval(event) {
+    set((state) => {
+      const revision = event.type === "upsert" ? event.request.revision : event.revision;
+      if (revision <= state.latestApprovalRevision) return state;
+      const approvalsById = { ...state.approvalsById };
+      if (event.type === "upsert") approvalsById[event.request.requestId] = event.request;
+      else delete approvalsById[event.requestId];
+      return { approvalsById, latestApprovalRevision: revision };
+    });
+  },
   applyTodoPlan(payload) {
     set((state) => {
       const revision = payload.revision ?? payload.snapshot.revision;
@@ -165,7 +193,9 @@ export const selectNodesForSession = (state: WorkspaceStore, sessionId: string |
   sessionId ? (state.nodeIdsBySessionId[sessionId] ?? []).flatMap((id) => state.nodesById[id] ? [state.nodesById[id]] : []) : [];
 
 export const selectNodeLiveTurn = (state: WorkspaceStore, nodeId: string): LiveTurnSnapshot | undefined => state.turnsByNodeId[nodeId];
+export const selectNodeApproval = (state: WorkspaceStore, nodeId: string): ApprovalRequestPayload | undefined => Object.values(state.approvalsById).find((approval) => approval.nodeId === nodeId);
 export const selectNodeTodoPlan = (state: WorkspaceStore, nodeId: string): TodoPlanSnapshot | undefined => state.plansByNodeId[nodeId];
+export const selectPendingApprovals = (state: WorkspaceStore): ApprovalRequestPayload[] => Object.values(state.approvalsById).sort((a, b) => a.createdAt - b.createdAt);
 export const selectTodoProgress = (state: WorkspaceStore, nodeId: string) => {
   const plan = state.plansByNodeId[nodeId];
   if (!plan) return { total: 0, completed: 0, active: 0, blocked: 0 };

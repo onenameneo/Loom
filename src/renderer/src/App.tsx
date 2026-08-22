@@ -22,6 +22,8 @@ import {
 } from "./workspace/store";
 import { connectLiveTurnBridge } from "./workspace/liveTurnBridge";
 import { connectTodoPlanBridge } from "./workspace/todoPlanBridge";
+import { connectApprovalBridge } from "./workspace/approvalBridge";
+import { ApprovalCenter } from "./workspace/ApprovalCenter";
 import { useI18n } from "./i18n/I18nProvider";
 
 export default function App() {
@@ -70,6 +72,7 @@ export default function App() {
         monitor: { notify: true },
         skills: { globalSources: [] },
         permissions: {
+          profile: "auto-edit",
           sandboxMode: "workspace-write",
           approvalPolicy: "on-request",
           approvalsReviewer: "user",
@@ -241,7 +244,11 @@ export default function App() {
     if (!window.api?.canvas) return;
     const stopLive = connectLiveTurnBridge(window.api.canvas);
     const stopTodo = connectTodoPlanBridge(window.api.canvas);
-    return () => { stopLive(); stopTodo(); };
+    const approvalApi = window.api.canvas as unknown as { onApproval?: typeof window.api.canvas.onApproval; listApprovals?: typeof window.api.canvas.listApprovals };
+    const stopApproval = typeof approvalApi.onApproval === "function" && typeof approvalApi.listApprovals === "function"
+      ? connectApprovalBridge(approvalApi as Required<typeof approvalApi>)
+      : () => undefined;
+    return () => { stopLive(); stopTodo(); stopApproval(); };
   }, []);
 
   const refreshActivityStatus = useCallback(async () => {
@@ -394,6 +401,7 @@ export default function App() {
       <CanvasLayoutProvider>
         <div className="app" data-platform={platform}>
           <div id="app-overlay-root" className="app-overlay-root chrome-no-drag" />
+          <ApprovalCenter />
           <div className="wallpaper" />
           <AppChrome
             shell={shellController.shell}
@@ -458,8 +466,10 @@ export default function App() {
                   reloadSessions(activeProjectId);
                 }}
                 onDeleteSession={async (id) => {
+                  const session = useWorkspaceStore.getState().sessionsById[id];
                   await window.api.sessions.delete(id);
-                  reloadSessions(activeProjectId);
+                  if (session?.projectId) await reloadSessions(session.projectId);
+                  setTreeVersion((version) => version + 1);
                 }}
                 onRenameNode={async (id, title) => {
                   if (window.api) await window.api.canvas.update(id, { title });

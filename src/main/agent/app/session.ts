@@ -64,6 +64,7 @@ import { createMetricsTelemetryHook } from "../hooks/events/metricsTelemetry";
 import { normalizeLlmUsage, type LlmUsage } from "../core/usage";
 import { createCompactionService, type CompactNodeResult, type CompactionServiceDeps } from "./compactionService";
 import { createApprovalGate } from "../hooks/tools/approvalGate";
+import { permissionInstructionsFor } from "../core/permissions";
 import type { McpToolProvider } from "../../mcp/provider";
 import {
   appendAssistantDeltaToSnapshot,
@@ -578,7 +579,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   function systemPromptFor(node: CanvasNode): string {
     const skillIndex = compileAvailableSkillsIndex(catalogFor(node.id).skills);
     const memoryPrompt = deps.memory?.memoryPrompt?.(node.projectId);
-    return [node.systemPrompt || getDefaultSystemPrompt(), TODO_PLAN_SYSTEM_PROMPT, FILE_TOOL_PATH_GUIDANCE, memoryPrompt, skillIndex].filter(Boolean).join("\n\n");
+    return [node.systemPrompt || getDefaultSystemPrompt(), permissionInstructionsFor(store.getSettings().permissions), TODO_PLAN_SYSTEM_PROMPT, FILE_TOOL_PATH_GUIDANCE, memoryPrompt, skillIndex].filter(Boolean).join("\n\n");
   }
 
   async function refreshMemoryPrompt(node: CanvasNode, handle: EngineHandle, text: string, supplementalContext?: string): Promise<void> {
@@ -646,9 +647,11 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return [...tools.list(), ...deps.mcp?.toolsForSync(nodeId) ?? [], todoTool, ...skillTools, ...createProjectFileTools(sourceRoots, {
       memory,
       getSandboxMode: () => store.getSettings().permissions.sandboxMode,
+      getWritableRoots: () => store.getSettings().permissions.writableRoots,
     }), ...createProjectMutationTools(sourceRoots, {
       memory,
       getSandboxMode: () => store.getSettings().permissions.sandboxMode,
+      getWritableRoots: () => store.getSettings().permissions.writableRoots,
     }), ...commandTools];
   }
 
@@ -1717,6 +1720,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     decideApproval,
     listSkills,
     liveTurns: () => runtime.listLive(),
+    listApprovals: () => approvals.listPending(),
+    onApproval: (listener: Parameters<typeof approvals.subscribe>[0]) => approvals.subscribe(listener),
     plan,
     onLiveTurn: (listener: Parameters<typeof liveTurnPublisher.subscribe>[0]) => liveTurnPublisher.subscribe(listener),
     disposeSession,

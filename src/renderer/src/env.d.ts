@@ -183,6 +183,8 @@ export interface ApprovalRequestPayload {
   turnId: string;
   toolCallId: string;
   toolName: string;
+  capability?: "read" | "write" | "delete" | "network" | "external-mutation" | "mcp" | "permission-escalation" | "command";
+  risk?: "low" | "elevated" | "high";
   target: string;
   normalizedTarget?: string;
   reason?: string;
@@ -197,7 +199,12 @@ export interface ApprovalRequestPayload {
   defaultScope: ApprovalScope;
   createdAt: number;
   expiresAt: number;
+  revision: number;
 }
+
+export type ApprovalCenterEvent =
+  | { type: "upsert"; request: ApprovalRequestPayload }
+  | { type: "remove"; requestId: string; revision: number };
 
 export interface ApprovalDecisionPayload {
   requestId: string;
@@ -205,6 +212,8 @@ export interface ApprovalDecisionPayload {
   turnId: string;
   toolCallId: string;
   toolName: string;
+  capability?: ApprovalRequestPayload["capability"];
+  normalizedTarget?: string;
   action: "allow" | "deny";
   scope?: ApprovalScope;
 }
@@ -413,6 +422,7 @@ export interface SettingsPayload {
   monitor: { notify: boolean };
   skills?: { globalSources: string[] };
   permissions?: {
+    profile: "suggest" | "auto-edit" | "full-auto" | "full-access";
     sandboxMode: "read-only" | "workspace-write" | "danger-full-access";
     approvalPolicy: "untrusted" | "on-request" | "never";
     approvalsReviewer: "user" | "auto-review";
@@ -584,6 +594,8 @@ declare global {
         onTrace: (listener: (event: import("./workbench/traceState").TraceEventDto) => void) => () => void;
         liveTurns: () => Promise<LiveTurnSnapshot[]>;
         onLiveTurn: (listener: (event: LiveTurnEvent) => void) => () => void;
+        listApprovals: () => Promise<ApprovalRequestPayload[]>;
+        onApproval: (listener: (event: ApprovalCenterEvent) => void) => () => void;
         reset: (nodeId: string) => Promise<{ ok: boolean }>;
         skills: (nodeId: string) => Promise<{
           catalog: SkillCatalogDto;

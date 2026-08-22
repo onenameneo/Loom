@@ -144,6 +144,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   });
   runtime.onTrace((event) => sendToWindow(getWin, "node:trace:update", event));
   runtime.onLiveTurn((event) => sendToWindow(getWin, "canvas:live-turn", event));
+  runtime.onApproval((event) => sendToWindow(getWin, "canvas:approval", event));
 
   // ---- IPC：一一转调 session（channel/入参/出参不变）------------------------
 
@@ -184,6 +185,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
   ipcMain.handle("node:enableSkill", (_e, arg: { nodeId: string; skillId: string }) => runtime.enableSkill(arg));
   ipcMain.handle("node:disableSkill", (_e, arg: { nodeId: string; skillId: string }) => runtime.disableSkill(arg));
   ipcMain.handle("turns:list", () => runtime.liveTurns());
+  ipcMain.handle("approval:list", () => runtime.listApprovals());
   ipcMain.handle("approval:decide", (_e, decision: ApprovalDecision) => runtime.decideApproval(decision));
 
   /** 设置变更（模型/baseUrl/key）→ 丢弃所有引擎，下次发送按新配置重建。 */

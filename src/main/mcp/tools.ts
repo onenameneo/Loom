@@ -35,6 +35,7 @@ export function mcpToolFromCatalog(tool: McpCatalogTool, caller: McpToolCaller, 
     permission: {
       request: async () => ({
         capability: "mcp",
+        risk: destructive ? "high" : "elevated",
         target,
         normalizedTarget: target,
         trusted: tool.trusted,

@@ -630,8 +630,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [images, setImages] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
   const [monitorNotify, setMonitorNotify] = useState(true);
-  const [sandboxMode, setSandboxMode] = useState<"read-only" | "workspace-write" | "danger-full-access">("workspace-write");
-  const [approvalPolicy, setApprovalPolicy] = useState<"untrusted" | "on-request" | "never">("on-request");
+  const [profile, setProfile] = useState<"suggest" | "auto-edit" | "full-auto" | "full-access">("auto-edit");
   const [approvalsReviewer, setApprovalsReviewer] = useState<"user" | "auto-review">("user");
   const [networkAccess, setNetworkAccess] = useState(false);
   const [memoryEnabled, setMemoryEnabled] = useState(false);
@@ -653,6 +652,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [mcpError, setMcpError] = useState<string | null>(null);
   const titlebarContext = useMemo(() => ({ title: t("nav.settings") }), [t]);
   const permissionDefaults = {
+    profile: "auto-edit" as const,
     sandboxMode: "workspace-write" as const,
     approvalPolicy: "on-request" as const,
     approvalsReviewer: "user" as const,
@@ -670,8 +670,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
     setTheme(s.appearance.theme);
     setMonitorNotify(s.monitor.notify);
     const permissions = { ...permissionDefaults, ...(s.permissions ?? {}) };
-    setSandboxMode(permissions.sandboxMode);
-    setApprovalPolicy(permissions.approvalPolicy);
+    setProfile(permissions.profile ?? (permissions.sandboxMode === "read-only" ? "suggest" : permissions.sandboxMode === "danger-full-access" ? "full-access" : "auto-edit"));
     setApprovalsReviewer(permissions.approvalsReviewer);
     setNetworkAccess(permissions.networkAccess);
     setMemoryEnabled(s.memory?.enabled ?? false);
@@ -720,7 +719,7 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
         autoDream,
       },
     });
-    await window.api.settings.setPermissions({ sandboxMode, approvalPolicy, approvalsReviewer, networkAccess });
+    await window.api.settings.setPermissions({ profile, approvalsReviewer, networkAccess });
     await window.api.monitor.setNotify(monitorNotify);
     setSaved(true);
     ctx.reloadSettings();
@@ -1395,19 +1394,12 @@ export function SettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
         <p className="settings-help">{t("settings.permissionsHelp")}</p>
         <div className="settings-grid">
           <label className="field">
-            <span>{t("settings.sandbox")}</span>
-            <LoomSelect value={sandboxMode} onValueChange={(value) => setSandboxMode(value as typeof sandboxMode)} placeholder={t("settings.chooseSandbox")} ariaLabel={t("settings.sandbox")}>
-              <LoomSelectItem value="read-only">{t("settings.readOnly")}</LoomSelectItem>
-              <LoomSelectItem value="workspace-write">{t("settings.workspaceWrite")}</LoomSelectItem>
-              <LoomSelectItem value="danger-full-access">{t("settings.fullAccess")}</LoomSelectItem>
-            </LoomSelect>
-          </label>
-          <label className="field">
-            <span>Approval policy</span>
-            <LoomSelect value={approvalPolicy} onValueChange={(value) => setApprovalPolicy(value as typeof approvalPolicy)} placeholder={t("settings.chooseApprovalPolicy")} ariaLabel={t("settings.approvalPolicy")}>
-              <LoomSelectItem value="on-request">{t("settings.askOutOfBounds")}</LoomSelectItem>
-              <LoomSelectItem value="untrusted">{t("settings.askUntrusted")}</LoomSelectItem>
-              <LoomSelectItem value="never">{t("settings.neverAsk")}</LoomSelectItem>
+            <span>{t("settings.permissionMode")}</span>
+            <LoomSelect value={profile} onValueChange={(value) => setProfile(value as typeof profile)} placeholder={t("settings.choosePermissionMode")} ariaLabel={t("settings.permissionMode")}>
+              <LoomSelectItem value="suggest">{t("settings.profileSuggest")}</LoomSelectItem>
+              <LoomSelectItem value="auto-edit">{t("settings.profileAutoEdit")}</LoomSelectItem>
+              <LoomSelectItem value="full-auto">{t("settings.profileFullAuto")}</LoomSelectItem>
+              <LoomSelectItem value="full-access">{t("settings.profileFullAccess")}</LoomSelectItem>
             </LoomSelect>
           </label>
           <label className="field">

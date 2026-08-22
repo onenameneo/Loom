@@ -206,7 +206,15 @@ export class SqliteStore implements Store {
       monitor: { ...current.monitor, ...(patch.monitor ?? {}) },
       activity: { ...current.activity, ...(patch.activity ?? {}) },
       skills: { ...current.skills, ...(patch.skills ?? {}) },
-      permissions: normalizePermissionSettings({ ...current.permissions, ...(patch.permissions ?? {}) }),
+      permissions: normalizePermissionSettings({
+        ...current.permissions,
+        ...(patch.permissions ?? {}),
+        profile: patch.permissions && "profile" in patch.permissions
+          ? patch.permissions.profile
+          : patch.permissions && "sandboxMode" in patch.permissions
+            ? undefined
+            : current.permissions.profile,
+      }),
       memory: normalizeMemorySettings({ ...current.memory, ...(patch.memory ?? {}) }),
     };
     const stmt = this.db.prepare(`

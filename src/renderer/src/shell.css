@@ -359,6 +359,16 @@ body {
   pointer-events: auto;
   -webkit-app-region: no-drag;
 }
+.approval-center {
+  position: fixed;
+  top: var(--s6);
+  right: var(--s6);
+  z-index: 1010;
+  display: grid;
+  gap: var(--s2);
+  width: min(360px, calc(100vw - var(--s6) * 2));
+  pointer-events: auto;
+}
 .click-tip {
   z-index: 1000;
   max-width: calc(100vw - var(--s6));

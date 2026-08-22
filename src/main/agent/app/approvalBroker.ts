@@ -1,4 +1,4 @@
-import type { ApprovalDecision, ApprovalPort, ApprovalRequest, ClockPort, EventSinkPort, PendingApprovalDecision } from "../ports";
+import type { ApprovalCenterEvent, ApprovalDecision, ApprovalPort, ApprovalRequest, ClockPort, EventSinkPort, PendingApprovalDecision } from "../ports";
 import { DEFAULT_PERMISSION_CONTEXT } from "../core/permissions";
 
 interface PendingApproval {
@@ -20,10 +20,14 @@ export function createApprovalBroker(deps: {
 }): ApprovalPort {
   const timeoutMs = deps.timeoutMs ?? 60_000;
   const pending = new Map<string, PendingApproval>();
+  const listeners = new Set<(event: ApprovalCenterEvent) => void>();
+  let revision = 0;
 
   function resolvePending(item: PendingApproval, decision: ApprovalDecision) {
     clearTimeout(item.timer);
     pending.delete(item.request.requestId);
+    const event: ApprovalCenterEvent = { type: "remove", requestId: item.request.requestId, revision: ++revision };
+    for (const listener of listeners) listener(event);
     item.resolve(decision);
   }
 
@@ -40,6 +44,7 @@ export function createApprovalBroker(deps: {
         requestId: requestId(),
         createdAt: now,
         expiresAt: now + timeoutMs,
+        revision: ++revision,
       };
       const promise = new Promise<ApprovalDecision>((resolve) => {
         const timer = setTimeout(() => {
@@ -57,8 +62,19 @@ export function createApprovalBroker(deps: {
         }, timeoutMs);
         pending.set(request.requestId, { request, timer, resolve });
       });
+      const event: ApprovalCenterEvent = { type: "upsert", request };
+      for (const listener of listeners) listener(event);
       deps.events.emit(request.nodeId, "approval", request);
       return Object.assign(promise, { requestId: request.requestId }) as PendingApprovalDecision;
+    },
+
+    listPending() {
+      return [...pending.values()].map((item) => item.request);
+    },
+
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
 
     decide(decision) {
@@ -69,7 +85,9 @@ export function createApprovalBroker(deps: {
         request.nodeId !== decision.nodeId ||
         request.turnId !== decision.turnId ||
         request.toolCallId !== decision.toolCallId ||
-        request.toolName !== decision.toolName
+        request.toolName !== decision.toolName ||
+        (decision.capability !== undefined && request.capability !== decision.capability) ||
+        (decision.normalizedTarget !== undefined && request.normalizedTarget !== decision.normalizedTarget)
       ) {
         return { ok: false, reason: "mismatch" };
       }

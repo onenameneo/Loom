@@ -36,6 +36,7 @@ export function createMcpConfigTool(options: McpConfigToolOptions): AgentTool<{ 
     permission: {
       request: () => ({
         capability: "external-mutation",
+        risk: "high",
         target: options.targetPath,
         normalizedTarget: `external:${options.targetPath}`,
       }),

@@ -13,3 +13,6 @@ dist
 docs/
 *.bak
 openspec/
+.claude
+.loom
+.agents

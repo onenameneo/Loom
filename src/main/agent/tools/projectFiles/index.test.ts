@@ -3,7 +3,10 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createProjectFileTools, createProjectMutationTools } from ".";
-import { fileVersion, withFileMutationQueue } from "./access";
+import { fileVersion, MAX_MUTATION_DIFF_INPUT_BYTES, withFileMutationQueue } from "./access";
+import { markdownForRecord } from "../../../memory/markdown";
+import { MemoryFileAccess } from "../../../memory/fileAccess";
+import { MemoryStore } from "../../../memory/storage";
 
 const dirs: string[] = [];
 
@@ -42,6 +45,13 @@ function fileStatVersion(path: string): string {
   return fileVersion(statSync(path));
 }
 
+function modelVersion(result: { content: Array<{ type: string; text?: string }> }): string {
+  const text = result.content.find((item) => item.type === "text")?.text ?? "";
+  const match = text.match(/\[File version: ([^\]]+)\]/);
+  if (!match) throw new Error("Model-visible file version is missing.");
+  return match[1]!;
+}
+
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   const promise = new Promise<T>((res) => {
@@ -71,6 +81,8 @@ describe("project coding tools", () => {
     const result = await read.execute({ toolCallId: "t1", args: { path: "src/index.ts", offset: 2, limit: 1 } });
 
     expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("2 | needle here") });
+    const version = (result.details as { version: string }).version;
+    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining(`[File version: ${version}]`) });
     expect(result.details).toMatchObject({ path: "src/index.ts", offset: 2, returnedLines: 1, truncation: { truncated: true, reason: "lines" } });
   });
 
@@ -262,6 +274,70 @@ describe("project coding tools", () => {
     const overwritten = await write.execute({ toolCallId: "t3", args: { path: "src/new.md", content: "changed", overwrite: true, expectedVersion: version } });
     expect(readFileSync(join(root, "src", "new.md"), "utf-8")).toBe("changed");
     expect(overwritten.details).toMatchObject({ operation: "overwrite" });
+    expect(overwritten.content[0]).toMatchObject({ type: "text", text: expect.stringContaining(`[File version: ${(overwritten.details as { version: string }).version}]`) });
+  });
+
+  it("keeps the new file version visible for chained model edits", async () => {
+    const root = projectRoot();
+    const read = tool(root, "read");
+    const edit = mutationTool(root, "edit");
+    const firstRead = await read.execute({ toolCallId: "t-chain-read", args: { path: "src/index.ts" } });
+    const first = await edit.execute({
+      toolCallId: "t-chain-edit-1",
+      args: { path: "src/index.ts", oldText: "zero", newText: "one", expectedVersion: modelVersion(firstRead) },
+    });
+    const second = await edit.execute({
+      toolCallId: "t-chain-edit-2",
+      args: { path: "src/index.ts", oldText: "one", newText: "two", expectedVersion: modelVersion(first) },
+    });
+
+    expect(readFileSync(join(root, "src", "index.ts"), "utf-8")).toContain("two");
+    expect(second.content[0]).toMatchObject({ type: "text", text: expect.stringContaining(`[File version: ${(second.details as { version: string }).version}]`) });
+  });
+
+  it("keeps the new memory-file version visible after an edit", async () => {
+    const memoryRoot = mkdtempSync(join(tmpdir(), "loom-memory-tool-"));
+    dirs.push(memoryRoot);
+    const memory = new MemoryFileAccess(new MemoryStore({ rootDir: memoryRoot }), "project-a");
+    const path = "project/memory_tool.md";
+    await memory.write({
+      root: "memory:project",
+      path,
+      content: markdownForRecord({
+        id: "memory_tool",
+        type: "project",
+        scope: { kind: "project", projectId: "project-a" },
+        status: "active",
+        confidence: 0.9,
+        description: "Memory tool contract",
+        content: "Use the original contract.",
+        dedupeKey: "memory-tool-version-test",
+        source: { trigger: "explicit", sessionId: "s1", nodeId: "n1" },
+        createdAt: 10,
+        updatedAt: 10,
+      }),
+    });
+    const read = createProjectFileTools([], { memory }).find((candidate) => candidate.name === "read")!;
+    const edit = createProjectMutationTools([], { memory }).find((candidate) => candidate.name === "edit")!;
+    const readResult = await read.execute({ toolCallId: "t-memory-read", args: { root: "memory:project", path } });
+    const edited = await edit.execute({
+      toolCallId: "t-memory-edit",
+      args: { root: "memory:project", path, oldText: "original contract", newText: "updated contract", expectedVersion: modelVersion(readResult) },
+    });
+
+    expect(edited.content[0]).toMatchObject({ type: "text", text: expect.stringContaining(`[File version: ${(edited.details as { version: string }).version}]`) });
+  });
+
+  it("rejects edits that would load more than the bounded mutation input", async () => {
+    const root = projectRoot();
+    const path = join(root, "src", "too-large.ts");
+    writeFileSync(path, `${"x".repeat(MAX_MUTATION_DIFF_INPUT_BYTES)}\n`, "utf-8");
+    const edit = mutationTool(root, "edit");
+
+    await expect(
+      edit.execute({ toolCallId: "t-large-edit", args: { path: "src/too-large.ts", oldText: "x", newText: "y", expectedVersion: fileStatVersion(path) } }),
+    ).rejects.toThrow(/too large|10 MB|input/i);
+    expect(readFileSync(path, "utf-8")).toContain("x");
   });
 
   it("creates, overwrites, and edits an external file in full-access mode", async () => {
@@ -274,7 +350,7 @@ describe("project coding tools", () => {
     const write = createProjectMutationTools([root], options).find((candidate) => candidate.name === "write")!;
     const edit = createProjectMutationTools([root], options).find((candidate) => candidate.name === "edit")!;
 
-    expect(await write.approval?.normalizeTarget({ path: target, content: "hello Neo\n" })).toBe(`external:${join(realpathSync(outside), "notes.md")}`);
+    expect((await write.permission!.request({ path: target, content: "hello Neo\n" })).normalizedTarget).toBe(`external:${join(realpathSync(outside), "notes.md")}`);
 
     const created = await write.execute({ toolCallId: "t-external-create", args: { path: target, content: "hello Neo\n" } });
     expect(created.details).toMatchObject({ path: realpathSync(target), root: "external", operation: "create" });
@@ -314,6 +390,20 @@ describe("project coding tools", () => {
     const concurrentResults = await Promise.allSettled([first, second]);
     expect(concurrentResults.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(concurrentResults.filter((result) => result.status === "rejected")).toHaveLength(1);
+  });
+
+  it("uses configured writable roots for external file capability targets", async () => {
+    const root = projectRoot();
+    const outside = mkdtempSync(join(tmpdir(), "loom-project-writable-root-"));
+    dirs.push(outside);
+    const target = join(outside, "notes.md");
+    const options = { getSandboxMode: () => "workspace-write" as const, getWritableRoots: () => [outside] };
+    const write = createProjectMutationTools([root], options).find((candidate) => candidate.name === "write")!;
+
+    const request = await write.permission!.request({ path: target, content: "allowed\n" });
+    expect(request.targetInWorkspace).toBe(true);
+    await write.execute({ toolCallId: "t-writable-root", args: { path: target, content: "allowed\n" } });
+    expect(readFileSync(target, "utf-8")).toBe("allowed\n");
   });
 
   it("rejects unsafe or unguarded external mutations", async () => {

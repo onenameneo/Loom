@@ -13,8 +13,8 @@ import { useTitlebarActions } from "../titlebar/Titlebar";
 import { ToolCallTimeline } from "./ToolCallTimeline";
 import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
 import { useComposerHeightVar } from "./useComposerHeightVar";
-import { ApprovalPrompt, type ApprovalState } from "./ApprovalPrompt";
-import { selectNodeLiveTurn, selectNodeTodoPlan, useWorkspaceStore } from "../workspace/store";
+import { ApprovalPrompt } from "./ApprovalPrompt";
+import { selectNodeApproval, selectNodeLiveTurn, selectNodeTodoPlan, useWorkspaceStore } from "../workspace/store";
 import { TodoProgressPanel } from "../composer/TodoProgressPanel";
 import { ComposerTelemetryLine } from "../composer/ComposerTelemetryLine";
 import { useNodeMetrics } from "../composer/useNodeMetrics";
@@ -94,9 +94,10 @@ export default function ChatView({
   const [stopPending, setStopPending] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [turn, setTurn] = useState<TurnCanvasEventPayload | null>(null);
-  const [approval, setApproval] = useState<ApprovalState | null>(null);
   const [input, setInput] = useState(() => localStorage.getItem(`loom:draft:${nodeId}`) ?? "");
   const todoPlan = useWorkspaceStore((state) => selectNodeTodoPlan(state, nodeId));
+  const pendingApproval = useWorkspaceStore((state) => selectNodeApproval(state, nodeId));
+  const approval = pendingApproval ? { ...pendingApproval, scope: pendingApproval.defaultScope } : null;
   const hydrateTodoPlan = useWorkspaceStore((state) => state.hydrateTodoPlan);
   const [personaOpen, setPersonaOpen] = useState(false);
   const [persona, setPersona] = useState(systemPrompt ?? "");
@@ -231,7 +232,6 @@ export default function ChatView({
     setStopPending(false);
     setThinking(false);
     setTurn(null);
-    setApproval(null);
     if (selectionNotesNodeRef.current !== nodeId) {
       selectionNotesNodeRef.current = nodeId;
       skipSelectionNotesSaveRef.current = true;
@@ -278,7 +278,10 @@ export default function ChatView({
         case "approval":
           {
             const payload = e.payload as ApprovalRequestPayload;
-            if (payload?.requestId && payload.nodeId === nodeId) setApproval({ ...payload, scope: payload.defaultScope });
+            if (payload?.requestId && payload.nodeId === nodeId) {
+              const revision = payload.revision ?? useWorkspaceStore.getState().latestApprovalRevision + 1;
+              useWorkspaceStore.getState().applyApproval({ type: "upsert", request: { ...payload, revision } });
+            }
           }
           break;
         case "turn":
@@ -288,14 +291,12 @@ export default function ChatView({
             setTurn(payload);
             if (payload.state === "running") {
               setBusy(true);
-              setApproval(null);
             } else if (payload.state === "awaiting_approval") {
               setBusy(true);
               setThinking(false);
             } else if (payload.state === "completed" || payload.state === "aborted" || payload.state === "failed") {
               setBusy(false);
               setThinking(false);
-              setApproval(null);
               void refreshMetrics();
             }
           }
@@ -320,6 +321,12 @@ export default function ChatView({
           setThinking(false);
           setBusy(false);
           setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: String(e.payload ?? t("chat.genericError")) }]);
+          break;
+        case "permission":
+          if (e.payload && typeof e.payload === "object" && (e.payload as { state?: string }).state === "denied") {
+            const reason = (e.payload as { reason?: string }).reason ?? t("chat.genericError");
+            setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: `Permission denied: ${reason}` }]);
+          }
           break;
       }
     });
@@ -405,21 +412,6 @@ export default function ChatView({
     } finally {
       setStopPending(false);
     }
-  }
-
-  async function decideApproval(action: "allow" | "deny", scope?: ApprovalState["scope"]) {
-    if (!window.api || !approval) return;
-    const current = approval;
-    setApproval(null);
-    await window.api.canvas.decideApproval({
-      requestId: current.requestId,
-      nodeId: current.nodeId,
-      turnId: current.turnId,
-      toolCallId: current.toolCallId,
-      toolName: current.toolName,
-      action,
-      scope: action === "allow" ? scope ?? current.scope : undefined,
-    });
   }
 
   async function regenerate() {
@@ -644,8 +636,24 @@ export default function ChatView({
               {awaitingApproval ? (
                 <ApprovalPrompt
                   approval={approval}
-                  onScopeChange={(scope) => setApproval((current) => current ? { ...current, scope } : current)}
-                  onDecision={decideApproval}
+                  onScopeChange={() => undefined}
+                  onDecision={(action, scope) => {
+                    if (!window.api) return;
+                    useWorkspaceStore.getState().applyApproval({ type: "remove", requestId: approval.requestId, revision: useWorkspaceStore.getState().latestApprovalRevision + 1 });
+                    void window.api.canvas.decideApproval({
+                      requestId: approval.requestId,
+                      nodeId: approval.nodeId,
+                      turnId: approval.turnId,
+                      toolCallId: approval.toolCallId,
+                      toolName: approval.toolName,
+                      capability: approval.capability,
+                      normalizedTarget: approval.normalizedTarget,
+                      action,
+                      scope: action === "allow" ? scope ?? approval.scope : undefined,
+                    }).then((result) => {
+                      if (!result.ok) useWorkspaceStore.getState().applyApproval({ type: "upsert", request: { ...approval, revision: useWorkspaceStore.getState().latestApprovalRevision + 1 } });
+                    });
+                  }}
                 />
               ) : null}
             </>

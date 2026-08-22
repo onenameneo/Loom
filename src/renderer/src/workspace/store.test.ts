@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { LiveTurnSnapshot, ProjectMeta, SessionMeta } from "../env";
+import type { ApprovalRequestPayload, LiveTurnSnapshot, ProjectMeta, SessionMeta } from "../env";
 import {
   resetWorkspaceStore,
   selectNodesForSession,
@@ -18,6 +18,10 @@ const turn = (overrides: Partial<LiveTurnSnapshot> = {}): LiveTurnSnapshot => ({
   revision: 1,
   assistantText: "",
   ...overrides,
+});
+const approval = (requestId: string, revision: number): ApprovalRequestPayload => ({
+  requestId, nodeId: "node-a", turnId: "turn-a", toolCallId: requestId, toolName: "write", target: "src/a.ts",
+  preview: { title: "Write src/a.ts" }, defaultScope: "once", createdAt: 1, expiresAt: 100, revision,
 });
 
 describe("workspace store", () => {
@@ -83,5 +87,23 @@ describe("workspace store", () => {
 
     expect(selectRunningNodeCount(useWorkspaceStore.getState(), "session-a")).toBe(2);
     expect("liveTurnCounts" in useWorkspaceStore.getState()).toBe(false);
+  });
+
+  it("replays pending approvals and rejects stale updates", () => {
+    const store = useWorkspaceStore.getState();
+    store.hydrateApprovals([approval("r1", 1)]);
+    store.applyApproval({ type: "remove", requestId: "r1", revision: 2 });
+    store.applyApproval({ type: "upsert", request: approval("r1", 1) });
+
+    expect(useWorkspaceStore.getState().approvalsById.r1).toBeUndefined();
+    expect(useWorkspaceStore.getState().latestApprovalRevision).toBe(2);
+  });
+
+  it("keeps an approval visible when the active node changes", () => {
+    const store = useWorkspaceStore.getState();
+    store.hydrateApprovals([approval("r1", 1)]);
+    store.selectNode("node-b");
+
+    expect(useWorkspaceStore.getState().approvalsById.r1?.nodeId).toBe("node-a");
   });
 });

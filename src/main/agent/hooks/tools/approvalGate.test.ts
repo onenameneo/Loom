@@ -18,10 +18,8 @@ const approvedTool: ReadonlyAgentTool<{ path: string }> = {
   description: "Writes a file",
   parameters: Type.Object({ path: Type.String() }),
   readOnly: true,
-  approval: {
-    required: true,
-    defaultScope: "once",
-    normalizeTarget: (args) => args.path,
+  permission: {
+    request: (args) => ({ capability: "external-mutation", target: args.path, normalizedTarget: args.path, targetInWorkspace: false }),
     preview: (args) => ({ title: `Write ${args.path}`, args }),
   },
   execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
@@ -33,10 +31,8 @@ const mutationTool: AgentTool<{ path: string; content: string }> = {
   description: "Writes a Project file",
   parameters: Type.Object({ path: Type.String(), content: Type.String() }),
   readOnly: false,
-  approval: {
-    required: true,
-    defaultScope: "once",
-    normalizeTarget: async (args) => `root:${args.path}`,
+  permission: {
+    request: async (args) => ({ capability: "write", target: args.path, normalizedTarget: `root:${args.path}`, targetInWorkspace: false }),
     preview: (args) => ({ title: `Write ${args.path}`, args: { path: args.path, contentLength: args.content.length } }),
   },
   execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
@@ -213,7 +209,7 @@ describe("createApprovalGate", () => {
         toolName: "write",
       toolCallId: "tc",
       args: { path: "a.md", content: "x" },
-    })).resolves.toEqual({ block: true, reason: "approval policy never" });
+    })).resolves.toEqual({ block: true, reason: "outside_workspace" });
     expect(eventLog.items).toHaveLength(0);
   });
 });

@@ -22,20 +22,6 @@ export interface ToolExecutionContext<TArgs = unknown> {
   update?: (result: ToolResult) => void;
 }
 
-export type ToolApprovalScope = "once" | "node-session" | "persistent";
-
-export interface ToolApprovalRequirement<TArgs = unknown> {
-  required: true;
-  defaultScope?: ToolApprovalScope;
-  reason?: PermissionReason;
-  normalizeTarget(args: TArgs): string | Promise<string>;
-  preview(args: TArgs): {
-    title: string;
-    description?: string;
-    args?: unknown;
-  };
-}
-
 export interface ToolPermissionDeclaration<TArgs = unknown> {
   request(args: TArgs): PermissionRequest | Promise<PermissionRequest>;
   preview(args: TArgs): {
@@ -51,7 +37,6 @@ export interface AgentTool<TArgs = unknown, TDetails = unknown> {
   description: string;
   parameters: TSchema;
   readOnly: boolean;
-  approval?: ToolApprovalRequirement<TArgs>;
   permission?: ToolPermissionDeclaration<TArgs>;
   executionMode?: ToolExecutionMode;
   execute(ctx: ToolExecutionContext<TArgs>): Promise<ToolResult<TDetails>>;

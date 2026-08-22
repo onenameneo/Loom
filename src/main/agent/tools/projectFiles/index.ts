@@ -1,9 +1,9 @@
 import { promises as fs } from "fs";
-import { isAbsolute, join } from "path";
+import { isAbsolute, join, relative, resolve } from "path";
 import { Type } from "typebox";
 import type { AgentTool, ReadonlyAgentTool } from "../../core/tool";
 import { textResult } from "../../core/tool";
-import type { SandboxMode } from "../../core/permissions";
+import type { PermissionRequest, SandboxMode } from "../../core/permissions";
 import type { MemoryFileAccess, MemoryRootId } from "../../../memory/fileAccess";
 import {
   DEFAULT_MAX_ENTRIES,
@@ -65,6 +65,10 @@ function textFromBuffer(buffer: Buffer): string {
   return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
 }
 
+function modelVisibleVersion(version: string): string {
+  return `[File version: ${version}]`;
+}
+
 function truncation(reason?: string, nextOffset?: number) {
   return {
     truncated: Boolean(reason),
@@ -76,6 +80,7 @@ function truncation(reason?: string, nextOffset?: number) {
 export interface ProjectFileToolOptions {
   memory?: MemoryFileAccess;
   getSandboxMode?: () => SandboxMode;
+  getWritableRoots?: () => string[];
 }
 
 function isMemoryRoot(root: string | undefined): root is MemoryRootId {
@@ -84,6 +89,15 @@ function isMemoryRoot(root: string | undefined): root is MemoryRootId {
 
 function isFullAccess(options: ProjectFileToolOptions): boolean {
   return options.getSandboxMode?.() === "danger-full-access";
+}
+
+function isWithinRoot(root: string, target: string): boolean {
+  const relation = relative(resolve(root), resolve(target));
+  return relation === "" || (!relation.startsWith("..") && !isAbsolute(relation));
+}
+
+function canAccessExternal(target: string, options: ProjectFileToolOptions): boolean {
+  return isFullAccess(options) || (options.getWritableRoots?.() ?? []).some((root) => isWithinRoot(root, target));
 }
 
 function externalPathPermissionError(operation: "read" | "write" | "edit"): Error {
@@ -101,7 +115,7 @@ async function resolveReadTarget(
   if (!rootArg && isAbsolute(pathArg)) {
     const projectRoot = await findProjectRootForAbsolute(sourceRoots, pathArg);
     if (projectRoot) return { kind: "project", target: await resolveExistingFile(projectRoot, pathArg) };
-    if (!isFullAccess(options)) throw externalPathPermissionError("read");
+    if (!canAccessExternal(pathArg, options)) throw externalPathPermissionError("read");
     return { kind: "external", target: await resolveExternalExistingFile(pathArg) };
   }
   const root = await selectProjectRoot(sourceRoots, rootArg);
@@ -118,7 +132,7 @@ async function resolveMutationTargetForTool(
   if (!rootArg && isAbsolute(pathArg)) {
     const projectRoot = await findProjectRootForAbsolute(sourceRoots, pathArg);
     if (projectRoot) return resolveMutationTarget(projectRoot, pathArg);
-    if (!isFullAccess(options)) throw externalPathPermissionError(operation);
+    if (!canAccessExternal(pathArg, options)) throw externalPathPermissionError(operation);
     return resolveExternalMutationTarget(pathArg);
   }
   const root = await selectProjectRoot(sourceRoots, rootArg);
@@ -135,7 +149,7 @@ async function resolveExistingMutationTargetForTool(
   if (!rootArg && isAbsolute(pathArg)) {
     const projectRoot = await findProjectRootForAbsolute(sourceRoots, pathArg);
     if (projectRoot) return resolveExistingFile(projectRoot, pathArg);
-    if (!isFullAccess(options)) throw externalPathPermissionError(operation);
+    if (!canAccessExternal(pathArg, options)) throw externalPathPermissionError(operation);
     return resolveExternalExistingFile(pathArg);
   }
   const root = await selectProjectRoot(sourceRoots, rootArg);
@@ -153,7 +167,7 @@ function targetDetails(target: FileTarget): Record<string, unknown> {
 }
 
 export function createProjectFileTools(sourceRoots: string[], options: ProjectFileToolOptions = {}): ReadonlyAgentTool[] {
-  if (sourceRoots.length === 0 && !options.memory && !isFullAccess(options)) return [];
+  if (sourceRoots.length === 0 && !options.memory && !isFullAccess(options) && (options.getWritableRoots?.().length ?? 0) === 0) return [];
 
   const listFiles: ReadonlyAgentTool<{ root?: string; path?: string; maxEntries?: number }, unknown> = {
     name: "project_list_files",
@@ -199,7 +213,7 @@ export function createProjectFileTools(sourceRoots: string[], options: ProjectFi
   const readFile: ReadonlyAgentTool<{ root?: string; path: string; offset?: number; limit?: number }, unknown> = {
     name: "read",
     label: "Read File",
-    description: `Read a numbered UTF-8 text range from a Project, external absolute path, or logical memory root. Use absolute paths for Project and external files; use an explicit memory root for memory-relative paths. In danger-full-access, an absolute path outside the current Project may be read as temporary external context. Project output is capped at ${DEFAULT_READ_LIMIT} lines, ${DEFAULT_READ_MAX_LINE_LENGTH} characters per line, or ${DEFAULT_READ_MAX_BYTES} bytes; use offset to continue large files.`,
+    description: `Read a numbered UTF-8 text range from a Project, external absolute path, or logical memory root. The result includes a File version token; pass that exact token as expectedVersion when calling edit or overwriting an existing file. Use absolute paths for Project and external files; use an explicit memory root for memory-relative paths. In danger-full-access, an absolute path outside the current Project may be read as temporary external context. Project output is capped at ${DEFAULT_READ_LIMIT} lines, ${DEFAULT_READ_MAX_LINE_LENGTH} characters per line, or ${DEFAULT_READ_MAX_BYTES} bytes; use offset to continue large files.`,
     parameters: Type.Object({
       root: Type.Optional(Type.String({ description: "project:0 or one of memory:user, memory:project, memory:candidates, memory:archive. Defaults to the current Project; omit for an absolute external path in danger-full-access." })),
       path: Type.String({ description: "Absolute path for Project or external files. A relative path is only valid with an explicit Project or memory root." }),
@@ -213,7 +227,7 @@ export function createProjectFileTools(sourceRoots: string[], options: ProjectFi
         if (!options.memory) throw new Error("Memory tools are unavailable because long-term memory is disabled.");
         const result = await options.memory.read({ root: args.root, path: args.path, offset: args.offset, limit: args.limit });
         return textResult(
-          [result.text, result.truncation.truncated ? `[Use offset=${result.truncation.nextOffset} to continue.]` : `[End of file - total ${result.totalLines} lines]`].join("\n\n"),
+          [result.text, result.truncation.truncated ? `[Use offset=${result.truncation.nextOffset} to continue.]` : `[End of file - total ${result.totalLines} lines]`, modelVisibleVersion(result.version)].join("\n\n"),
           result,
         );
       }
@@ -236,11 +250,12 @@ export function createProjectFileTools(sourceRoots: string[], options: ProjectFi
         const footer = hasMore
           ? `[Showing external file lines ${offset}-${lastLine ?? offset - 1} of ${window.totalLines}${window.truncatedByBytes ? ` (${DEFAULT_READ_MAX_BYTES} byte limit)` : ""}. Use offset=${nextOffset} to continue.]`
           : `[End of external file - total ${window.totalLines} lines]`;
+        const version = fileVersion(stat);
         const reason = window.truncatedByBytes ? "bytes" : hasMore ? "lines" : undefined;
-        return textResult([window.lines.join("\n"), footer].filter(Boolean).join("\n\n"), {
+        return textResult([window.lines.join("\n"), footer, modelVisibleVersion(version)].filter(Boolean).join("\n\n"), {
           ...targetDetails(resolved.target),
           offset,
-          version: fileVersion(stat),
+          version,
           returnedLines: window.lines.length,
           totalLines: window.totalLines,
           truncation: truncation(reason, nextOffset),
@@ -265,11 +280,12 @@ export function createProjectFileTools(sourceRoots: string[], options: ProjectFi
       const footer = hasMore
         ? `[Showing lines ${offset}-${lastLine ?? offset - 1} of ${window.totalLines}${window.truncatedByBytes ? ` (${DEFAULT_READ_MAX_BYTES} byte limit)` : ""}. Use offset=${nextOffset} to continue.]`
         : `[End of file - total ${window.totalLines} lines]`;
+      const version = fileVersion(stat);
       const reason = window.truncatedByBytes ? "bytes" : hasMore ? "lines" : undefined;
-      return textResult([window.lines.join("\n"), footer].filter(Boolean).join("\n\n"), {
+      return textResult([window.lines.join("\n"), footer, modelVisibleVersion(version)].filter(Boolean).join("\n\n"), {
         path: relativeProjectPath(root, file),
         offset,
-        version: fileVersion(stat),
+        version,
         returnedLines: window.lines.length,
         totalLines: window.totalLines,
         truncation: truncation(reason, nextOffset),
@@ -433,7 +449,24 @@ function mutationPreviewSummary(args: WriteArgs | EditArgs, kind: "write" | "edi
   };
 }
 
-async function approvalTargetFor(
+async function mutationPermissionRequest(
+  sourceRoots: string[],
+  root: string | undefined,
+  path: string,
+  options: ProjectFileToolOptions,
+): Promise<PermissionRequest> {
+  const normalizedTarget = await canonicalMutationTargetFor(sourceRoots, root, path, options);
+  return {
+    capability: "write",
+    risk: "elevated",
+    target: path,
+    normalizedTarget,
+    targetInWorkspace: !normalizedTarget.startsWith("external:") || canAccessExternal(path, options),
+    workspaceRoots: sourceRoots,
+  };
+}
+
+async function canonicalMutationTargetFor(
   sourceRoots: string[],
   rootArg: string | undefined,
   pathArg: string,
@@ -505,7 +538,7 @@ function replaceExact(content: string, oldText: string, newText: string, replace
 }
 
 export function createProjectMutationTools(sourceRoots: string[], options: ProjectFileToolOptions = {}): AgentTool[] {
-  if (sourceRoots.length === 0 && !options.memory && !isFullAccess(options)) return [];
+  if (sourceRoots.length === 0 && !options.memory && !isFullAccess(options) && (options.getWritableRoots?.().length ?? 0) === 0) return [];
 
   const writeFile: AgentTool<WriteArgs, unknown> = {
     name: "write",
@@ -519,10 +552,8 @@ export function createProjectMutationTools(sourceRoots: string[], options: Proje
       expectedVersion: Type.Optional(Type.String({ description: "Version returned by read; rejects stale writes." })),
     }),
     readOnly: false,
-    approval: {
-      required: true,
-      defaultScope: "once",
-      normalizeTarget: (args) => approvalTargetFor(sourceRoots, args.root, args.path, options),
+    permission: {
+      request: (args) => mutationPermissionRequest(sourceRoots, args.root, args.path, options),
       preview: (args) => ({
         title: args.overwrite ? `Overwrite ${args.path}` : `Create ${args.path}`,
         args: mutationPreviewSummary(args, "write"),
@@ -533,7 +564,7 @@ export function createProjectMutationTools(sourceRoots: string[], options: Proje
       if (isMemoryRoot(args.root)) {
         if (!options.memory) throw new Error("Memory tools are unavailable because long-term memory is disabled.");
         const result = await options.memory.write({ root: args.root, path: args.path, content: args.content, overwrite: args.overwrite, expectedVersion: args.expectedVersion });
-        return textResult(`Memory file ${result.operation === "create" ? "created" : "overwritten"}: ${result.path}`, result);
+        return textResult(`Memory file ${result.operation === "create" ? "created" : "overwritten"}: ${result.path}\n\n${modelVisibleVersion(result.version)}`, result);
       }
       const target = await resolveMutationTargetForTool(sourceRoots, args.root, args.path, "write", options);
       return withFileMutationQueue(target.canonicalKey, async () => {
@@ -552,7 +583,7 @@ export function createProjectMutationTools(sourceRoots: string[], options: Proje
         const verb = operation === "create" ? "created" : "overwritten";
         const version = fileVersion(await fs.stat(current.absolutePath));
         const label = current.kind === "external" ? "External file" : "Project file";
-        return textResult(`${label} ${verb}: ${targetPath(current)}`, {
+        return textResult(`${label} ${verb}: ${targetPath(current)}\n\n${modelVisibleVersion(version)}`, {
           ...targetDetails(current),
           operation,
           version,
@@ -577,10 +608,8 @@ export function createProjectMutationTools(sourceRoots: string[], options: Proje
       expectedVersion: Type.Optional(Type.String({ description: "Version returned by read; rejects stale edits." })),
     }),
     readOnly: false,
-    approval: {
-      required: true,
-      defaultScope: "once",
-      normalizeTarget: (args) => approvalTargetFor(sourceRoots, args.root, args.path, options),
+    permission: {
+      request: (args) => mutationPermissionRequest(sourceRoots, args.root, args.path, options),
       preview: (args) => ({
         title: `Edit ${args.path}`,
         args: mutationPreviewSummary(args, "edit"),
@@ -591,13 +620,17 @@ export function createProjectMutationTools(sourceRoots: string[], options: Proje
       if (isMemoryRoot(args.root)) {
         if (!options.memory) throw new Error("Memory tools are unavailable because long-term memory is disabled.");
         const result = await options.memory.edit({ root: args.root, path: args.path, oldText: args.oldText, newText: args.newText, replaceAll: args.replaceAll, expectedVersion: args.expectedVersion });
-        return textResult(`Memory file edited: ${result.path} (${result.replacements} replacement${result.replacements === 1 ? "" : "s"})`, result);
+        return textResult(`Memory file edited: ${result.path} (${result.replacements} replacement${result.replacements === 1 ? "" : "s"})\n\n${modelVisibleVersion(result.version)}`, result);
       }
       const target = await resolveExistingMutationTargetForTool(sourceRoots, args.root, args.path, "edit", options);
       return withFileMutationQueue(target.canonicalKey, async () => {
         abortIfNeeded(signal);
         const current = await resolveExistingMutationTargetForTool(sourceRoots, args.root, args.path, "edit", options);
         assertExpectedVersion(current, args.expectedVersion, "edit", true);
+        const stat = await fs.stat(current.absolutePath);
+        if (stat.size >= MAX_MUTATION_DIFF_INPUT_BYTES) {
+          throw new Error(`Edit target exceeds the ${MAX_MUTATION_DIFF_INPUT_BYTES} byte mutation input limit.`);
+        }
         const before = textFromBuffer(await fs.readFile(current.absolutePath));
         const edited = replaceExact(before, args.oldText, args.newText, args.replaceAll);
         abortIfNeeded(signal);
@@ -608,7 +641,7 @@ export function createProjectMutationTools(sourceRoots: string[], options: Proje
           : boundedMutationDiffDetails(before, edited.content, targetPath(current));
         const version = fileVersion(await fs.stat(current.absolutePath));
         const label = current.kind === "external" ? "External file" : "Project file";
-        return textResult(`${label} edited: ${targetPath(current)} (${edited.replacements} replacement${edited.replacements === 1 ? "" : "s"})`, {
+        return textResult(`${label} edited: ${targetPath(current)} (${edited.replacements} replacement${edited.replacements === 1 ? "" : "s"})\n\n${modelVisibleVersion(version)}`, {
           ...targetDetails(current),
           operation: "edit",
           version,

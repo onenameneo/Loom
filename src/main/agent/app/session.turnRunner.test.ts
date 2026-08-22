@@ -1625,7 +1625,7 @@ describe("createAgentSession turn runner integration", () => {
     expect(handle.continue).toHaveBeenCalledTimes(1);
   });
 
-  it("pauses project mutation tools for approval, then persists the tool result transcript", async () => {
+  it("allows ordinary in-project mutation tools in the automatic edit profile", async () => {
     const root = mkdtempSync(join(tmpdir(), "loom-session-mutation-"));
     const store = new MemoryStore();
     store.projects[0].sourceRoots = [root];
@@ -1676,21 +1676,8 @@ describe("createAgentSession turn runner integration", () => {
 
     try {
       const run = session.send({ nodeId: "n1", text: "create file" });
-      await vi.waitFor(() => expect(eventLog.items.some((item) => item.type === "approval")).toBe(true));
-      expect(existsSync(join(root, "loomtest.md"))).toBe(false);
-      const approval = eventLog.items.find((item) => item.type === "approval")!.payload as any;
-      expect(JSON.stringify(approval.preview)).not.toContain("hello Neo!");
-      expect(session.decideApproval({
-        requestId: approval.requestId,
-        nodeId: "n1",
-        turnId: approval.turnId,
-        toolCallId: "tc-write",
-        toolName: "write",
-        action: "allow",
-        scope: "once",
-      })).toEqual({ ok: true });
-
       await expect(run).resolves.toEqual({ ok: true });
+      expect(eventLog.items.some((item) => item.type === "approval")).toBe(false);
       expect(readFileSync(join(root, "loomtest.md"), "utf-8")).toBe("hello Neo!");
       expect(store.listMessages("n1").map((m) => (m.content as any).role)).toEqual(["user", "toolResult"]);
     } finally {

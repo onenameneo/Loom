@@ -25,9 +25,34 @@ type ApprovalDecision = {
   turnId: string;
   toolCallId: string;
   toolName: string;
+  capability?: "read" | "write" | "delete" | "network" | "external-mutation" | "mcp" | "permission-escalation" | "command";
+  normalizedTarget?: string;
   action: "allow" | "deny";
   scope?: ApprovalScope;
 };
+type ApprovalRequest = {
+  requestId: string;
+  nodeId: string;
+  turnId: string;
+  toolCallId: string;
+  toolName: string;
+  capability?: "read" | "write" | "delete" | "network" | "external-mutation" | "mcp" | "permission-escalation" | "command";
+  risk?: "low" | "elevated" | "high";
+  target: string;
+  normalizedTarget?: string;
+  reason?: string;
+  sandboxMode?: "read-only" | "workspace-write" | "danger-full-access";
+  approvalPolicy?: "untrusted" | "on-request" | "never";
+  reviewer?: "user" | "auto-review";
+  preview: { title: string; description?: string; args?: unknown };
+  defaultScope: ApprovalScope;
+  createdAt: number;
+  expiresAt: number;
+  revision: number;
+};
+type ApprovalCenterEvent =
+  | { type: "upsert"; request: ApprovalRequest }
+  | { type: "remove"; requestId: string; revision: number };
 type AgentProc = {
   pid: number;
   tool: "codex" | "claude";
@@ -165,6 +190,12 @@ const api = {
       return () => ipcRenderer.removeListener("canvas:event", l);
     },
     liveTurns: (): Promise<LiveTurnSnapshot[]> => ipcRenderer.invoke("turns:list"),
+    listApprovals: (): Promise<ApprovalRequest[]> => ipcRenderer.invoke("approval:list"),
+    onApproval: (cb: (event: ApprovalCenterEvent) => void) => {
+      const listener = (_event: unknown, data: ApprovalCenterEvent) => cb(data);
+      ipcRenderer.on("canvas:approval", listener);
+      return () => ipcRenderer.removeListener("canvas:approval", listener);
+    },
     onLiveTurn: (cb: (event: LiveTurnEvent) => void) => {
       const l = (_: unknown, event: LiveTurnEvent) => cb(event);
       ipcRenderer.on("canvas:live-turn", l);

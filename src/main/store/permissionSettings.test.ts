@@ -60,12 +60,26 @@ describe("permission settings persistence", () => {
     });
 
     expect(new SqliteStore(file).getSettings().permissions).toEqual({
+      profile: "auto-edit",
       sandboxMode: "workspace-write",
       approvalPolicy: "untrusted",
       approvalsReviewer: "user",
       networkAccess: true,
       writableRoots: ["/repo"],
       commandOutputLimit: 12_345,
+    });
+  });
+
+  it("persists a normalized profile and its compatibility projection", () => {
+    const dir = mkdtempSync(join(tmpdir(), "loom-permissions-profile-"));
+    dirs.push(dir);
+    const store = new JsonStore(join(dir, "canvas-data.json"));
+    store.patchSettings({ permissions: { profile: "full-access" } });
+
+    expect(new JsonStore(join(dir, "canvas-data.json")).getSettings().permissions).toMatchObject({
+      profile: "full-access",
+      sandboxMode: "danger-full-access",
+      networkAccess: true,
     });
   });
 });

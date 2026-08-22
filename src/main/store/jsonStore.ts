@@ -103,7 +103,15 @@ export class JsonStore implements Store {
       monitor: { ...this.data.settings.monitor, ...(patch.monitor ?? {}) },
       activity: { ...this.data.settings.activity, ...(patch.activity ?? {}) },
       skills: { ...this.data.settings.skills, ...(patch.skills ?? {}) },
-      permissions: normalizePermissionSettings({ ...this.data.settings.permissions, ...(patch.permissions ?? {}) }),
+      permissions: normalizePermissionSettings({
+        ...this.data.settings.permissions,
+        ...(patch.permissions ?? {}),
+        profile: patch.permissions && "profile" in patch.permissions
+          ? patch.permissions.profile
+          : patch.permissions && "sandboxMode" in patch.permissions
+            ? undefined
+            : this.data.settings.permissions.profile,
+      }),
       memory: normalizeMemorySettings({ ...this.data.settings.memory, ...(patch.memory ?? {}) }),
     };
     this.flush();

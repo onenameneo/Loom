@@ -3,7 +3,7 @@ import type { ImageContent, TextContent, Usage } from "@earendil-works/pi-ai";
 import type { Store } from "../store/store";
 import type { StoredModelSelection } from "../modelConfig/modelRef";
 import type { ThinkingLevel } from "../modelConfig/thinkingLevels";
-import type { ApprovalPolicy, ApprovalsReviewer, PermissionReason, SandboxMode } from "./core/permissions";
+import type { ApprovalPolicy, ApprovalsReviewer, PermissionCapability, PermissionReason, PermissionRisk, SandboxMode } from "./core/permissions";
 import type { PermissionContext } from "./core/permissions";
 import type { LlmUsage } from "./core/usage";
 
@@ -285,23 +285,14 @@ export interface HookToolCallContext {
 
 export type ApprovalScope = "once" | "node-session" | "persistent";
 
-export interface ToolApprovalRequirement {
-  required: true;
-  defaultScope?: ApprovalScope;
-  target: string;
-  preview: {
-    title: string;
-    description?: string;
-    args?: unknown;
-  };
-}
-
 export type ApprovalDecision = {
   requestId: string;
   nodeId: string;
   turnId: string;
   toolCallId: string;
   toolName: string;
+  capability?: PermissionCapability;
+  normalizedTarget?: string;
   action: "allow" | "deny";
   scope?: ApprovalScope;
 };
@@ -312,22 +303,31 @@ export interface ApprovalRequest {
   turnId: string;
   toolCallId: string;
   toolName: string;
+  capability?: PermissionCapability;
+  risk?: PermissionRisk;
   target: string;
   normalizedTarget?: string;
   reason?: PermissionReason;
   sandboxMode?: SandboxMode;
   approvalPolicy?: ApprovalPolicy;
   reviewer?: ApprovalsReviewer;
-  preview: ToolApprovalRequirement["preview"];
+  preview: { title: string; description?: string; args?: unknown };
   defaultScope: ApprovalScope;
   createdAt: number;
   expiresAt: number;
+  revision: number;
 }
+
+export type ApprovalCenterEvent =
+  | { type: "upsert"; request: ApprovalRequest }
+  | { type: "remove"; requestId: string; revision: number };
 
 export type PendingApprovalDecision = Promise<ApprovalDecision> & { requestId: string };
 
 export interface ApprovalPort {
-  request(input: Omit<ApprovalRequest, "requestId" | "createdAt" | "expiresAt">): PendingApprovalDecision;
+  request(input: Omit<ApprovalRequest, "requestId" | "createdAt" | "expiresAt" | "revision">): PendingApprovalDecision;
+  listPending(): ApprovalRequest[];
+  subscribe(listener: (event: ApprovalCenterEvent) => void): () => void;
   decide(decision: ApprovalDecision): { ok: boolean; reason?: "not_found" | "stale" | "mismatch" };
   cancelByTurn(nodeId: string, turnId: string, reason: string): void;
   cancelByNode(nodeId: string, reason: string): void;

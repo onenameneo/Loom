@@ -66,6 +66,19 @@ describe("createApprovalBroker", () => {
     expect(broker.decide(decision)).toEqual({ ok: false, reason: "not_found" });
   });
 
+  it("replays complete pending requests with monotonic revisions", () => {
+    const eventLog = events();
+    const broker = createApprovalBroker({ events: eventLog.sink, clock: { now: () => 100 }, timeoutMs: 1000 });
+    const updates: unknown[] = [];
+    const unsubscribe = broker.subscribe?.((snapshot) => updates.push(snapshot));
+    broker.request(request);
+    const pending = broker.listPending?.();
+    expect(pending).toHaveLength(1);
+    expect(pending?.[0]).toMatchObject({ requestId: expect.any(String), revision: 1, target: "/tmp/a", preview: { title: "Write /tmp/a" } });
+    expect(updates).toHaveLength(1);
+    unsubscribe?.();
+  });
+
   it("rejects stale or mismatched decisions", () => {
     const eventLog = events();
     const broker = createApprovalBroker({ events: eventLog.sink, clock: { now: () => 100 }, timeoutMs: 1000 });
@@ -94,6 +107,16 @@ describe("createApprovalBroker", () => {
         action: "allow",
       }),
     ).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("rejects a correlated decision with a different capability or target", () => {
+    const eventLog = events();
+    const broker = createApprovalBroker({ events: eventLog.sink, clock: { now: () => 100 }, timeoutMs: 1000 });
+    const pending = broker.request({ ...request, capability: "write", normalizedTarget: "project:src/a" });
+    const requestId = pending.requestId;
+
+    expect(broker.decide({ ...request, requestId, capability: "delete", normalizedTarget: "project:src/a", action: "allow" })).toEqual({ ok: false, reason: "mismatch" });
+    broker.cancelByNode("n1", "test");
   });
 
   it("times out pending requests as denied decisions", async () => {
