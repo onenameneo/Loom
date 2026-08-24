@@ -162,8 +162,8 @@ function targetPath(target: FileTarget): string {
 
 function targetDetails(target: FileTarget): Record<string, unknown> {
   return target.kind === "external"
-    ? { path: target.absolutePath, root: "external", external: true }
-    : { path: target.relativePath };
+    ? { path: target.absolutePath, absolutePath: target.absolutePath, root: "external", external: true }
+    : { path: target.relativePath, absolutePath: target.absolutePath };
 }
 
 export function createProjectFileTools(sourceRoots: string[], options: ProjectFileToolOptions = {}): ReadonlyAgentTool[] {

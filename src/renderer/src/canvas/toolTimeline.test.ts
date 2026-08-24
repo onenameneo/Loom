@@ -23,6 +23,22 @@ describe("tool timeline state", () => {
     expect(ended[0]).toMatchObject({ id: "tc-1", state: "end", summary: "2", startedAt: 10, updatedAt: 20 });
   });
 
+  it("keeps the final bounded error details on the same tool row", () => {
+    const started = applyToolEvent([], { state: "start", toolCallId: "tc-error", toolName: "run_command" }, 10);
+    const ended = applyToolEvent(started, {
+      state: "end",
+      toolCallId: "tc-error",
+      toolName: "run_command",
+      isError: true,
+      summary: "Command failed with exit code 2",
+      details: { json: '{"exitCode":2,"cwd":"/tmp"}', truncated: false },
+    }, 20);
+
+    expect(ended).toHaveLength(1);
+    expect(ended[0]).toMatchObject({ id: "tc-error", state: "end", isError: true, details: { truncated: false } });
+    expect(ended[0].details).toEqual({ json: '{"exitCode":2,"cwd":"/tmp"}', truncated: false });
+  });
+
   it("narrows valid payloads", () => {
     expect(isToolCanvasEventPayload({ state: "start", toolCallId: "tc", toolName: "now" })).toBe(true);
     expect(isToolCanvasEventPayload({ state: "start", toolCallId: "tc" })).toBe(false);

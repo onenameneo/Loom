@@ -137,5 +137,19 @@ describe("createHookRegistry · 空注册表行为保真", () => {
   });
 });
 
+describe("createHookRegistry · toolResult（异常隔离）", () => {
+  it("keeps the normalized result available when an observer throws", async () => {
+    const r = createHookRegistry();
+    const good = vi.fn(() => ({ details: { observed: true } }));
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    r.use({ name: "boom", onToolResult: () => { throw new Error("x"); } });
+    r.use({ name: "ok", onToolResult: good });
+
+    await expect(r.toolResult(resultCtx)).resolves.toEqual({ details: { observed: true } });
+    expect(good).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+});
+
 const _partial: AgentHook = { name: "partial", onEvent: () => {} };
 void _partial;

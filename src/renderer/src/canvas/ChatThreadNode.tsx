@@ -3,6 +3,7 @@ import { Handle, NodeResizeControl, Position, type ResizeParams } from "@xyflow/
 import { Check, ChevronDown, MessageSquareText, Pencil, Trash2 } from "lucide-react";
 import type { ApprovalRequestPayload, LiveTurnContentPart, ModelSelection, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
 import type { FileMentionRef } from "../../../common/fileMentions";
+import type { FileArtifactRef } from "../../../common/fileArtifacts";
 import type { SelectionContextNote } from "../../../common/selectionContext";
 import { normalizeSelectionContextNotes } from "../../../common/selectionContext";
 import { Composer, type ComposerImage } from "../composer/Composer";
@@ -25,7 +26,7 @@ import { useNodeMetrics } from "../composer/useNodeMetrics";
 import { useI18n } from "../i18n/I18nProvider";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
-type Msg = { id: number; role: Role; text: string; thinking?: string; contentParts?: LiveTurnContentPart[]; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; selectionNotes?: SelectionContextNote[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
+type Msg = { id: number; role: Role; text: string; thinking?: string; contentParts?: LiveTurnContentPart[]; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; selectionNotes?: SelectionContextNote[]; artifacts?: FileArtifactRef[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
 type SelectionToolbar = { text: string; x: number; y: number; place: "top" | "bottom"; arrowX: number };
 type RectLike = Pick<DOMRect, "left" | "top" | "bottom" | "width" | "height">;
 
@@ -102,7 +103,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   const idRef = useRef(1);
 
   const toMsgs = useCallback((items: NodeMsg[] = []) => (
-    items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, fileMentions: m.fileMentions, selectionNotes: m.selectionNotes, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }))
+    items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, fileMentions: m.fileMentions, selectionNotes: m.selectionNotes, artifacts: m.artifacts, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }))
   ), []);
 
   const [msgs, setMsgs] = useState<Msg[]>(() => toMsgs(data.messages ?? []));
@@ -796,6 +797,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
                 contentParts={item.message.contentParts}
                 images={item.message.images}
                 fileMentions={item.message.fileMentions}
+                artifacts={item.message.artifacts}
                 selectionNotes={item.message.selectionNotes}
                 density="compact"
                 streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1]?.id}

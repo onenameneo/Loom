@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { ChevronDown } from "lucide-react";
 import type { ApprovalRequestPayload, BranchSource, LiveTurnContentPart, ModelSelection, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
 import type { FileMentionRef } from "../../../common/fileMentions";
+import type { FileArtifactRef } from "../../../common/fileArtifacts";
 import type { SelectionContextNote } from "../../../common/selectionContext";
 import { normalizeSelectionContextNotes } from "../../../common/selectionContext";
 import { IconSplit, IconProject } from "../icons";
@@ -22,7 +23,7 @@ import { useNodeMetrics } from "../composer/useNodeMetrics";
 import { useI18n } from "../i18n/I18nProvider";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
-type Msg = { id: number; role: Role; text: string; thinking?: string; contentParts?: LiveTurnContentPart[]; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; selectionNotes?: SelectionContextNote[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
+type Msg = { id: number; role: Role; text: string; thinking?: string; contentParts?: LiveTurnContentPart[]; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; selectionNotes?: SelectionContextNote[]; artifacts?: FileArtifactRef[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
 
 function formatModelSelection(model?: ModelSelection) {
   if (!model) return undefined;
@@ -83,6 +84,7 @@ export default function ChatView({
     images: m.images,
     fileMentions: m.fileMentions,
     selectionNotes: m.selectionNotes,
+    artifacts: m.artifacts,
     seq: m.seq,
     usage: m.usage,
     meta: m.meta,
@@ -179,7 +181,7 @@ export default function ChatView({
   useTitlebarActions(titlebarActions);
 
   const reloadFromInitial = useCallback((items: NodeMsg[], targetNodeId: string) => {
-    const restored: Msg[] = items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, fileMentions: m.fileMentions, selectionNotes: m.selectionNotes, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }));
+    const restored: Msg[] = items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, fileMentions: m.fileMentions, selectionNotes: m.selectionNotes, artifacts: m.artifacts, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }));
     // A tree refresh can race an in-flight Node. Merge the authoritative live
     // snapshot into the refreshed transcript instead of briefly replacing it
     // with an older persisted copy.
@@ -556,6 +558,7 @@ export default function ChatView({
                   contentParts={item.message.contentParts}
                   images={item.message.images}
                   fileMentions={item.message.fileMentions}
+                  artifacts={item.message.artifacts}
                   selectionNotes={item.message.selectionNotes}
                   density="comfortable"
                   streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1].id}

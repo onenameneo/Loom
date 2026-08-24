@@ -31,6 +31,8 @@ import { parseFileSearchRequest, parseFileWorkspaceRequest } from "../common/fil
 import { ProjectFileWorkspace } from "./projectFiles/fileWorkspace";
 import { assertRendererSender } from "./fileIpcAuthorization";
 import { registerMcpIpc } from "./mcp/ipc";
+import { FileArtifactRegistry } from "./fileArtifacts";
+import { parseArtifactActionRequest } from "../common/fileArtifacts";
 
 // ---------------------------------------------------------------------------
 // 主进程：持久化(store) + 设置 + 会话 + 画布引擎(pi 多节点)。
@@ -47,6 +49,7 @@ let collector: ReturnType<typeof registerCollector> | null = null;
 let memory: MemoryRuntimeService | null = null;
 let menuLocale: "zh-CN" | "en" = app.getLocale().toLowerCase().startsWith("en") ? "en" : "zh-CN";
 let mcpIpcDispose: (() => void) | undefined;
+let fileArtifacts: FileArtifactRegistry;
 
 // productName 只在 electron-builder 打包时写入 Info.plist；开发态 Electron
 // 二进制没有 Info.plist，app.getName() 默认返回 "Electron"，必须显式覆盖。
@@ -229,6 +232,19 @@ function registerIpc() {
     const error = await shell.openPath(filePath);
     return { ok: !error, error: error || undefined };
   });
+  ipcMain.handle("artifact:action", async (event, request: unknown) => {
+    assertRendererSender(event, win);
+    const parsed = parseArtifactActionRequest(request);
+    const resolved = fileArtifacts.resolve(parsed.id, parsed.action);
+    if (!resolved.ok) return { ok: false, error: resolved.error, message: resolved.message };
+    if (parsed.action === "preview") return { ok: true, preview: resolved.record.project };
+    if (parsed.action === "reveal") {
+      shell.showItemInFolder(resolved.record.absolutePath);
+      return { ok: true };
+    }
+    const error = await shell.openPath(resolved.record.absolutePath);
+    return { ok: !error, error: error ? "open-failed" : undefined, message: error || undefined };
+  });
   ipcMain.handle("session:list", (_e, projectId: string) => {
     return store.listSessions(projectId);
   });
@@ -399,7 +415,8 @@ app.whenReady().then(() => {
   void memory.initialize();
   ensureLoomAgentDefaults({ homeDir: app.getPath("home"), legacyApiKeyPresent: Boolean(store.getApiKeyEnc()) });
   applyThemeSource();
-  canvas = registerCanvas({ getWin: () => win, store, userDataDir: app.getPath("userData"), homeDir: app.getPath("home"), memory, getLocale: () => menuLocale });
+  fileArtifacts = new FileArtifactRegistry();
+  canvas = registerCanvas({ getWin: () => win, store, userDataDir: app.getPath("userData"), homeDir: app.getPath("home"), memory, fileArtifacts, getLocale: () => menuLocale });
   monitor = registerMonitor({ getWin: () => win, store });
   acp = registerAcp({ getWin: () => win, store });
   collector = registerCollector({ getWin: () => win, store });

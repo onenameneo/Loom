@@ -6,6 +6,7 @@ import type { ThinkingLevel } from "../modelConfig/thinkingLevels";
 import type { ApprovalPolicy, ApprovalsReviewer, PermissionCapability, PermissionReason, PermissionRisk, SandboxMode } from "./core/permissions";
 import type { PermissionContext } from "./core/permissions";
 import type { LlmUsage } from "./core/usage";
+import type { ToolProcessState } from "./core/tool";
 
 // ---------------------------------------------------------------------------
 // ③ 端口（契约）：由内圈（②应用编排）声明、外圈（④适配器）实现。
@@ -241,6 +242,7 @@ export interface CommandExecutionResult {
   timedOut: boolean;
   cancelled: boolean;
   truncated: boolean;
+  processState: ToolProcessState;
   blocked?: { reason: PermissionReason };
 }
 

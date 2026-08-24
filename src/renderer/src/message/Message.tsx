@@ -1,7 +1,9 @@
 import { memo, useId, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { BookOpen, Brain, Check, Copy, FileText, Pencil, RefreshCcw } from "lucide-react";
+import { BookOpen, Brain, Check, ChevronDown, ChevronUp, Copy, FileText, FolderOpen, Pencil, RefreshCcw } from "lucide-react";
+import type { FileArtifactRef } from "../../../common/fileArtifacts";
+import { artifactIdFromLink, artifactLink } from "../../../common/fileArtifacts";
 import type { FileMentionRef } from "../../../common/fileMentions";
 import type { LiveTurnContentPart } from "../../../common/liveTurns";
 import type { SelectionContextNote } from "../../../common/selectionContext";
@@ -12,30 +14,85 @@ import { buttonClassName, cn, fieldClassName } from "../ui/styles";
 import { CodeBlock } from "./CodeBlock";
 import { useI18n } from "../i18n/I18nProvider";
 import { splitMarkdownBlocks } from "./markdownBlocks";
+import { linkifyArtifactText } from "./fileArtifacts";
 
 export type MsgRole = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
 export type Density = "compact" | "comfortable";
 type CheckpointInfo = NonNullable<NodeMsg["checkpoint"]>;
 const CHECKPOINT_SUMMARY_LIMIT = 4_000;
+const ARTIFACT_COLLAPSE_LIMIT = 5;
+
+function artifactForInlineCode(value: string, artifacts: FileArtifactRef[]): FileArtifactRef | undefined {
+  const normalized = value.trim().replace(/\\/g, "/");
+  const exact = artifacts.find((artifact) => [artifact.name, artifact.displayPath, artifact.project?.path]
+    .filter(Boolean)
+    .some((candidate) => candidate!.replace(/\\/g, "/") === normalized));
+  if (exact) return exact;
+  const suffixMatches = artifacts.filter((artifact) => normalized.endsWith(`/${artifact.name}`));
+  return suffixMatches.length === 1 ? suffixMatches[0] : undefined;
+}
+
+function renderCode({ className, children }: any, artifacts: FileArtifactRef[] = [], onArtifactOpen?: (id: string) => void) {
+  const match = /language-(\w+)/.exec(className || "");
+  const raw = String(children ?? "");
+  if (match || raw.includes("\n")) {
+    return <CodeBlock code={raw.replace(/\n$/, "")} lang={match?.[1]} />;
+  }
+  const artifact = artifactForInlineCode(raw, artifacts);
+  if (!artifact) return <code className="inline-code">{children}</code>;
+  return (
+    <a
+      href={artifactLink(artifact)}
+      className="inline-code nodrag"
+      onClick={(event) => {
+        event.preventDefault();
+        onArtifactOpen?.(artifact.id);
+      }}
+    >
+      {children}
+    </a>
+  );
+}
 
 // react-markdown 组件覆盖：围栏代码块 → CodeBlock（高亮/复制），行内 code → token 化，
 // 链接 → 新窗口（经主进程 window-open handler 走系统浏览器）。不启用 rehype-raw（转义 HTML）。
 const mdComponents = {
   pre: (props: any) => <>{props.children}</>,
-  code: ({ className, children }: any) => {
-    const match = /language-(\w+)/.exec(className || "");
-    const raw = String(children ?? "");
-    if (match || raw.includes("\n")) {
-      return <CodeBlock code={raw.replace(/\n$/, "")} lang={match?.[1]} />;
-    }
-    return <code className="inline-code">{children}</code>;
-  },
+  code: (props: any) => renderCode(props),
   a: ({ href, children }: any) => (
     <a href={href} target="_blank" rel="noreferrer">
       {children}
     </a>
   ),
 };
+
+function markdownComponents(onArtifactOpen?: (id: string) => void, artifacts: FileArtifactRef[] = []) {
+  return {
+    ...mdComponents,
+    code: (props: any) => renderCode(props, artifacts, onArtifactOpen),
+    a: ({ href, children }: any) => {
+      const artifactId = artifactIdFromLink(href);
+      return (
+        <a
+          href={href}
+          className={artifactId ? "nodrag" : undefined}
+          target={artifactId ? undefined : "_blank"}
+          rel={artifactId ? undefined : "noreferrer"}
+          onClick={artifactId ? (event) => {
+            event.preventDefault();
+            onArtifactOpen?.(artifactId);
+          } : undefined}
+        >
+          {children}
+        </a>
+      );
+    },
+  };
+}
+
+function messageUrlTransform(value: string) {
+  return artifactIdFromLink(value) ? value : defaultUrlTransform(value);
+}
 
 function rangeText(range?: { fromSeq: number; toSeq: number }, prefix = "") {
   return range ? `${prefix}${range.fromSeq}..${range.toSeq}` : undefined;
@@ -98,7 +155,7 @@ function CheckpointView({ checkpoint, text }: { checkpoint?: CheckpointInfo; tex
           <section>
             <h4>Checkpoint summary</h4>
             <div className="m__checkpoint-summary">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents} urlTransform={messageUrlTransform}>
                 {summary}
               </ReactMarkdown>
             </div>
@@ -136,11 +193,15 @@ function AssistantContent({
   thinking,
   contentParts,
   streaming,
+  artifacts,
+  onArtifactOpen,
 }: {
   text: string;
   thinking?: string;
   contentParts?: LiveTurnContentPart[];
   streaming: boolean;
+  artifacts?: FileArtifactRef[];
+  onArtifactOpen?: (id: string) => void;
 }) {
   const parts = contentParts?.length
     ? contentParts
@@ -155,8 +216,13 @@ function AssistantContent({
       ) : (
         <div key={part.partId} className="m__md-part">
           {splitMarkdownBlocks(part.text).map((block, index) => (
-            <ReactMarkdown key={`${part.partId}:block:${index}`} remarkPlugins={[remarkGfm]} components={mdComponents}>
-              {block}
+            <ReactMarkdown
+              key={`${part.partId}:block:${index}`}
+              remarkPlugins={[remarkGfm]}
+              components={markdownComponents(onArtifactOpen, artifacts)}
+              urlTransform={messageUrlTransform}
+            >
+              {linkifyArtifactText(block, artifacts)}
             </ReactMarkdown>
           ))}
         </div>
@@ -173,6 +239,7 @@ type MessageProps = {
   contentParts?: LiveTurnContentPart[];
   images?: { data: string; mimeType: string }[];
   fileMentions?: FileMentionRef[];
+  artifacts?: FileArtifactRef[];
   selectionNotes?: SelectionContextNote[];
   density?: Density;
   streaming?: boolean;
@@ -196,6 +263,7 @@ function equalMessageProps(previous: MessageProps, next: MessageProps) {
     previous.contentParts === next.contentParts &&
     previous.images === next.images &&
     previous.fileMentions === next.fileMentions &&
+    previous.artifacts === next.artifacts &&
     previous.selectionNotes === next.selectionNotes &&
     previous.density === next.density &&
     previous.streaming === next.streaming &&
@@ -220,6 +288,7 @@ export const Message = memo(function Message({
   contentParts,
   images,
   fileMentions,
+  artifacts,
   selectionNotes,
   density = "comfortable",
   streaming = false,
@@ -240,7 +309,12 @@ export const Message = memo(function Message({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);
   const [branchOpen, setBranchOpen] = useState(false);
+  const [artifactError, setArtifactError] = useState<string | null>(null);
+  const [expandedArtifacts, setExpandedArtifacts] = useState(false);
   const editFieldId = useId();
+  const artifactListId = `${editFieldId}-artifact-list`;
+  const collapsibleArtifacts = Boolean(artifacts && artifacts.length > ARTIFACT_COLLAPSE_LIMIT);
+  const artifactExpanded = !collapsibleArtifacts || expandedArtifacts;
   // Internal reasoning is a timeline state, not a user-facing answer. Keeping
   // its action bar hidden prevents controls from landing between Thinking and
   // the tool call that follows it.
@@ -262,6 +336,28 @@ export const Message = memo(function Message({
     if (onEditResendWithSeq) onEditResendWithSeq(sourceSeq, next);
     else onEditResend?.(next);
     setEditing(false);
+  }
+
+  async function artifactAction(id: string, action: "open" | "reveal" | "preview" = "open") {
+    const api = window.api?.artifacts;
+    if (!api) return;
+    const result = await api.action({ id, action });
+    if (!result.ok) setArtifactError(result.message || "无法打开文件。");
+    else {
+      setArtifactError(null);
+      if (action === "preview" && result.preview) {
+        window.dispatchEvent(new CustomEvent("loom:preview-file", { detail: result.preview }));
+      }
+    }
+  }
+
+  async function copyArtifactPath(path: string) {
+    try {
+      await navigator.clipboard.writeText(path);
+      setArtifactError(null);
+    } catch {
+      setArtifactError("无法复制文件路径。");
+    }
   }
 
   return (
@@ -333,7 +429,43 @@ export const Message = memo(function Message({
       ) : role === "skill" ? (
         <span className="m__plain m__skill"><BookOpen size={13} /> {text}</span>
       ) : role === "assistant" ? (
-        <AssistantContent text={text} thinking={thinking} contentParts={contentParts} streaming={streaming} />
+        <>
+          <AssistantContent text={text} thinking={thinking} contentParts={contentParts} streaming={streaming} artifacts={artifacts} onArtifactOpen={(id) => void artifactAction(id)} />
+          {artifacts && artifacts.length > 0 && (
+            <div className="m__artifacts nodrag" aria-label="Generated files">
+              <div className="m__artifacts-header">
+                <strong>{t("message.generatedFiles")}</strong>
+                <span>{artifacts.length}</span>
+              </div>
+              <div className="m__artifact-list" id={artifactListId} data-expanded={artifactExpanded}>
+                {artifacts.map((artifact, index) => (
+                  <div className="m__artifact" key={artifact.id} data-status={artifact.status} hidden={collapsibleArtifacts && !artifactExpanded && index >= ARTIFACT_COLLAPSE_LIMIT}>
+                    <button className="m__artifact-main nodrag" type="button" onClick={() => void artifactAction(artifact.id)} disabled={artifact.status !== "available"}>
+                      <FileText size={16} aria-hidden="true" />
+                      <span><strong>{artifact.name}</strong><small>{artifact.project?.path || artifact.displayPath}</small></span>
+                    </button>
+                    <button type="button" className="m__artifact-action nodrag" aria-label="Reveal file in folder" title="Reveal file in folder" onClick={() => void artifactAction(artifact.id, "reveal")}><FolderOpen size={16} /></button>
+                    <button type="button" className="m__artifact-action nodrag" aria-label="Copy file path" title="Copy file path" onClick={() => void copyArtifactPath(artifact.displayPath)}><Copy size={16} /></button>
+                  </div>
+                ))}
+              </div>
+              {collapsibleArtifacts && (
+                <button
+                  type="button"
+                  className="m__artifact-toggle nodrag"
+                  aria-expanded={artifactExpanded}
+                  aria-controls={artifactListId}
+                  aria-label={artifactExpanded ? "Collapse generated files" : "Expand generated files"}
+                  onClick={() => setExpandedArtifacts((expanded) => !expanded)}
+                >
+                  <span>{artifactExpanded ? t("message.hideExtraFiles") : t("message.showMoreFiles", { count: artifacts.length - ARTIFACT_COLLAPSE_LIMIT })}</span>
+                  {artifactExpanded ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+                </button>
+              )}
+            </div>
+          )}
+          {artifactError && <div className="m__artifact-error" role="status">{artifactError}</div>}
+        </>
       ) : text || !selectionNotes?.length ? (
         <span className="m__plain">{text}</span>
       ) : null}

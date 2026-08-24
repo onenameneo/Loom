@@ -1,6 +1,7 @@
 import { Activity, ChevronRight, Copy, Files, Plus, X } from "lucide-react";
 import { DropdownMenu, Tabs } from "radix-ui";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { FileWorkspaceRequest } from "../../../common/filePreview";
 import { readUsageFacts, type AgentMetricTotals, type UsageFacts } from "../../../common/telemetry";
 import { cn } from "../ui/styles";
 import { FilesPage } from "./files/FilesPage";
@@ -54,6 +55,16 @@ function restoredTabs(): WorkbenchPageId[] {
     }
   } catch { /* fall back to legacy preference */ }
   return localStorage.getItem("loom:workbench:trace") === "1" ? ["trace"] : [];
+}
+
+function parsePreviewRequest(value: unknown): FileWorkspaceRequest | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.projectId !== "string" || candidate.projectId.length === 0) return null;
+  if (typeof candidate.root !== "string" || candidate.root.length === 0) return null;
+  if (typeof candidate.path !== "string" || candidate.path.length === 0) return null;
+  if ([candidate.projectId, candidate.root, candidate.path].some((item) => item.includes("\0"))) return null;
+  return { projectId: candidate.projectId, root: candidate.root, path: candidate.path };
 }
 
 function spanDurationMs(span: TraceSpanDto) {
@@ -388,6 +399,7 @@ export function Workbench({ nodeId, projectId = null }: { nodeId: string | null;
   const [trace, setTrace] = useState<TraceClientState | null>(null);
   const [metrics, setMetrics] = useState<AgentMetricTotals | null>(null);
   const [hasNewActivity, setHasNewActivity] = useState(false);
+  const [filePreviewRequest, setFilePreviewRequest] = useState<FileWorkspaceRequest | null>(null);
   const addRef = useRef<HTMLButtonElement>(null);
   const menuWasOpenRef = useRef(false);
   const inspectorRef = useRef<HTMLDivElement>(null);
@@ -414,6 +426,18 @@ export function Workbench({ nodeId, projectId = null }: { nodeId: string | null;
     if (menuWasOpenRef.current && !menuOpen) addRef.current?.focus();
     menuWasOpenRef.current = menuOpen;
   }, [menuOpen]);
+  useEffect(() => {
+    const onPreviewFile = (event: Event) => {
+      const request = parsePreviewRequest((event as CustomEvent<unknown>).detail);
+      if (!request) return;
+      setFilePreviewRequest(request);
+      setTabs((current) => current.includes("files") ? current : [...current, "files"]);
+      setSelectedTab("files");
+      setMenuOpen(false);
+    };
+    window.addEventListener("loom:preview-file", onPreviewFile);
+    return () => window.removeEventListener("loom:preview-file", onPreviewFile);
+  }, []);
   useEffect(() => {
     if (!nodeId || !tabs.includes("trace") || !window.api) {
       setTrace(null);
@@ -481,7 +505,7 @@ export function Workbench({ nodeId, projectId = null }: { nodeId: string | null;
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
     </Tabs.List>
-    <Tabs.Content value="files" className="min-h-0 min-w-0 flex-1" aria-label="Files"><FilesPage projectId={projectId} /></Tabs.Content>
+    <Tabs.Content value="files" className="min-h-0 min-w-0 flex-1" aria-label="Files"><FilesPage projectId={projectId} previewRequest={filePreviewRequest} /></Tabs.Content>
     <Tabs.Content value="trace" className="min-h-0 min-w-0 flex-1 overflow-auto p-loom-3 [&_p]:text-[12px] [&_p]:leading-[1.6] [&_p]:text-loom-muted" aria-label="Trace" onScroll={(event) => {
       const element = event.currentTarget;
       const atNewest = element.scrollTop <= 24;

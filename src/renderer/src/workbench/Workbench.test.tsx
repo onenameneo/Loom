@@ -12,6 +12,19 @@ afterEach(() => {
 });
 
 describe("Workbench", () => {
+  it("opens the Files page when a message requests an artifact preview", async () => {
+    localStorage.setItem("loom:workbench:tabs", '["trace"]');
+    render(<Workbench nodeId={null} />);
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("loom:preview-file", {
+        detail: { projectId: "project-1", root: "project:0", path: "docs/hello-world.docx" },
+      }));
+    });
+
+    expect(screen.getByRole("tab", { name: /Files/ }).getAttribute("data-state")).toBe("active");
+  });
+
   it("returns focus to the add control when its menu closes with Escape", () => {
     (window as any).api = { canvas: { trace: vi.fn(async () => ({ records: [] })), onTrace: vi.fn(() => () => {}) } };
     localStorage.setItem("loom:workbench:tabs", '["trace"]');

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { FileListResult, FilePreviewResult } from "../../../../common/filePreview";
-import { FilePreviewController } from "./controller";
+import { FilePreviewController, openFilePreview } from "./controller";
 
 function listResult(projectId: string, path: string): FileListResult {
   return { projectId, root: "project:0", path, entries: [], truncated: false };
@@ -11,6 +11,20 @@ function previewResult(path: string): FilePreviewResult {
 }
 
 describe("FilePreviewController", () => {
+  it("opens a requested project artifact in the preview pane", async () => {
+    const api = {
+      list: vi.fn(async () => listResult("project-1", ".")),
+      preview: vi.fn(async () => previewResult("docs/hello-world.docx")),
+    };
+    const controller = new FilePreviewController(api);
+
+    await openFilePreview(controller, { projectId: "project-1", root: "project:0", path: "docs/hello-world.docx" });
+
+    expect(api.preview).toHaveBeenCalledWith({ projectId: "project-1", root: "project:0", path: "docs/hello-world.docx" });
+    expect(controller.getSnapshot().selectedPath).toBe("docs/hello-world.docx");
+    expect(controller.getSnapshot().preview?.path).toBe("docs/hello-world.docx");
+  });
+
   it("loads and expands child directories without replacing the root tree", async () => {
     const api = {
       list: vi.fn(async (request: { path?: string }) => request.path === "src"

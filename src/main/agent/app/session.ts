@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { basename, extname, isAbsolute, relative, resolve } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { NodeBranchPoint, NodeLayout, NodeRecord, PersistedMessage } from "../../store/store";
@@ -75,6 +76,8 @@ import {
 } from "./liveTurns";
 import { createNodeRuntimeStore } from "./nodeRuntime";
 import type { FileCandidate, FileMentionRef } from "../../../common/fileMentions";
+import type { FileArtifactRecord, FileArtifactRef, FileArtifactKind, FileArtifactOperation } from "../../../common/fileArtifacts";
+import { discoverArtifactPaths, operationFromArtifactDetails, persistedArtifactRecords } from "./fileArtifacts";
 import { findProjectFileCandidates, resolveProjectFileMentions } from "../tools/projectFiles/fileMentions";
 import type { ComposerBudgetPreviewInput } from "../../../common/composerBudget";
 import { normalizeSelectionContextNotes, selectionContextPrompt, type SelectionContextNote } from "../../../common/selectionContext";
@@ -171,6 +174,10 @@ export interface CanvasRuntimeDeps {
     afterTurn(input: { sessionId: string; nodeId: string; projectId?: string; userText: string; assistantText?: string; sourceKey?: string }): Promise<void>;
   };
   mcp?: McpToolProvider;
+  fileArtifacts?: {
+    register(input: Omit<FileArtifactRecord, "id" | "status" | "version"> & { id?: string; version?: string }): { ref: FileArtifactRef; record: FileArtifactRecord };
+    registerRecord(record: FileArtifactRecord): { ref: FileArtifactRef; record: FileArtifactRecord };
+  };
   /** 注入引擎工厂：由组装根提供 pi 适配器；session 只认端口，引擎缓存持有于 runtime 记录。 */
   createEngine: (hooks: {
     buildContext: (nodeId: string, own: AgentMessage[]) => Message[] | Promise<Message[]>;
@@ -192,6 +199,7 @@ interface CanvasMessageDto {
   images?: { data: string; mimeType: string }[];
   fileMentions?: FileMentionRef[];
   selectionNotes?: SelectionContextNote[];
+  artifacts?: FileArtifactRef[];
   seq: number;
   usage?: LlmUsage;
   meta?: unknown;
@@ -237,6 +245,8 @@ const FILE_TOOL_PATH_GUIDANCE = [
   "- Use absolute paths for Project and external files with read, write, and edit; preserve the exact absolute path supplied by the user or returned by search/command output.",
   "- Use an explicit memory:* root for memory-relative paths; never treat an external path as a memory path.",
   "- Do not shorten an external absolute path to a relative path or infer it from the current working directory.",
+  "- When run_command creates, updates, or exports a file, declare every produced file in its outputs array with path and operation (created, updated, or exported). The path may be relative to that command's cwd.",
+  "- In the final response, mention the exact output filename or path so the file can be rendered as a clickable artifact.",
 ].join("\n");
 const DEFAULT_COMPACTION_TAIL_BUDGET_TOKENS = 12_000;
 const DEFAULT_MANUAL_COMPACTION_TAIL_BUDGET_TOKENS = 6_000;
@@ -326,6 +336,119 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
   }
 
   // ---- 图缓存 & 映射 --------------------------------------------------------
+
+  function artifactKindForPath(path: string): FileArtifactKind {
+    const extension = extname(path).toLowerCase();
+    if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".svg"].includes(extension)) return "image";
+    if ([".zip", ".tar", ".gz", ".tgz", ".7z", ".rar"].includes(extension)) return "archive";
+    if ([".txt", ".md", ".markdown", ".json", ".csv", ".ts", ".tsx", ".js", ".jsx", ".css", ".html", ".py", ".rs", ".go", ".java", ".sh", ".yaml", ".yml", ".toml", ".sql"].includes(extension)) return "text";
+    if ([".doc", ".docx", ".pdf", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods"].includes(extension)) return "document";
+    return "other";
+  }
+
+  function projectIdentityForPath(node: CanvasNode, absolutePath: string): { projectId: string; root: string; path: string } | undefined {
+    const project = store.listProjects().find((candidate) => candidate.id === node.projectId);
+    if (!project) return undefined;
+    let canonicalPath: string;
+    try {
+      canonicalPath = realpathSync(absolutePath);
+    } catch {
+      return undefined;
+    }
+    for (let index = 0; index < project.sourceRoots.length; index += 1) {
+      const configuredRoot = resolve(project.sourceRoots[index]!);
+      let canonicalRoot: string;
+      try {
+        canonicalRoot = realpathSync(configuredRoot);
+      } catch {
+        continue;
+      }
+      const relativePath = relative(canonicalRoot, canonicalPath);
+      if (relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath))) {
+        return { projectId: node.projectId, root: `project:${index}`, path: relativePath.split("\\").join("/") };
+      }
+    }
+    return undefined;
+  }
+
+  function artifactInputForPath(node: CanvasNode, absolutePath: string, operation: FileArtifactOperation): Omit<FileArtifactRecord, "id" | "status" | "version"> {
+    const project = projectIdentityForPath(node, absolutePath);
+    const canonical = realpathSync(absolutePath);
+    return {
+      absolutePath: canonical,
+      name: basename(canonical),
+      displayPath: project?.path || canonical,
+      kind: artifactKindForPath(canonical),
+      operation,
+      ...(project ? { project } : {}),
+    };
+  }
+
+  function artifactRecordsFromMessage(node: CanvasNode, message: AgentMessage): FileArtifactRecord[] {
+    if (!deps.fileArtifacts) return [];
+    const candidates: Array<{ path: string; operation: FileArtifactOperation }> = [];
+    const anyMessage = message as any;
+    if (roleOf(message) === "toolResult") {
+      const detailsList = Array.isArray(anyMessage.details?.artifacts) ? anyMessage.details.artifacts : [anyMessage.details];
+      for (const details of detailsList) {
+        const operation = operationFromArtifactDetails(details);
+        const path = details && typeof details === "object" && typeof details.absolutePath === "string" ? details.absolutePath : undefined;
+        if (operation && path && isAbsolute(path) && existsSync(path)) candidates.push({ path, operation });
+      }
+    }
+    if (roleOf(message) === "assistant") {
+      for (const path of discoverArtifactPaths(textOf(message))) candidates.push({ path, operation: "created" });
+    }
+    const seen = new Set<string>();
+    const records: FileArtifactRecord[] = [];
+    for (const candidate of candidates) {
+      try {
+        const input = artifactInputForPath(node, candidate.path, candidate.operation);
+        if (seen.has(input.absolutePath)) continue;
+        seen.add(input.absolutePath);
+        records.push(deps.fileArtifacts.register(input).record);
+      } catch {
+        // An artifact candidate is best-effort; the source message remains visible.
+      }
+    }
+    return records;
+  }
+
+  function artifactRecordsOf(meta: unknown): FileArtifactRecord[] {
+    return persistedArtifactRecords(meta);
+  }
+
+  function publicMetaOf(meta: unknown): unknown {
+    if (!meta || typeof meta !== "object") return meta;
+    const copy = { ...(meta as Record<string, unknown>) };
+    delete copy.fileArtifacts;
+    return Object.keys(copy).length > 0 ? copy : undefined;
+  }
+
+  function artifactsOf(meta: unknown): FileArtifactRef[] | undefined {
+    const records = artifactRecordsOf(meta);
+    if (records.length === 0) return undefined;
+    const registry = deps.fileArtifacts;
+    if (!registry) return undefined;
+    const refs = records.map((record) => {
+      try {
+        return registry.registerRecord(record).ref;
+      } catch {
+        const { absolutePath: _absolutePath, ...ref } = record;
+        return { ...ref, status: "unavailable" as const, error: "The generated file is no longer available." };
+      }
+    });
+    return refs.length > 0 ? refs : undefined;
+  }
+
+  function artifactsForAssistantMessage(node: CanvasNode, seq: number): FileArtifactRef[] | undefined {
+    if (roleOf(node.messages[seq]) !== "assistant") return undefined;
+    if (persistedArtifactRecords(node.messageMeta[seq]).length === 0) return undefined;
+    for (let next = seq + 1; next < node.messages.length && roleOf(node.messages[next]) !== "user"; next += 1) {
+      if (roleOf(node.messages[next]) === "assistant" && persistedArtifactRecords(node.messageMeta[next]).length > 0) return undefined;
+    }
+    return artifactsOf(node.messageMeta[seq]);
+  }
 
   function persisted(msg: AgentMessage, extraMeta?: Record<string, unknown>): PersistedMessage {
     const usage = normalizeLlmUsage((msg as any)?.usage);
@@ -843,7 +966,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
             role: "checkpoint",
             text: m.summary,
             seq,
-            meta: n.messageMeta[seq],
+            meta: publicMetaOf(n.messageMeta[seq]),
+            artifacts: undefined,
             checkpoint: {
               id: m.id,
               kind: "context",
@@ -863,7 +987,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
             role: "checkpoint",
             text: m.summary,
             seq,
-            meta: n.messageMeta[seq],
+            meta: publicMetaOf(n.messageMeta[seq]),
+            artifacts: undefined,
             checkpoint: {
               id: m.id,
               kind: "frozen-branch",
@@ -884,7 +1009,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
             role: "tool",
             text,
             seq,
-            meta: n.messageMeta[seq],
+            meta: publicMetaOf(n.messageMeta[seq]),
+            artifacts: undefined,
             toolCall: {
               id: toolCallId,
               name: toolName,
@@ -910,7 +1036,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
         selectionNotes: selectionNotesOf(n.messageMeta[seq]),
         seq,
         usage,
-        meta: n.messageMeta[seq],
+        meta: publicMetaOf(n.messageMeta[seq]),
+        artifacts: artifactsForAssistantMessage(n, seq),
       }];
     }),
     skills: effectiveSkillsFor(n.id).skills.map((skill) => ({
@@ -969,8 +1096,24 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       const llmMetric = turnId
         ? [...(store.listMetrics?.({ nodeId: node.id }) ?? [])].reverse().find((metric) => metric.kind === "llm" && metric.turnId === turnId)
         : undefined;
-      const persistedDelta = delta.map((message) => {
-        const item = persisted(message);
+      const turnArtifacts: FileArtifactRecord[] = [];
+      const generatedByMessage = delta.map((message) => artifactRecordsFromMessage(node, message));
+      for (const generated of generatedByMessage) {
+        for (const artifact of generated) {
+          if (!turnArtifacts.some((current) => current.absolutePath === artifact.absolutePath)) turnArtifacts.push(artifact);
+        }
+      }
+      let artifactMessageIndex = -1;
+      for (let index = delta.length - 1; index >= 0; index -= 1) {
+        if (roleOf(delta[index]) === "assistant") {
+          artifactMessageIndex = index;
+          break;
+        }
+      }
+      if (artifactMessageIndex < 0 && turnArtifacts.length > 0) artifactMessageIndex = delta.length - 1;
+
+      const persistedDelta = delta.map((message, index) => {
+        const item = persisted(message, index === artifactMessageIndex && turnArtifacts.length > 0 ? { fileArtifacts: turnArtifacts } : undefined);
         if (roleOf(message) !== "assistant" || !llmMetric) return item;
         return {
           ...item,

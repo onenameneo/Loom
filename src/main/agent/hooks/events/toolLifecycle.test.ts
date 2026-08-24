@@ -26,6 +26,37 @@ describe("normalizeToolEvent", () => {
     expect(result?.summary).toBeDefined();
     expect(result?.summary?.length).toBeLessThanOrEqual(900);
   });
+
+  it.each([
+    ["failed", true, { processState: "failed", exitCode: 2, cwd: "/tmp", stderr: "missing" }],
+    ["blocked", true, { processState: "blocked", blocked: { reason: "sandbox_unavailable" } }],
+    ["cancelled", true, { processState: "cancelled", cancelled: true }],
+    ["timed out", true, { processState: "timed_out", timedOut: true }],
+    ["truncated", true, { processState: "failed", truncation: { truncated: true } }],
+    ["successful", false, { processState: "completed", exitCode: 0 }],
+  ])("preserves bounded final %s diagnostics", (_label, isError, details) => {
+    const result = normalizeToolEvent({
+      type: "tool_execution_end",
+      toolCallId: "tc-state",
+      toolName: "run_command",
+      isError,
+      result: { content: [{ type: "text", text: "diagnostic" }], details },
+    } as AgentEvent);
+    expect(result).toMatchObject({ state: "end", toolCallId: "tc-state", isError });
+    expect(result?.details).toMatchObject({ json: expect.stringContaining("processState") });
+    expect(result?.details).not.toHaveProperty("adapterError");
+  });
+
+  it("normalizes an end event even when no update event was emitted", () => {
+    const result = normalizeToolEvent({
+      type: "tool_execution_end",
+      toolCallId: "tc-no-update",
+      toolName: "run_command",
+      isError: true,
+      result: { content: [{ type: "text", text: "exit code 127" }], details: { exitCode: 127, processState: "failed" } },
+    } as AgentEvent);
+    expect(result).toMatchObject({ toolCallId: "tc-no-update", state: "end", isError: true, summary: "exit code 127" });
+  });
 });
 
 describe("createToolLifecycleHook", () => {

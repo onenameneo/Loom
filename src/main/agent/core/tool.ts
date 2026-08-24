@@ -1,5 +1,7 @@
 import type { TSchema } from "typebox";
 import type { PermissionReason, PermissionRequest } from "./permissions";
+import { normalizeUnexpectedToolError } from "./toolDiagnostics";
+export type { ToolDiagnosticDetails, ToolErrorKind, ToolProcessState } from "./toolDiagnostics";
 
 export type ToolExecutionMode = "sequential" | "parallel";
 export type ReadonlyToolExecutionMode = ToolExecutionMode;
@@ -74,7 +76,7 @@ export function resultText(result: Pick<ToolResult, "content">, limit = 800): st
   return limitText(text, limit).text;
 }
 
-export function normalizeToolError(toolName: string, err: unknown): ToolResult<{ tool: string; error: string }> {
-  const message = err instanceof Error ? err.message : String(err);
-  return textResult(`Tool ${toolName} failed: ${message}`, { tool: toolName, error: message }, true);
+export function normalizeToolError(toolName: string, err: unknown): ToolResult {
+  const normalized = normalizeUnexpectedToolError(toolName, err);
+  return textResult(normalized.message, normalized.details, true);
 }

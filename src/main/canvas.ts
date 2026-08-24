@@ -25,6 +25,7 @@ import { createMcpConnectionManager } from "./mcp/connection";
 import { createMcpToolProvider } from "./mcp/provider";
 import { loadMcpConfiguration, loadMcpConsent, saveMcpConsent } from "./mcp/store";
 import { connectEnabledMcpServers } from "./mcp/startup";
+import type { FileArtifactRegistry } from "./fileArtifacts";
 
 // ---------------------------------------------------------------------------
 // 画布引擎接线（主进程）：组装洋葱四圈 + 把 node:* IPC 绑定到 ② runtime。
@@ -38,7 +39,7 @@ import { connectEnabledMcpServers } from "./mcp/startup";
 
 export type { Seed };
 
-export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store: Store; userDataDir?: string; homeDir?: string; memory?: MemoryRuntimePort; getLocale?: () => "zh-CN" | "en" }) {
+export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store: Store; userDataDir?: string; homeDir?: string; memory?: MemoryRuntimePort; getLocale?: () => "zh-CN" | "en"; fileArtifacts?: FileArtifactRegistry }) {
   const { getWin, store } = opts;
 
   const events = createIpcEventSink(getWin);
@@ -122,6 +123,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     titleGenerator,
     memory: opts.memory,
     mcp: mcpProvider,
+    fileArtifacts: opts.fileArtifacts,
     // 注入 pi 引擎工厂：session 只认端口，pi 收敛在适配器。
     createEngine: (hooks) =>
       createPiEngine({

@@ -9,7 +9,10 @@ import type { SelectionContextNote } from "../../../common/selectionContext";
 
 const messageStyles = readFileSync("src/renderer/src/message/message.css", "utf8");
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  delete (window as any).api;
+});
 
 describe("Message thinking", () => {
   it("removes collapsed content from layout before recovering the width", () => {
@@ -222,6 +225,22 @@ describe("Message edit mode", () => {
 });
 
 describe("Message file references", () => {
+  it("keeps HTTP links on the external browser path", () => {
+    render(<Message role="assistant" text="[OpenAI](https://openai.com)" />);
+
+    const link = screen.getByRole("link", { name: "OpenAI" });
+    expect(link.getAttribute("href")).toBe("https://openai.com");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noreferrer");
+  });
+
+  it("leaves unregistered filenames as selectable assistant text", () => {
+    render(<Message role="assistant" text="missing-report.pdf" />);
+
+    expect(screen.queryByRole("link", { name: "missing-report.pdf" })).toBeNull();
+    expect(screen.getByText("missing-report.pdf")).toBeTruthy();
+  });
+
   it("shows the selected file and its project path on the sent message", () => {
     const { container } = render(
       <Message
@@ -234,6 +253,118 @@ describe("Message file references", () => {
     expect(screen.getByText("@titleDefaults.ts")).toBeTruthy();
     expect(screen.getByText("src/common/titleDefaults.ts")).toBeTruthy();
     expect(container.querySelector(".m__file-mentions")).toBeTruthy();
+  });
+
+  it("opens a registered generated file when its filename link is clicked", async () => {
+    const action = vi.fn(async () => ({ ok: true }));
+    window.api = { artifacts: { action } } as any;
+    render(
+      <Message
+        role="assistant"
+        text="已创建 hello-world.docx。"
+        artifacts={[{
+          id: "artifact_12345678",
+          name: "hello-world.docx",
+          displayPath: "/tmp/hello-world.docx",
+          kind: "document",
+          operation: "created",
+          status: "available",
+        }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "hello-world.docx" }));
+    await act(async () => undefined);
+    expect(action).toHaveBeenCalledWith({ id: "artifact_12345678", action: "open" });
+    expect(screen.getByRole("link", { name: "hello-world.docx" }).className).toContain("nodrag");
+    expect(screen.getByLabelText("Generated files").className).toContain("nodrag");
+  });
+
+  it("groups generated files into one aggregate panel", () => {
+    const artifacts = ["title.html", "card.html", "build.js", "hello-world-test.pptx"].map((name, index) => ({
+      id: `artifact_${index}`,
+      name,
+      displayPath: `pptx-test/${name}`,
+      kind: "document" as const,
+      operation: "created" as const,
+      status: "available" as const,
+    }));
+    const { container } = render(<Message role="assistant" text="已完成文件生成。" artifacts={artifacts} />);
+
+    expect(container.querySelectorAll(".m__artifacts")).toHaveLength(1);
+    expect(container.querySelectorAll(".m__artifact")).toHaveLength(4);
+    expect(screen.getByLabelText("Generated files")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Preview file in Loom" })).toBeNull();
+  });
+
+  it("collapses long generated file lists and expands them on demand", () => {
+    const artifacts = Array.from({ length: 7 }, (_, index) => ({
+      id: `artifact_${index}`,
+      name: `file-${index}.txt`,
+      displayPath: `output/file-${index}.txt`,
+      kind: "text" as const,
+      operation: "created" as const,
+      status: "available" as const,
+    }));
+    const { container } = render(<Message role="assistant" text="已完成文件生成。" artifacts={artifacts} />);
+
+    expect(container.querySelectorAll(".m__artifact:not([hidden])")).toHaveLength(5);
+    const toggle = screen.getByRole("button", { name: "Expand generated files" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(toggle);
+
+    expect(container.querySelectorAll(".m__artifact:not([hidden])")).toHaveLength(7);
+    expect(screen.getByRole("button", { name: "Collapse generated files" }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("opens a registered generated file when the assistant wraps its path in inline code", async () => {
+    const action = vi.fn(async () => ({ ok: true }));
+    window.api = { artifacts: { action } } as any;
+    render(
+      <Message
+        role="assistant"
+        text="文件：`pptx-test/hello-world-test.pptx`"
+        artifacts={[{
+          id: "artifact_12345678",
+          name: "hello-world-test.pptx",
+          displayPath: "pptx-test/hello-world-test.pptx",
+          kind: "document",
+          operation: "created",
+          status: "available",
+          project: { projectId: "project-1", root: "project:0", path: "pptx-test/hello-world-test.pptx" },
+        }]}
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: "pptx-test/hello-world-test.pptx" });
+    fireEvent.click(link);
+    await act(async () => undefined);
+    expect(action).toHaveBeenCalledWith({ id: "artifact_12345678", action: "open" });
+  });
+
+  it("copies the canonical display path from the secondary action", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    window.api = { artifacts: { action: vi.fn(async () => ({ ok: true })) } } as any;
+    render(
+      <Message
+        role="assistant"
+        text="已创建 report.pdf。"
+        artifacts={[{
+          id: "artifact_12345678",
+          name: "report.pdf",
+          displayPath: "/tmp/report.pdf",
+          kind: "document",
+          operation: "created",
+          status: "available",
+        }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy file path" }));
+    await act(async () => undefined);
+    expect(writeText).toHaveBeenCalledWith("/tmp/report.pdf");
   });
 });
 

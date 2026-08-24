@@ -10,6 +10,7 @@ import type { AgentTool } from "../core/tool";
 import { createLoomContextCheckpoint } from "../core/messages";
 import type { BranchSource, NodeBranchPoint, NodeLayout, NodeRecord, PersistedMessage, SessionRecord, Settings, Store, Project } from "../../store/store";
 import { DEFAULT_SETTINGS } from "../../store/store";
+import { FileArtifactRegistry } from "../../fileArtifacts";
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -1683,6 +1684,78 @@ describe("createAgentSession turn runner integration", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("persists one aggregated artifact list on the final assistant message", async () => {
+    const root = mkdtempSync(join(tmpdir(), "loom-session-artifacts-"));
+    const file = join(root, "hello-world.pptx");
+    writeFileSync(file, "pptx");
+    const store = new MemoryStore();
+    store.projects[0].sourceRoots = [root];
+    const engineMessages: AgentMessage[] = [];
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => `id-${Math.random()}` },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      fileArtifacts: new FileArtifactRegistry(),
+      createEngine: () => createEngine(createHandle(engineMessages, vi.fn(async (msg) => {
+        engineMessages.push(msg);
+        engineMessages.push({
+          role: "toolResult",
+          toolName: "run_command",
+          toolCallId: "tc-build",
+          content: [{ type: "text", text: "created" }],
+          details: { artifacts: [{ absolutePath: file, operation: "created" }] },
+          isError: false,
+        } as unknown as AgentMessage);
+        engineMessages.push(assistant("已生成 `hello-world.pptx`。"));
+      }))),
+    });
+
+    try {
+      await expect(session.send({ nodeId: "n1", text: "create file" })).resolves.toMatchObject({ ok: true });
+      const messages = store.listMessages("n1");
+      expect(messages).toHaveLength(3);
+      expect((messages[1]?.meta as any)?.fileArtifacts).toBeUndefined();
+      expect((messages[2]?.meta as any)?.fileArtifacts).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("persists the model diagnostic, structured details, and error classification together", async () => {
+    const store = new MemoryStore();
+    const engineMessages: AgentMessage[] = [];
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: (() => { let n = 0; return () => `tool-error-${n++}`; })() },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle(engineMessages, vi.fn(async (msg) => {
+        engineMessages.push(msg);
+        engineMessages.push({
+          role: "toolResult",
+          toolName: "run_command",
+          toolCallId: "tc-error",
+          content: [{ type: "text", text: "Command failed with exit code 2\ncwd: /tmp\nstderr: missing" }],
+          details: { processState: "failed", exitCode: 2, cwd: "/tmp", stderr: "missing" },
+          isError: true,
+        } as unknown as AgentMessage);
+        engineMessages.push(assistant("The command failed; I will explain the issue."));
+      }))),
+    });
+
+    await expect(session.send({ nodeId: "n1", text: "run the command" })).resolves.toEqual({ ok: true });
+    const saved = store.listMessages("n1").map((message) => message.content as any).find((message) => message.role === "toolResult");
+    expect(saved).toMatchObject({
+      toolCallId: "tc-error",
+      isError: true,
+      content: [{ text: expect.stringContaining("exit code 2") }],
+      details: { processState: "failed", exitCode: 2, cwd: "/tmp" },
+    });
   });
 
   it("rejects a busy same-node send before appending another user message", async () => {

@@ -170,6 +170,7 @@ function blockedResult(request: CommandExecutionRequest, reason: "sandbox_unavai
     timedOut: false,
     cancelled: false,
     truncated: false,
+    processState: "blocked",
     blocked: { reason },
   };
 }
@@ -267,6 +268,7 @@ export function createCommandPort(options: {
           timedOut,
           cancelled,
           truncated,
+          processState: "failed_to_start",
         }));
         child.on("close", (exitCode, signal) => finish({
           argv: request.argv,
@@ -278,6 +280,7 @@ export function createCommandPort(options: {
           timedOut,
           cancelled,
           truncated,
+          processState: cancelled ? "cancelled" : timedOut ? "timed_out" : exitCode === 0 ? "completed" : "failed",
         }));
         if (request.signal?.aborted) onAbort();
         else request.signal?.addEventListener("abort", onAbort, { once: true });

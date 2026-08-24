@@ -72,6 +72,7 @@ describe("command executor", () => {
       workspaceRoots: [process.cwd()],
     });
     expect(result.exitCode).not.toBe(0);
+    expect(result.processState).toBe("failed");
     expect(result.stdout.length).toBeLessThanOrEqual(1024);
     expect(result.truncated).toBe(true);
   });
@@ -89,6 +90,7 @@ describe("command executor", () => {
     controller.abort();
     const result = await promise;
     expect(result.cancelled).toBe(true);
+    expect(result.processState).toBe("cancelled");
   });
 
   it("fails closed when a restricted sandbox adapter is unavailable", async () => {
@@ -100,5 +102,6 @@ describe("command executor", () => {
       workspaceRoots: [process.cwd()],
     });
     expect(result.blocked).toEqual({ reason: "sandbox_unavailable" });
+    expect(result.processState).toBe("blocked");
   });
 });

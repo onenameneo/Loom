@@ -2,6 +2,7 @@ import type { AgentMetricTotals, LlmUsage } from "../../../common/telemetry";
 import type { ComposerBudgetPreviewInput } from "../../../common/composerBudget";
 import type { SelectionContextNote } from "../../../common/selectionContext";
 import type { FileListResult, FilePreviewResult, FileSearchRequest, FileSearchResult, FileWorkspaceRequest } from "../../../common/filePreview";
+import type { FileArtifactActionRequest, FileArtifactActionResult, FileArtifactRef } from "../../../common/fileArtifacts";
 import type { McpConfigInput, McpSafeServerDto, McpSettingsSnapshot } from "../../../common/mcp";
 import type { LiveTurnContentPart, LiveTurnEvent, LiveTurnPatch, LiveTurnSnapshot } from "../../../common/liveTurns";
 
@@ -26,6 +27,7 @@ export interface NodeMsg {
   images?: { data: string; mimeType: string }[];
   fileMentions?: FileMentionRef[];
   selectionNotes?: SelectionContextNote[];
+  artifacts?: FileArtifactRef[];
   seq: number;
   usage?: Partial<LlmUsage>;
   meta?: unknown;
@@ -686,6 +688,9 @@ declare global {
         search: (request: FileSearchRequest) => Promise<FileSearchResult>;
         preview: (request: FileWorkspaceRequest) => Promise<FilePreviewResult>;
         open: (request: FileWorkspaceRequest) => Promise<{ ok: boolean; error?: string }>;
+      };
+      artifacts: {
+        action: (request: FileArtifactActionRequest) => Promise<FileArtifactActionResult>;
       };
       sessions: {
         list: (projectId: string) => Promise<SessionMeta[]>;

@@ -5,6 +5,7 @@ import type { SelectionContextNote } from "../common/selectionContext";
 import type { AgentMetricTotals } from "../common/telemetry";
 import type { McpConfigInput, McpSafeServerDto, McpSettingsSnapshot } from "../common/mcp";
 import type { LiveTurnEvent, LiveTurnSnapshot } from "../common/liveTurns";
+import type { FileArtifactActionRequest, FileArtifactActionResult } from "../common/fileArtifacts";
 import {
   parseFileListResult,
   parseFilePreviewResult,
@@ -316,6 +317,10 @@ const api = {
       parseFilePreviewResult(await ipcRenderer.invoke("file:preview", request)),
     open: (request: FileWorkspaceRequest): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke("file:open", request),
+  },
+  artifacts: {
+    action: (request: FileArtifactActionRequest): Promise<FileArtifactActionResult> =>
+      ipcRenderer.invoke("artifact:action", request),
   },
   sessions: {
     list: (projectId: string): Promise<any[]> => ipcRenderer.invoke("session:list", projectId),

@@ -18,4 +18,26 @@ describe("createTraceTelemetryHook", () => {
     expect(llm.status).toBe("ok");
     expect(tool.parentSpanId).toBe(turn.spanId);
   });
+
+  it("records the final tool error status and bounded diagnostic attributes", () => {
+    const traces = createTraceRepository({ now: () => 100 });
+    const hook = createTraceTelemetryHook(traces);
+    const emit = (event: AgentTelemetryEvent) => hook.onTelemetry?.(event);
+
+    emit({ type: "turn_start", nodeId: "n1", turnId: "t1", operation: "send", at: 1 });
+    emit({ type: "tool_start", nodeId: "n1", turnId: "t1", toolCallId: "c1", toolName: "run_command", at: 2 });
+    emit({
+      type: "tool_end",
+      nodeId: "n1",
+      turnId: "t1",
+      toolCallId: "c1",
+      toolName: "run_command",
+      status: "error",
+      at: 3,
+      attributes: { isError: true, details: { exitCode: 2, cwd: "/tmp" } },
+    });
+
+    const tool = traces.snapshot("n1").records[0].spans.find((span) => span.kind === "tool");
+    expect(tool).toMatchObject({ status: "error", attributes: { isError: true, details: { exitCode: 2, cwd: "/tmp" } } });
+  });
 });

@@ -119,6 +119,19 @@ describe("main/preload project IPC contracts", () => {
     expect(envSource).toContain("normalizedTarget");
   });
 
+  it("keeps generated-file actions opaque across the main/preload boundary", () => {
+    const mainSource = readSource("src/main/index.ts");
+    const preloadSource = readSource("src/preload/index.ts");
+    const envSource = readSource("src/renderer/src/env.d.ts");
+
+    expect(mainSource).toContain('ipcMain.handle("artifact:action"');
+    expect(mainSource).toContain("parseArtifactActionRequest");
+    expect(mainSource).toContain("fileArtifacts.resolve");
+    expect(preloadSource).toContain('ipcRenderer.invoke("artifact:action", request)');
+    expect(envSource).toContain("action: (request: FileArtifactActionRequest)");
+    expect(envSource).toContain("FileArtifactRef");
+  });
+
   it("registers a native editable context menu for Electron text controls", () => {
     const mainSource = readSource("src/main/index.ts");
 

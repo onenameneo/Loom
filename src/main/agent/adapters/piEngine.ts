@@ -11,7 +11,7 @@ import { join } from "node:path";
 import type { Message } from "@earendil-works/pi-ai";
 import type { AgentTool } from "../core/tool";
 import type { EngineCacheEntry, EngineFactory, EngineHandle, EventSinkPort, HookDispatcher, NodeInit } from "../ports";
-import { adaptAgentToolsToPi } from "./piTools";
+import { adaptAgentToolsToPi, consumePiErrorClassification } from "./piTools";
 import type { StoredModelSelection } from "../../modelConfig/modelRef";
 import { ModelRegistry } from "../../modelConfig/registry";
 import { createRuntimeModelsFromRegistry } from "../../modelConfig/runtimeModels";
@@ -330,32 +330,42 @@ export function createPiEngine(deps: PiEngineDeps): EngineFactory {
         }
         return undefined;
       },
-      afterToolCall: ({ toolCall, args, result, isError }: AfterToolCallContext) => {
+      afterToolCall: async ({ toolCall, args, result, isError }: AfterToolCallContext) => {
+        const adapterIsError = consumePiErrorClassification(result);
+        const normalizedIsError = adapterIsError ?? isError;
         const startedAt = toolStartedAt.get(toolCall.id);
         toolStartedAt.delete(toolCall.id);
         const usage = normalizeLlmUsage(result.usage, { source: "provider", exact: true });
-        dispatcher.telemetry({
-          type: "tool_end",
-          nodeId,
-          turnId: getCurrentTurnId?.(nodeId),
-          toolCallId: toolCall.id,
-          toolName: toolCall.name,
-          status: isError ? "error" : "ok",
-          at: now(),
-          ...(startedAt !== undefined ? { durationMs: Math.max(0, now() - startedAt) } : {}),
-          ...(usage ? { usage } : {}),
-          attributes: { arguments: args, result: result.content, details: result.details, isError },
-        });
-        return dispatcher.toolResult({
+        const override = await dispatcher.toolResult({
           nodeId,
           toolName: toolCall.name,
           toolCallId: toolCall.id,
           args,
           content: result.content,
           details: result.details,
-          isError,
+          isError: normalizedIsError,
           usage: result.usage,
         });
+        const finalContent = override?.content ?? result.content;
+        const finalDetails = "details" in (override ?? {}) ? override?.details : result.details;
+        const finalIsError = override?.isError ?? normalizedIsError;
+        dispatcher.telemetry({
+          type: "tool_end",
+          nodeId,
+          turnId: getCurrentTurnId?.(nodeId),
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          status: finalIsError ? "error" : "ok",
+          at: now(),
+          ...(startedAt !== undefined ? { durationMs: Math.max(0, now() - startedAt) } : {}),
+          ...(usage ? { usage } : {}),
+          attributes: { arguments: args, result: finalContent, details: finalDetails, isError: finalIsError },
+        });
+        if (!override && adapterIsError === undefined) return undefined;
+        return {
+          ...(override ?? {}),
+          isError: finalIsError,
+        };
       },
     });
 

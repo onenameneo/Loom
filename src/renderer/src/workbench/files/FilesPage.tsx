@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, ExternalLink, File, FileImage, Folder, FolderOpen, LoaderCircle, PanelLeft, RefreshCw, Search } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import type { FileEntry } from "../../../../common/filePreview";
+import type { FileEntry, FileWorkspaceRequest } from "../../../../common/filePreview";
 import { FilePreviewPane } from "./FilePreviewPane";
 import { FilePreviewController, openFilePreview, type FilesApi } from "./controller";
 import { useI18n } from "../../i18n/I18nProvider";
@@ -23,9 +23,12 @@ function useFilesController(projectId: string | null) {
   return { controller, snapshot };
 }
 
-export function FilesPage({ projectId }: { projectId: string | null }) {
+export function FilesPage({ projectId, previewRequest }: { projectId: string | null; previewRequest?: FileWorkspaceRequest | null }) {
   const { t } = useI18n();
   const { controller, snapshot } = useFilesController(projectId);
+  useEffect(() => {
+    if (previewRequest && previewRequest.projectId === projectId) void openFilePreview(controller, previewRequest);
+  }, [controller, previewRequest, projectId]);
   const [split, setSplit] = useState(42);
   const splitRef = useRef(42);
   const workspaceRef = useRef<HTMLDivElement>(null);

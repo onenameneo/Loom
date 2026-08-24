@@ -59,7 +59,13 @@ export function createHookRegistry(): HookRegistry {
     async toolResult(ctx: HookToolResultContext) {
       let override: ResultOverride | undefined;
       for (const h of hooks) {
-        const o = await h.onToolResult?.(applyOverride(ctx, override));
+        let o: ResultOverride | void;
+        try {
+          o = await h.onToolResult?.(applyOverride(ctx, override));
+        } catch (err) {
+          console.error(`[hook:${h.name}] onToolResult failed`, err);
+          continue;
+        }
         if (o) override = mergeOverride(override, o);
       }
       return override;
