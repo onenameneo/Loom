@@ -11,3 +11,7 @@ export function modelsJsonPath(homeDir: string) {
 export function globalSettingsPath(homeDir: string) {
   return join(loomAgentDir(homeDir), "settings.json");
 }
+
+export function modelsDevCatalogCachePath(homeDir: string) {
+  return join(loomAgentDir(homeDir), "catalog", "models-dev.json");
+}

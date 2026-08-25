@@ -82,7 +82,7 @@ function summarizeMessages(messages: unknown[]) {
 export function modelsForSwitching(providers: RegistryProvider[]) {
   return providers.flatMap((provider) =>
     provider.models
-      .filter((model) => model.available && model.source !== "builtin")
+      .filter((model) => model.available && model.source !== "pi-builtin" && model.source !== "models-dev")
       .map((model) => ({
         id: `${provider.id}/${model.id}`,
         name: model.name,

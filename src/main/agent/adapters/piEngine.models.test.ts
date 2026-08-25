@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { modelsForSwitching } from "./piEngine";
 import type { RegistryProvider } from "../../modelConfig/types";
 
-function provider(models: Array<{ id: string; source: "builtin" | "user-custom" | "user-overridden"; available: boolean }>): RegistryProvider {
+function provider(models: Array<{ id: string; source: "pi-builtin" | "models-dev" | "user-custom" | "user-overridden"; available: boolean }>): RegistryProvider {
   return {
     id: "openai",
     name: "OpenAI",
-    source: "builtin",
+    source: "pi-builtin",
     availability: "available",
     diagnostics: [],
     hasAuthentication: true,
@@ -31,7 +31,7 @@ describe("pi engine model switch list", () => {
   it("returns only user-configured available models for /model switching", () => {
     const models = modelsForSwitching([
       provider([
-        { id: "builtin-gpt", source: "builtin", available: true },
+        { id: "builtin-gpt", source: "pi-builtin", available: true },
         { id: "custom-gpt", source: "user-custom", available: true },
         { id: "overridden-gpt", source: "user-overridden", available: true },
         { id: "broken-gpt", source: "user-custom", available: false },

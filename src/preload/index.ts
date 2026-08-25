@@ -214,6 +214,8 @@ const api = {
     addProviderModel: (input: any): Promise<{ ok: boolean }> => ipcRenderer.invoke("settings:addProviderModel", input),
     deleteProviderModel: (model: { providerId: string; modelId: string }): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("settings:deleteProviderModel", model),
+    refreshModelCatalog: (): Promise<{ status: string; fetchedAt?: string; providerCount: number; modelCount: number; diagnostics: Array<{ code: string; message: string; field?: string }> }> =>
+      ipcRenderer.invoke("settings:refreshModelCatalog"),
     openModelsJson: (): Promise<{ ok: boolean; path: string; error?: string }> =>
       ipcRenderer.invoke("settings:openModelsJson"),
     skills: (projectId?: string): Promise<any> => ipcRenderer.invoke("settings:skills", projectId),

@@ -602,6 +602,7 @@ declare global {
         setGlobalModel: (model: { providerId: string; modelId: string }) => Promise<{ ok: boolean }>;
         addProviderModel: (input: AddProviderModelPayload) => Promise<{ ok: boolean }>;
         deleteProviderModel: (model: { providerId: string; modelId: string }) => Promise<{ ok: boolean }>;
+        refreshModelCatalog: () => Promise<{ status: "updated" | "not-modified" | "offline-fallback" | "invalid-response" | "failed"; fetchedAt?: string; providerCount: number; modelCount: number; diagnostics: Array<{ code: string; message: string; field?: string }> }>;
         openModelsJson: () => Promise<{ ok: boolean; path: string; error?: string }>;
         skills: (projectId?: string) => Promise<SkillCatalogDto>;
         addSkillSource: (path: string) => Promise<{ ok: boolean; path: string }>;

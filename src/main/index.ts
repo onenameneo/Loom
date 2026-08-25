@@ -17,6 +17,7 @@ import {
 import { addProviderModelConfig, deleteProviderModelConfig, ensureLoomAgentDefaults, writeGlobalDefaultModel } from "./modelConfig/files";
 import { modelsJsonPath } from "./modelConfig/paths";
 import { ModelRegistry } from "./modelConfig/registry";
+import { refreshModelsDevCatalog } from "./modelConfig/catalog/updateService";
 import { loadScopedModelSettings, resolveSelectedModel } from "./modelConfig/scopes";
 import { platformWindowOptions } from "./windowOptions";
 import { addGlobalSkillSource, buildSkillCatalog, openSkillSource, removeGlobalSkillSource } from "./agent/skills";
@@ -149,6 +150,11 @@ function registerIpc() {
     deleteProviderModelConfig(app.getPath("home"), model);
     invalidateAgent();
     return { ok: true };
+  });
+  ipcMain.handle("settings:refreshModelCatalog", async () => {
+    const result = await refreshModelsDevCatalog({ homeDir: app.getPath("home"), force: true });
+    if (result.status === "updated") invalidateAgent();
+    return result;
   });
   ipcMain.handle("settings:skills", () => {
     return buildSkillCatalog({
@@ -372,7 +378,12 @@ function createWindow() {
   if (store && !monitor) monitor = registerMonitor({ getWin: () => win, store });
   if (store && !acp) acp = registerAcp({ getWin: () => win, store });
   if (store && !collector) collector = registerCollector({ getWin: () => win, store });
-  win.on("ready-to-show", () => win?.show());
+  win.on("ready-to-show", () => {
+    win?.show();
+    void refreshModelsDevCatalog({ homeDir: app.getPath("home") }).then((result) => {
+      if (result.status === "updated") invalidateAgent();
+    });
+  });
   // 阻止 HTML <title> 覆盖 BrowserWindow title，保持标题栏始终为产品名。
   win.on("page-title-updated", (e) => e.preventDefault());
   // 全屏时 macOS 隐藏红绿灯，渲染层据此把侧栏开关移到左缘、收掉预留内边距。

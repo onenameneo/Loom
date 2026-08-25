@@ -29,6 +29,21 @@ async function apiStreams(api: Api): Promise<ProviderStreams> {
   }
 }
 
+export function isSupportedRuntimeApi(api: Api) {
+  return [
+    "anthropic-messages",
+    "openai-completions",
+    "openai-responses",
+    "openai-codex-responses",
+    "azure-openai-responses",
+    "google-generative-ai",
+    "google-vertex",
+    "mistral-conversations",
+    "bedrock-converse-stream",
+    "pi-messages",
+  ].includes(api);
+}
+
 export async function createRuntimeModelsFromRegistry(registry: ModelRegistry) {
   const { createModels, createProvider } = await import("@earendil-works/pi-ai");
   const models = createModels();
@@ -36,7 +51,7 @@ export async function createRuntimeModelsFromRegistry(registry: ModelRegistry) {
 
   for (const provider of registry.listProviders()) {
     const apiEntries = await Promise.all(
-      [...new Set(provider.models.map((model) => model.api))].map(async (api) => [api, await apiStreams(api)] as const),
+      [...new Set(provider.models.filter((model) => isSupportedRuntimeApi(model.api)).map((model) => model.api))].map(async (api) => [api, await apiStreams(api)] as const),
     );
     const apiMap = Object.fromEntries(apiEntries) as Partial<Record<Api, ProviderStreams>>;
     const secret = registry.requireProviderSecret(provider.id);
@@ -53,7 +68,7 @@ export async function createRuntimeModelsFromRegistry(registry: ModelRegistry) {
             resolve: async () => (secret.apiKey ? { auth: { apiKey: secret.apiKey, headers: secret.headers }, source: "models.json" } : undefined),
           },
         },
-        models: provider.models.map((model) => model.runtimeModel),
+        models: provider.models.filter((model) => isSupportedRuntimeApi(model.api)).map((model) => model.runtimeModel),
         api: apiMap,
       }),
     );

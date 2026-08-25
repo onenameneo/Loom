@@ -1,7 +1,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 
 export type ModelAvailability = "available" | "missing-authentication" | "configuration-error";
-export type ConfigSource = "builtin" | "user-overridden" | "user-custom";
+export type ConfigSource = "pi-builtin" | "models-dev" | "user-overridden" | "user-custom" | "builtin";
 
 export interface ModelRef {
   providerId: string;

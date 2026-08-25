@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadBuiltinModelCatalog } from "./builtinCatalog";
 import { ModelRegistry } from "./registry";
+import { writeCatalogCache } from "./catalog/cache";
+import type { CatalogSnapshot } from "./catalog/types";
 
 const tempDirs: string[] = [];
 
@@ -32,7 +34,7 @@ describe("model registry", () => {
     const anthropic = catalog.providers.find((provider) => provider.id === "anthropic");
     const sonnet = anthropic?.models.find((model) => model.id === "claude-sonnet-4-5");
 
-    expect(anthropic?.source).toBe("builtin");
+    expect(anthropic?.source).toBe("pi-builtin");
     expect(sonnet).toMatchObject({
       providerId: "anthropic",
       id: "claude-sonnet-4-5",
@@ -157,5 +159,102 @@ describe("model registry", () => {
 
     expect(tiny.availability).toBe("configuration-error");
     expect(tiny.diagnostics.map((diag) => diag.field)).toEqual(expect.arrayContaining(["baseUrl", "models.tiny.api"]));
+  });
+
+  it("loads Models.dev cache entries and lets user configuration override them", async () => {
+    const home = await tempHome();
+    const cache: CatalogSnapshot = {
+      schemaVersion: 1,
+      source: "models.dev",
+      fetchedAt: "2026-08-25T00:00:00.000Z",
+      providers: [
+        {
+          id: "catalog-provider",
+          name: "Catalog Provider",
+          baseUrl: "https://catalog.example/v1",
+          models: [
+            {
+              providerId: "catalog-provider",
+              modelId: "catalog-model",
+              name: "Catalog Model",
+              api: "openai-completions",
+              baseUrl: "https://catalog.example/v1",
+              reasoning: true,
+              input: ["text"],
+              contextWindow: 128000,
+              maxTokens: 16000,
+              cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+              source: "models-dev",
+              diagnostics: [],
+            },
+            {
+              providerId: "catalog-provider",
+              modelId: "custom-model",
+              name: "Custom Model",
+              api: "openai-completions",
+              baseUrl: "https://catalog.example/v1",
+              reasoning: false,
+              input: ["text"],
+              contextWindow: 8192,
+              maxTokens: 1024,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+              source: "models-dev",
+              diagnostics: [],
+            },
+          ],
+        },
+      ],
+    };
+    writeCatalogCache(join(home, ".loom", "agent", "catalog", "models-dev.json"), cache);
+    writeModelsJson(home, {
+      providers: {
+        "catalog-provider": {
+          apiKey: "catalog-secret",
+          modelOverrides: { "catalog-model": { maxTokens: 2048 } },
+          models: { "user-model": { api: "openai-completions", contextWindow: 4096, maxTokens: 512 } },
+        },
+      },
+    });
+
+    const registry = await ModelRegistry.load({ homeDir: home });
+    const overridden = registry.requireModel({ providerId: "catalog-provider", modelId: "catalog-model" });
+    const custom = registry.requireModel({ providerId: "catalog-provider", modelId: "user-model" });
+    expect(overridden.source).toBe("user-overridden");
+    expect(overridden.capabilities.maxOutputTokens).toBe(2048);
+    expect(overridden.available).toBe(true);
+    expect(custom.source).toBe("user-custom");
+    expect(custom.capabilities.maxOutputTokens).toBe(512);
+  });
+
+  it("keeps unsupported and unauthenticated catalog models diagnosed", async () => {
+    const home = await tempHome();
+    const cache: CatalogSnapshot = {
+      schemaVersion: 1,
+      source: "models.dev",
+      fetchedAt: "2026-08-25T00:00:00.000Z",
+      providers: [{
+        id: "unknown-provider",
+        name: "Unknown Provider",
+        models: [{
+          providerId: "unknown-provider",
+          modelId: "unknown-model",
+          name: "Unknown",
+          api: "unsupported",
+          reasoning: false,
+          input: ["text"],
+          contextWindow: 4096,
+          maxTokens: 512,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          source: "models-dev",
+          diagnostics: [{ code: "unsupported-api", message: "No adapter." }],
+        }],
+      }],
+    };
+    writeCatalogCache(join(home, ".loom", "agent", "catalog", "models-dev.json"), cache);
+    const registry = await ModelRegistry.load({ homeDir: home });
+    const model = registry.requireModel({ providerId: "unknown-provider", modelId: "unknown-model" });
+    expect(model.available).toBe(false);
+    expect(model.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-api");
+    expect(model.availability).toBe("configuration-error");
   });
 });

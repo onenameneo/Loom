@@ -22,6 +22,12 @@ pnpm dev                              # 启动 Electron 应用
 - `pnpm build` 构建，`pnpm typecheck` 严格类型检查。
 - 注意：若你的 shell 全局设了 `ELECTRON_RUN_AS_NODE=1`，dev/start 脚本已自动清除它（否则 Electron 会以纯 Node 模式启动主进程而报错）。
 
+### Provider 与模型目录
+
+设置页使用 pi-ai 内置模型作为离线基线，并从 `https://models.dev/catalog.json` 更新可选的 provider/model 元数据。归一化目录缓存位于 `~/.loom/agent/catalog/models-dev.json`，24 小时内不会重复请求；网络失败时继续使用最近一次有效缓存或 pi-ai 内置目录。用户凭证、endpoint 和自定义模型仍保存在 `~/.loom/agent/models.json`，刷新目录不会改写该文件，也不会把 API key 暴露给 renderer。
+
+模型来源优先级为：pi-ai builtin → Models.dev → 用户 `modelOverrides` → 用户自定义模型。目录模型只能使用 Loom 当前明确支持的 pi-ai API 映射；非标准 provider 会显示诊断，不会被猜测成兼容协议。旧的 `builtin` 来源标签仍可读取，新的内置来源标记为 `pi-builtin`。详见 [`docs/model-catalog.md`](docs/model-catalog.md)。
+
 ## MCP（pi-agent）
 
 设置 → MCP 服务器支持两类连接：本地 `stdio` 和远程 `Streamable HTTP`。MCP client、连接生命周期、工具目录和审批都在主进程完成，pi-agent 只接收 Loom 的中性工具；renderer 不会拿到 client、子进程句柄或凭证原文。

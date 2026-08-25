@@ -132,6 +132,7 @@ function toRuntimeModel(provider: RegistryProvider, id: string, raw: JsonObject,
 function validateModel(provider: RegistryProvider, model: RegistryModel, custom: boolean): ModelDiagnostic[] {
   const diagnostics: ModelDiagnostic[] = [];
   if (!provider.baseUrl && custom) diagnostics.push({ code: "invalid-provider", field: "baseUrl", message: "Custom provider requires baseUrl." });
+  if (model.api === "unsupported") diagnostics.push({ code: "unsupported-api", field: `models.${model.id}.api`, message: "This model has no supported pi-ai API mapping." });
   if (!model.api) diagnostics.push({ code: "invalid-model", field: `models.${model.id}.api`, message: "Custom model requires api." });
   if (!model.capabilities.contextWindow) {
     diagnostics.push({ code: "invalid-model", field: `models.${model.id}.contextWindow`, message: "Model requires contextWindow." });
@@ -160,7 +161,7 @@ export class ModelRegistry {
   static async load(options: ModelRegistryOptions = {}) {
     const homeDir = options.homeDir ?? homedir();
     const env = options.env ?? process.env;
-    const catalog = await loadBuiltinModelCatalog();
+    const catalog = await loadBuiltinModelCatalog({ homeDir });
     const providers = catalog.providers.map((provider) => ({
       ...provider,
       diagnostics: [...provider.diagnostics],
@@ -235,7 +236,7 @@ export class ModelRegistry {
       const providerCustom = provider.source === "user-custom";
       provider.availability = worstAvailability(provider.diagnostics, provider.hasAuthentication);
       for (const model of provider.models) {
-        const diagnostics = [...provider.diagnostics, ...validateModel(provider, model, providerCustom)];
+        const diagnostics = [...provider.diagnostics, ...model.diagnostics, ...validateModel(provider, model, providerCustom)];
         model.diagnostics = diagnostics;
         model.availability = diagnostics.some(isConfigurationDiagnostic) ? "configuration-error" : provider.availability;
         model.available = model.availability === "available";
