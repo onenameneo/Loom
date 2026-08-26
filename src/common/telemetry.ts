@@ -37,13 +37,165 @@ function finiteNonNegative(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
-function firstNumber(value: Record<string, unknown>, keys: string[]): number | undefined {
+function firstNumber(value: Record<string, unknown>, keys: readonly string[]): number | undefined {
   for (const key of keys) {
     const number = finiteNonNegative(value[key]);
     if (number !== undefined) return number;
   }
   return undefined;
 }
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" ? value as Record<string, unknown> : undefined;
+}
+
+type UsageRecord = Record<string, unknown>;
+
+interface ParsedUsage {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  reasoning?: number;
+  total?: number;
+  exact: boolean;
+  source: UsageSource;
+}
+
+type UsageReader = (usage: UsageRecord) => UsageFacts | undefined;
+
+const CANONICAL_KEYS = ["input", "output", "cacheRead", "cacheWrite", "reasoning"] as const;
+const CANONICAL_INPUT_KEYS = ["input"];
+const CANONICAL_OUTPUT_KEYS = ["output"];
+const CANONICAL_CACHE_READ_KEYS = ["cacheRead"];
+const CANONICAL_CACHE_WRITE_KEYS = ["cacheWrite"];
+const CANONICAL_REASONING_KEYS = ["reasoning"];
+
+const COMPAT_INPUT_KEYS = ["input", "inputTokens", "promptTokens", "prompt_tokens"];
+const COMPAT_OUTPUT_KEYS = ["output", "outputTokens", "completionTokens", "completion_tokens"];
+const COMPAT_CACHE_READ_KEYS = ["cacheRead", "cacheReadTokens", "cachedTokens", "cacheTokens", "cached_tokens", "promptCacheHitTokens", "prompt_cache_hit_tokens"];
+const COMPAT_CACHE_WRITE_KEYS = ["cacheWrite", "cacheWriteTokens"];
+const COMPAT_REASONING_KEYS = ["reasoning", "reasoningTokens", "reasoning_tokens"];
+const TOTAL_KEYS = ["totalTokens", "total_tokens", "total"];
+
+const LEGACY_KEYS = [
+  "inputTokens", "promptTokens", "prompt_tokens", "input_tokens",
+  "outputTokens", "completionTokens", "completion_tokens", "output_tokens",
+  "cachedTokens", "cacheTokens", "cached_tokens", "promptCacheHitTokens", "prompt_cache_hit_tokens",
+  "reasoningTokens", "reasoning_tokens",
+];
+
+function hasNumber(value: UsageRecord | undefined, keys: readonly string[]): boolean {
+  return value ? keys.some((key) => finiteNonNegative(value[key]) !== undefined) : false;
+}
+
+function hasAnyNumericProperty(value: UsageRecord | undefined): boolean {
+  return value ? Object.values(value).some((item) => finiteNonNegative(item) !== undefined) : false;
+}
+
+function responseDetails(usage: UsageRecord): { input?: UsageRecord; output?: UsageRecord } {
+  return {
+    input: objectValue(usage.input_tokens_details),
+    output: objectValue(usage.output_tokens_details),
+  };
+}
+
+function isResponsesUsage(usage: UsageRecord): boolean {
+  const details = responseDetails(usage);
+  return hasNumber(usage, ["input_tokens", "output_tokens", "total_tokens"])
+    || hasAnyNumericProperty(details.input)
+    || hasAnyNumericProperty(details.output);
+}
+
+function toUsageFacts(usage: UsageRecord, parsed: ParsedUsage): UsageFacts {
+  const input = parsed.input ?? 0;
+  const output = parsed.output ?? 0;
+  const cacheRead = parsed.cacheRead ?? 0;
+  const cacheWrite = parsed.cacheWrite ?? 0;
+  const cost = normalizeCost(usage.cost);
+  return {
+    input,
+    output,
+    cacheRead,
+    cacheWrite,
+    ...(parsed.reasoning !== undefined ? { reasoning: parsed.reasoning } : {}),
+    total: parsed.total ?? input + output + cacheRead + cacheWrite,
+    ...(cost ? { cost } : {}),
+    exact: parsed.exact,
+    source: parsed.source,
+  };
+}
+
+function readAliasedUsage(usage: UsageRecord, provenance: Pick<ParsedUsage, "exact" | "source">): UsageFacts {
+  return toUsageFacts(usage, {
+    input: firstNumber(usage, COMPAT_INPUT_KEYS),
+    output: firstNumber(usage, COMPAT_OUTPUT_KEYS),
+    cacheRead: firstNumber(usage, COMPAT_CACHE_READ_KEYS),
+    cacheWrite: firstNumber(usage, COMPAT_CACHE_WRITE_KEYS),
+    reasoning: firstNumber(usage, COMPAT_REASONING_KEYS),
+    total: firstNumber(usage, TOTAL_KEYS),
+    ...provenance,
+  });
+}
+
+function readCanonicalUsage(usage: UsageRecord): UsageFacts | undefined {
+  const hasCanonicalFields = hasNumber(usage, CANONICAL_KEYS);
+  const canUseCanonicalTotal = !hasCanonicalFields
+    && !hasNumber(usage, LEGACY_KEYS)
+    && !isResponsesUsage(usage)
+    && finiteNonNegative(usage.totalTokens) !== undefined;
+  if (!hasCanonicalFields && !canUseCanonicalTotal) return undefined;
+
+  return readAliasedUsage(usage, {
+    exact: true,
+    source: "provider",
+  });
+}
+
+function readResponsesUsage(usage: UsageRecord): UsageFacts | undefined {
+  if (!isResponsesUsage(usage)) return undefined;
+
+  const details = responseDetails(usage);
+  const cached = firstNumber(details.input ?? {}, ["cached_tokens", "cache_read_tokens"]) ?? 0;
+  const cacheWrite = firstNumber(details.input ?? {}, ["cache_write_tokens"]) ?? 0;
+  const inputTokens = firstNumber(usage, ["input_tokens"]);
+  const outputTokens = firstNumber(usage, ["output_tokens"]);
+
+  return toUsageFacts(usage, {
+    input: firstNumber(usage, CANONICAL_INPUT_KEYS)
+      ?? (inputTokens !== undefined ? Math.max(0, inputTokens - cached - cacheWrite) : undefined),
+    output: firstNumber(usage, CANONICAL_OUTPUT_KEYS) ?? outputTokens,
+    cacheRead: firstNumber(usage, CANONICAL_CACHE_READ_KEYS) ?? cached,
+    cacheWrite: firstNumber(usage, CANONICAL_CACHE_WRITE_KEYS) ?? cacheWrite,
+    reasoning: firstNumber(usage, CANONICAL_REASONING_KEYS)
+      ?? firstNumber(details.output ?? {}, ["reasoning_tokens", "thinking_tokens"]),
+    total: firstNumber(usage, TOTAL_KEYS),
+    exact: true,
+    source: "provider",
+  });
+}
+
+function readLegacyUsage(usage: UsageRecord): UsageFacts | undefined {
+  if (!hasNumber(usage, LEGACY_KEYS)) return undefined;
+
+  return readAliasedUsage(usage, {
+    exact: false,
+    source: "estimated",
+  });
+}
+
+/**
+ * Reader order is the compatibility contract: canonical values win, then
+ * recognized provider payloads, then historical aliases.
+ *
+ * A new provider format should get its own reader and be added here; the
+ * normalization and legacy readers do not need to grow another branch.
+ */
+const usageReaders: readonly UsageReader[] = [
+  readCanonicalUsage,
+  readResponsesUsage,
+  readLegacyUsage,
+];
 
 function normalizeCost(value: unknown): LlmCost | undefined {
   if (!value || typeof value !== "object") return undefined;
@@ -69,31 +221,13 @@ function normalizeCost(value: unknown): LlmCost | undefined {
 
 /** One compatibility reader shared by provider normalization and trace display. */
 export function readUsageFacts(value: unknown): UsageFacts | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const usage = value as Record<string, unknown>;
-  const hasCanonicalSpecificField = ["input", "output", "cacheRead", "cacheWrite", "reasoning"].some((key) => finiteNonNegative(usage[key]) !== undefined);
-  const legacyKeys = ["inputTokens", "promptTokens", "prompt_tokens", "input_tokens", "outputTokens", "completionTokens", "completion_tokens", "output_tokens", "cachedTokens", "cacheTokens", "cached_tokens", "promptCacheHitTokens", "prompt_cache_hit_tokens", "reasoningTokens", "reasoning_tokens"];
-  const hasLegacyField = legacyKeys.some((key) => finiteNonNegative(usage[key]) !== undefined);
-  const hasCanonicalField = hasCanonicalSpecificField || (!hasLegacyField && finiteNonNegative(usage.totalTokens) !== undefined);
-  if (!hasCanonicalField && !hasLegacyField) return undefined;
-  const input = firstNumber(usage, ["input", "inputTokens", "promptTokens", "prompt_tokens", "input_tokens"]) ?? 0;
-  const output = firstNumber(usage, ["output", "outputTokens", "completionTokens", "completion_tokens", "output_tokens"]) ?? 0;
-  const cacheRead = firstNumber(usage, ["cacheRead", "cacheReadTokens", "cachedTokens", "cacheTokens", "cached_tokens", "promptCacheHitTokens", "prompt_cache_hit_tokens"]) ?? 0;
-  const cacheWrite = firstNumber(usage, ["cacheWrite", "cacheWriteTokens"]) ?? 0;
-  const reasoning = firstNumber(usage, ["reasoning", "reasoningTokens", "reasoning_tokens"]);
-  const total = firstNumber(usage, ["totalTokens", "total_tokens", "total"]) ?? input + output + cacheRead + cacheWrite;
-  const cost = normalizeCost(usage.cost);
-  return {
-    input,
-    output,
-    cacheRead,
-    cacheWrite,
-    ...(reasoning !== undefined ? { reasoning } : {}),
-    total,
-    ...(cost ? { cost } : {}),
-    exact: hasCanonicalField,
-    source: hasCanonicalField ? "provider" : "estimated",
-  };
+  const usage = objectValue(value);
+  if (!usage) return undefined;
+  for (const reader of usageReaders) {
+    const facts = reader(usage);
+    if (facts) return facts;
+  }
+  return undefined;
 }
 
 export type AgentMetricKind = "turn" | "llm" | "tool" | "compaction";

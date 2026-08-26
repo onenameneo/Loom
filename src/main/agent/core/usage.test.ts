@@ -38,6 +38,45 @@ describe("canonical usage", () => {
     expect(normalizeLlmUsage({ input: 2, output: 3, cacheRead: 4, cacheWrite: 1 })?.totalTokens).toBe(10);
   });
 
+  it("normalizes raw OpenAI Responses usage details", () => {
+    expect(normalizeLlmUsage({
+      input_tokens: 100,
+      output_tokens: 20,
+      total_tokens: 120,
+      input_tokens_details: { cached_tokens: 80, cache_write_tokens: 5 },
+      output_tokens_details: { reasoning_tokens: 7 },
+    })).toEqual({
+      input: 15,
+      output: 20,
+      cacheRead: 80,
+      cacheWrite: 5,
+      reasoning: 7,
+      totalTokens: 120,
+      exact: true,
+      source: "provider",
+    });
+  });
+
+  it("prefers a recognized Responses payload over legacy aliases", () => {
+    expect(normalizeLlmUsage({
+      input_tokens: 100,
+      output_tokens: 20,
+      total_tokens: 120,
+      input_tokens_details: { cached_tokens: 80, cache_write_tokens: 5 },
+      inputTokens: 1,
+      outputTokens: 2,
+      cachedTokens: 3,
+    })).toMatchObject({
+      input: 15,
+      output: 20,
+      cacheRead: 80,
+      cacheWrite: 5,
+      totalTokens: 120,
+      exact: true,
+      source: "provider",
+    });
+  });
+
   it("normalizes message usage", () => {
     expect(usageFromMessage({ usage: { input: 1, output: 2, totalTokens: 3 } })).toMatchObject({ totalTokens: 3 });
     expect(usageFromMessage({ role: "user", content: "hello" })).toBeUndefined();
