@@ -73,6 +73,20 @@ beforeEach(() => {
 });
 
 describe("ChatView turn and approval controls", () => {
+  it("shows agent loading before the live turn has its first output", async () => {
+    useWorkspaceStore.getState().applyLiveTurn({
+      type: "upsert",
+      snapshot: {
+        nodeId: "n1", sessionId: "session-a", turnId: "turn-a", operation: "send",
+        state: "running", revision: 1, assistantText: "",
+      },
+    });
+
+    renderChat();
+
+    expect(await screen.findByText("思考中…")).toBeTruthy();
+  });
+
   it("shows a navigation notice at the copied branch boundary", () => {
     const onReturnToBranch = vi.fn();
     render(

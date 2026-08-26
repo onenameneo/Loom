@@ -1,5 +1,13 @@
 import type { LiveTurnContentPart, LiveTurnSnapshot } from "../env";
 
+export function hasLiveTurnOutput(snapshot: LiveTurnSnapshot): boolean {
+  return Boolean(
+    snapshot.assistantText
+    || snapshot.assistantThinking
+    || snapshot.contentParts?.some((part: LiveTurnContentPart) => part.text.length > 0),
+  );
+}
+
 export interface LiveTurnMessageLike {
   role: string;
   text: string;

@@ -13,7 +13,7 @@ import { SelectionNoteCapture, addSelectionContextNote } from "../composer/Selec
 import { useTitlebarActions } from "../titlebar/Titlebar";
 import { ToolCallTimeline } from "./ToolCallTimeline";
 import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
-import { appendLiveTurnMessage } from "./liveTurnMessages";
+import { appendLiveTurnMessage, hasLiveTurnOutput } from "./liveTurnMessages";
 import { useComposerHeightVar } from "./useComposerHeightVar";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { selectNodeApproval, selectNodeLiveTurn, selectNodeTodoPlan, useWorkspaceStore } from "../workspace/store";
@@ -358,6 +358,7 @@ export default function ChatView({
 
   const isBusy = busy || Boolean(liveTurn);
   const streaming = isBusy && msgs[msgs.length - 1]?.role === "assistant";
+  const agentLoading = thinking || (Boolean(liveTurn) && !hasLiveTurnOutput(liveTurn));
   const awaitingApproval = turn?.state === "awaiting_approval" && approval;
 
   async function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = [], mentions: FileMentionRef[] = [], submittedSelectionNotes: SelectionContextNote[] = []) {
@@ -539,7 +540,7 @@ export default function ChatView({
               )}
             </div>
           )}
-          {msgs.length === 0 && !thinking && (
+          {msgs.length === 0 && !agentLoading && (
             <div className="cv-empty">
               {t("node.startThinking")}
               <br />
@@ -577,8 +578,8 @@ export default function ChatView({
               {item.kind === "message" && item.message.seq === branchSource?.messageSeq && <BranchReturnNotice />}
             </Fragment>
           ))}
-          {thinking && !liveTurn && (
-            <div className="thinking">
+          {agentLoading && (
+            <div className="thinking" role="status" aria-live="polite">
               <span className="dot">·</span> {t("chat.thinking")}
             </div>
           )}

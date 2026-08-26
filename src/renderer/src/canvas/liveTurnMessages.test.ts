@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LiveTurnContentPart, LiveTurnSnapshot } from "../env";
-import { appendLiveTurnMessage } from "./liveTurnMessages";
+import { appendLiveTurnMessage, hasLiveTurnOutput } from "./liveTurnMessages";
 
 type TestMessage = { role: string; text: string; thinking?: string; id: number };
 
@@ -79,5 +79,12 @@ describe("appendLiveTurnMessage", () => {
       [["thinking", "plan"], ["text", "answer"]],
       [["text", "after tool"]],
     ]);
+  });
+});
+
+describe("hasLiveTurnOutput", () => {
+  it("keeps the agent loading state visible until the live turn has output", () => {
+    expect(hasLiveTurnOutput(snapshot(""))).toBe(false);
+    expect(hasLiveTurnOutput(snapshot("answer"))).toBe(true);
   });
 });

@@ -14,7 +14,7 @@ import type { MessageBranchMode } from "../ui/dialogs";
 import { BranchContext } from "./branch";
 import { ToolCallTimeline } from "./ToolCallTimeline";
 import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
-import { appendLiveTurnMessage } from "./liveTurnMessages";
+import { appendLiveTurnMessage, hasLiveTurnOutput } from "./liveTurnMessages";
 import { useComposerHeightVar } from "./useComposerHeightVar";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { type NodeUpdate } from "./nodeUpdates";
@@ -559,6 +559,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   const titleEditUnits = Array.from(title || "标题").reduce((sum, char) => sum + (char.charCodeAt(0) > 255 ? 2 : 1), 0);
   const titleEditWidth = `${Math.min(Math.max(titleEditUnits + 2, 8), 36)}ch`;
   const streaming = isBusy && msgs[msgs.length - 1]?.role === "assistant";
+  const agentLoading = thinking || (Boolean(liveTurn) && !hasLiveTurnOutput(liveTurn));
   const awaitingApproval = turn?.state === "awaiting_approval" && approval;
   const hasChildren = Boolean(data.hasChildren);
   const treeCollapsed = Boolean(data.isTreeCollapsed);
@@ -781,7 +782,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
             </button>
           )}
 
-          {msgs.length === 0 && !thinking && (
+          {msgs.length === 0 && !agentLoading && (
             <div className="empty">{data.seed ? t("node.seedPrompt") : t("node.startThinking")}</div>
           )}
 
@@ -815,7 +816,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
             )
           ))}
 
-          {thinking && !liveTurn && <div className="thinking"><span className="dot">·</span> {t("chat.thinking")}</div>}
+          {agentLoading && <div className="thinking" role="status" aria-live="polite"><span className="dot">·</span> {t("chat.thinking")}</div>}
 
           {tb && (
             <div
