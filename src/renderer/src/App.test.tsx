@@ -9,6 +9,7 @@ vi.mock("./Sidebar", () => ({
   default: ({ activeSurface, setSurface, onSelectProject, onSelectSession, onFocusNode, onOpenCreateProject, toggleTheme, ctx }: any) => (
     <aside>
       <output data-testid="active-surface">{activeSurface}</output>
+      <output data-testid="settings-section">{ctx.settingsSection ?? "none"}</output>
       <button onClick={onOpenCreateProject}>sidebar create project</button>
       <button onClick={toggleTheme}>toggle theme</button>
       <button onClick={() => setSurface("settings")}>show settings</button>
@@ -49,6 +50,10 @@ vi.mock("./surfaces", () => ({
         </>
       );
     },
+  }, {
+    id: "settings",
+    label: "Settings",
+    Panel: ({ ctx }: any) => <output data-testid="settings-surface">{ctx.settingsSection ?? "none"}</output>,
   }],
   applyActivityEvent: vi.fn(),
   getSessionViews: () => [],
@@ -243,6 +248,17 @@ describe("App project creation flow", () => {
     expect(screen.getAllByRole("dialog", { name: "创建项目" })).toHaveLength(1);
     expect(document.querySelectorAll(".project-create-dialog")).toHaveLength(1);
     expect(api.create).not.toHaveBeenCalled();
+  });
+
+  it("normalizes the legacy Memory menu action to the Settings memory section", async () => {
+    const api = installApi();
+    render(<App />);
+    await waitFor(() => expect(api.list).toHaveBeenCalledOnce());
+
+    api.emitMenu("surface:memory");
+
+    await waitFor(() => expect(screen.getByTestId("active-surface").textContent).toBe("settings"));
+    expect(screen.getByTestId("settings-section").textContent).toBe("memory");
   });
 
   it("resets draft state when reopened from another entry and preserves the active project across every ordinary dismiss route", async () => {

@@ -29,7 +29,6 @@ describe("ModelCatalogPicker", () => {
         onClear={vi.fn()}
         onAddCustom={vi.fn()}
         editing={false}
-        selectedCountLabel="selected"
         selectAllLabel="select all"
         clearLabel="clear"
         addCustomLabel="custom"

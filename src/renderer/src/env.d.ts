@@ -497,6 +497,8 @@ export interface ModelRegistryPayload {
     diagnostics: Array<{ code: string; message: string; field?: string }>;
     hasAuthentication: boolean;
     hasPlaintextSecret: boolean;
+    authMethods?: Array<{ type: "api_key" | "oauth"; label: string; isSubscription?: boolean; loginLabel?: string }>;
+    configuredAuthTypes?: Array<"api_key" | "oauth">;
     models: Array<{
       id: string;
       providerId: string;
@@ -532,6 +534,14 @@ export interface AddProviderModelPayload {
   images: boolean;
   modelFromProvider?: boolean;
 }
+
+export type ModelAuthPrompt =
+  | { requestId: string; providerId: string; prompt: { type: "text" | "secret" | "manual_code"; message: string; placeholder?: string } }
+  | { requestId: string; providerId: string; prompt: { type: "select"; message: string; options: Array<{ id: string; label: string; description?: string }> } };
+export type ModelAuthEvent =
+  | { providerId: string; type: "info" | "progress"; message: string; links?: Array<{ url: string; label?: string }> }
+  | { providerId: string; type: "auth_url"; url: string; instructions?: string }
+  | { providerId: string; type: "device_code"; userCode: string; verificationUri: string; intervalSeconds?: number; expiresInSeconds?: number };
 
 declare global {
   interface Window {
@@ -601,7 +611,14 @@ declare global {
         setPermissions: (patch: Partial<NonNullable<SettingsPayload["permissions"]>>) => Promise<{ ok: boolean; permissions: NonNullable<SettingsPayload["permissions"]> }>;
         setGlobalModel: (model: { providerId: string; modelId: string }) => Promise<{ ok: boolean }>;
         addProviderModel: (input: AddProviderModelPayload) => Promise<{ ok: boolean }>;
+        loginProvider: (providerId: string) => Promise<{ ok: boolean; type?: "oauth"; error?: string }>;
+        cancelLoginProvider: (providerId: string) => Promise<{ ok: boolean }>;
+        logoutProvider: (providerId: string) => Promise<{ ok: boolean }>;
+        respondToAuthPrompt: (response: { requestId: string; value?: string; cancelled?: boolean }) => void;
+        onAuthPrompt: (listener: (prompt: ModelAuthPrompt) => void) => () => void;
+        onAuthEvent: (listener: (event: ModelAuthEvent) => void) => () => void;
         deleteProviderModel: (model: { providerId: string; modelId: string }) => Promise<{ ok: boolean }>;
+        deleteProvider: (providerId: string) => Promise<{ ok: boolean }>;
         refreshModelCatalog: () => Promise<{ status: "updated" | "not-modified" | "offline-fallback" | "invalid-response" | "failed"; fetchedAt?: string; providerCount: number; modelCount: number; diagnostics: Array<{ code: string; message: string; field?: string }> }>;
         openModelsJson: () => Promise<{ ok: boolean; path: string; error?: string }>;
         skills: (projectId?: string) => Promise<SkillCatalogDto>;
@@ -656,6 +673,8 @@ declare global {
         preview: (id: string) => Promise<{ record: unknown; markdown: string } | undefined>;
         remember: (input: any) => Promise<any>;
         edit: (arg: { id: string; patch: any }) => Promise<any>;
+        restore: (id: string) => Promise<any>;
+        purge: (id: string) => Promise<any>;
         archive: (id: string, reason?: string) => Promise<any>;
         forget: (id: string, reason?: string) => Promise<any>;
         approve: (id: string, overrides?: any) => Promise<any>;

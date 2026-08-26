@@ -2,6 +2,14 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 
 export type ModelAvailability = "available" | "missing-authentication" | "configuration-error";
 export type ConfigSource = "pi-builtin" | "models-dev" | "user-overridden" | "user-custom" | "builtin";
+export type ProviderAuthType = "api_key" | "oauth";
+
+export interface ProviderAuthMethod {
+  type: ProviderAuthType;
+  label: string;
+  isSubscription?: boolean;
+  loginLabel?: string;
+}
 
 export interface ModelRef {
   providerId: string;
@@ -47,6 +55,8 @@ export interface RegistryProvider {
   diagnostics: ModelDiagnostic[];
   hasAuthentication: boolean;
   hasPlaintextSecret: boolean;
+  authMethods?: ProviderAuthMethod[];
+  configuredAuthTypes?: ProviderAuthType[];
   models: RegistryModel[];
 }
 
@@ -65,6 +75,8 @@ export interface RendererRegistryDTO {
     diagnostics: ModelDiagnostic[];
     hasAuthentication: boolean;
     hasPlaintextSecret: boolean;
+    authMethods: ProviderAuthMethod[];
+    configuredAuthTypes: ProviderAuthType[];
     models: Array<{
       id: string;
       providerId: string;

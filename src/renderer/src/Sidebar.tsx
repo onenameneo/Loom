@@ -25,6 +25,7 @@ import { cn } from "./ui/styles";
 import { selectProjects, selectSessionsForProject, useWorkspaceStore } from "./workspace/store";
 import { useI18n } from "./i18n/I18nProvider";
 import { localizedNodeTitle, localizedSessionTitle } from "./i18n/titleLabels";
+import { SettingsNav } from "./settings/SettingsNav";
 
 const SIDEBAR_PROJECT_EXPANSION_KEY = "loom:sidebar:expanded-projects";
 const SIDEBAR_SESSION_EXPANSION_KEY = "loom:sidebar:expanded-sessions";
@@ -643,6 +644,10 @@ export default function Sidebar({
             <div className="sb-hint px-[9px] pb-[6px] pt-[2px] text-[11px] text-loom-faint">{t("nav.noActivity")}</div>
           )}
         </>
+      )}
+
+      {activeSurface === "settings" && ctx.setSettingsSection && (
+        <SettingsNav value={ctx.settingsSection} onValueChange={ctx.setSettingsSection} />
       )}
 
       <RenameDialog

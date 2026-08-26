@@ -74,6 +74,8 @@ function mergeNormalizedProviders(providers: RegistryProvider[], additions: Norm
         diagnostics: [],
         hasAuthentication: false,
         hasPlaintextSecret: false,
+        authMethods: [{ type: "api_key", label: "API key" }],
+        configuredAuthTypes: [],
         models: addition.models.map(adaptCatalogModel),
       });
       continue;
@@ -100,6 +102,11 @@ export async function loadBuiltinModelCatalog(options: { homeDir?: string } = {}
     diagnostics: [],
     hasAuthentication: false,
     hasPlaintextSecret: false,
+    authMethods: [
+      ...(provider.auth.apiKey ? [{ type: "api_key" as const, label: provider.auth.apiKey.name }] : []),
+      ...(provider.auth.oauth ? [{ type: "oauth" as const, label: provider.auth.oauth.name, isSubscription: provider.auth.oauth.isSubscription, loginLabel: provider.auth.oauth.loginLabel }] : []),
+    ],
+    configuredAuthTypes: [],
     models: provider.getModels().map((model) => adaptPiModel(model, "pi-builtin")),
   }));
   mergeNormalizedProviders(providers, embeddedCatalogProviders());

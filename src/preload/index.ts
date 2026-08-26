@@ -212,8 +212,23 @@ const api = {
     setGlobalModel: (model: { providerId: string; modelId: string }): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("settings:setGlobalModel", model),
     addProviderModel: (input: any): Promise<{ ok: boolean }> => ipcRenderer.invoke("settings:addProviderModel", input),
+    loginProvider: (providerId: string): Promise<any> => ipcRenderer.invoke("settings:loginProvider", providerId),
+    cancelLoginProvider: (providerId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("settings:cancelLoginProvider", providerId),
+    logoutProvider: (providerId: string): Promise<any> => ipcRenderer.invoke("settings:logoutProvider", providerId),
+    respondToAuthPrompt: (response: any): void => { ipcRenderer.send("settings:auth-prompt-response", response); },
+    onAuthPrompt: (listener: (prompt: any) => void) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, prompt: any) => listener(prompt);
+      ipcRenderer.on("settings:auth-prompt", wrapped);
+      return () => ipcRenderer.removeListener("settings:auth-prompt", wrapped);
+    },
+    onAuthEvent: (listener: (event: any) => void) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, authEvent: any) => listener(authEvent);
+      ipcRenderer.on("settings:auth-event", wrapped);
+      return () => ipcRenderer.removeListener("settings:auth-event", wrapped);
+    },
     deleteProviderModel: (model: { providerId: string; modelId: string }): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke("settings:deleteProviderModel", model),
+    deleteProvider: (providerId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("settings:deleteProvider", providerId),
     refreshModelCatalog: (): Promise<{ status: string; fetchedAt?: string; providerCount: number; modelCount: number; diagnostics: Array<{ code: string; message: string; field?: string }> }> =>
       ipcRenderer.invoke("settings:refreshModelCatalog"),
     openModelsJson: (): Promise<{ ok: boolean; path: string; error?: string }> =>
@@ -266,6 +281,8 @@ const api = {
     preview: (id: string): Promise<any> => ipcRenderer.invoke("memory:preview", id),
     remember: (input: any): Promise<MemoryRecordDto> => ipcRenderer.invoke("memory:remember", input),
     edit: (arg: { id: string; patch: any }): Promise<MemoryRecordDto | undefined> => ipcRenderer.invoke("memory:edit", arg),
+    restore: (id: string): Promise<MemoryRecordDto | undefined> => ipcRenderer.invoke("memory:restore", id),
+    purge: (id: string): Promise<MemoryRecordDto | undefined> => ipcRenderer.invoke("memory:purge", id),
     archive: (id: string, reason?: string): Promise<MemoryRecordDto | undefined> => ipcRenderer.invoke("memory:archive", { id, reason }),
     forget: (id: string, reason?: string): Promise<MemoryRecordDto | undefined> => ipcRenderer.invoke("memory:forget", { id, reason }),
     approve: (id: string, overrides?: any): Promise<MemoryRecordDto | undefined> => ipcRenderer.invoke("memory:approve", { id, overrides }),

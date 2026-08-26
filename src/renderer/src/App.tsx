@@ -5,7 +5,8 @@ import Sidebar from "./Sidebar";
 import { CanvasLayoutProvider } from "./canvas/CanvasLayoutContext";
 import { AppChrome, TitlebarProvider } from "./titlebar/Titlebar";
 import { Workbench } from "./workbench/Workbench";
-import { CreateProjectDialog } from "./ui/dialogs";
+import { CreateProjectDialog, Modal } from "./ui/dialogs";
+import { buttonClassName } from "./ui/styles";
 import { isBrowserSidebarShortcut } from "./titlebar/sidebarState";
 import { useAppShellController } from "./titlebar/useAppShellController";
 import {
@@ -25,10 +26,14 @@ import { connectTodoPlanBridge } from "./workspace/todoPlanBridge";
 import { connectApprovalBridge } from "./workspace/approvalBridge";
 import { ApprovalCenter } from "./workspace/ApprovalCenter";
 import { useI18n } from "./i18n/I18nProvider";
+import { readStoredSettingsSection, SETTINGS_SECTION_STORAGE_KEY, type SettingsSectionId } from "./settings/settingsNavigation";
 
 export default function App() {
   const { t } = useI18n();
   const [activeSurface, setActiveSurface] = useState("project");
+  const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>(readStoredSettingsSection);
+  const [settingsSectionState, setSettingsSectionState] = useState<import("./surfaces").SettingsSectionState | null>(null);
+  const [pendingSettingsSection, setPendingSettingsSection] = useState<SettingsSectionId | null>(null);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const projects = useWorkspaceStore(useShallow(selectProjects));
   const activeProjectId = useWorkspaceStore((state) => state.activeProjectId);
@@ -331,7 +336,11 @@ export default function App() {
       else if (action === "settings") setActiveSurface("settings");
       else if (action === "surface:project") setActiveSurface("project");
       else if (action === "surface:observatory") setActiveSurface("observatory");
-      else if (action === "surface:memory") setActiveSurface("memory");
+      else if (action === "surface:memory") {
+        setActiveSettingsSection("memory");
+        localStorage.setItem(SETTINGS_SECTION_STORAGE_KEY, "memory");
+        setActiveSurface("settings");
+      }
       else if (action === "toggle-sidebar") shellController.requestToggle("menu");
     });
   }, [createSession, openCreateProject, shellController.requestToggle]);
@@ -359,6 +368,22 @@ export default function App() {
     setTreeVersion((v) => v + 1);
     if (activeProjectId) void reloadSessions(activeProjectId);
   }, [activeProjectId, reloadSessions]);
+
+  const commitSettingsSection = useCallback((section: SettingsSectionId) => {
+    setActiveSettingsSection(section);
+    localStorage.setItem(SETTINGS_SECTION_STORAGE_KEY, section);
+    setSettingsSectionState(null);
+    setPendingSettingsSection(null);
+  }, []);
+
+  const selectSettingsSection = useCallback((section: SettingsSectionId) => {
+    if (section === activeSettingsSection) return;
+    if (settingsSectionState?.dirty) {
+      setPendingSettingsSection(section);
+      return;
+    }
+    commitSettingsSection(section);
+  }, [activeSettingsSection, commitSettingsSection, settingsSectionState]);
 
   const ctx: SurfaceCtx = {
     projects,
@@ -389,6 +414,9 @@ export default function App() {
     runActivityConfig,
     createChatBranch,
     returnToBranchSource,
+    settingsSection: activeSettingsSection,
+    setSettingsSection: selectSettingsSection,
+    setSettingsSectionState,
   };
 
   const Active = SURFACES.find((s) => s.id === activeSurface) ?? SURFACES[0];
@@ -502,6 +530,17 @@ export default function App() {
             onPickFolder={pickProjectFolder}
             onSubmit={createProject}
           />
+          <Modal open={Boolean(pendingSettingsSection)} onOpenChange={(open) => { if (!open) setPendingSettingsSection(null); }} ariaLabel={t("settings.unsavedTitle")}>
+            <div className="settings-modal__panel settings-unsaved-dialog">
+              <div className="settings-modal__head"><h3>{t("settings.unsavedTitle")}</h3></div>
+              <p className="settings-help">{t("settings.unsavedBody")}</p>
+              <div className="settings-unsaved-dialog__actions">
+                <button className={buttonClassName()} type="button" onClick={() => setPendingSettingsSection(null)}>{t("common.cancel")}</button>
+                <button className={buttonClassName("danger")} type="button" onClick={() => { settingsSectionState?.discard(); if (pendingSettingsSection) commitSettingsSection(pendingSettingsSection); }}>{t("settings.discardChanges")}</button>
+                <button className={buttonClassName("primary")} type="button" onClick={async () => { if (!settingsSectionState || !pendingSettingsSection) return; const ok = await settingsSectionState.save(); if (ok) commitSettingsSection(pendingSettingsSection); }}>{t("settings.saveAndSwitch")}</button>
+              </div>
+            </div>
+          </Modal>
         </div>
       </CanvasLayoutProvider>
     </TitlebarProvider>

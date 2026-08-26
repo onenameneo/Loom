@@ -1,5 +1,4 @@
-import { useMemo, useState } from "react";
-import { LoomSelect, LoomSelectItem } from "../ui/controls";
+import { LoomSearchableSelect } from "../ui/controls";
 import type { RendererProvider } from "./modelCatalogState";
 
 export function ModelProviderPicker({
@@ -10,6 +9,7 @@ export function ModelProviderPicker({
   placeholder,
   ariaLabel,
   searchPlaceholder = "搜索 Provider",
+  emptyLabel = "没有匹配的 Provider",
 }: {
   providers: RendererProvider[];
   value: string;
@@ -18,23 +18,23 @@ export function ModelProviderPicker({
   placeholder: string;
   ariaLabel: string;
   searchPlaceholder?: string;
+  emptyLabel?: string;
 }) {
-  const [query, setQuery] = useState("");
-  const filteredProviders = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    if (!normalized) return providers;
-    return providers.filter((provider) => `${provider.name} ${provider.id}`.toLowerCase().includes(normalized));
-  }, [providers, query]);
   return (
-    <div className="grid gap-loom-1">
-      <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchPlaceholder} aria-label={searchPlaceholder} disabled={disabled} />
-      <LoomSelect value={value} onValueChange={onChange} disabled={disabled} placeholder={placeholder} ariaLabel={ariaLabel}>
-        {filteredProviders.map((provider) => (
-          <LoomSelectItem key={provider.id} value={provider.id}>
-            {provider.name} · {provider.id}
-          </LoomSelectItem>
-        ))}
-      </LoomSelect>
-    </div>
+    <LoomSearchableSelect
+      value={value}
+      onValueChange={onChange}
+      options={providers.map((provider) => ({
+        value: provider.id,
+        label: provider.name,
+        secondary: provider.id,
+        keywords: (provider.authMethods ?? []).map((method) => method.label).join(" "),
+      }))}
+      placeholder={placeholder}
+      searchPlaceholder={searchPlaceholder}
+      emptyLabel={emptyLabel}
+      ariaLabel={ariaLabel}
+      disabled={disabled}
+    />
   );
 }

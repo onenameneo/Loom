@@ -1,7 +1,8 @@
 import "dotenv/config"; // 先加载 .env（ANTHROPIC_API_KEY / BASE_URL）
 import { existsSync, writeFileSync } from "fs";
 import { join } from "path";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell, type WebContents } from "electron";
+import { randomUUID } from "node:crypto";
 import { dbPath, SqliteStore } from "./store/sqliteStore";
 import type { Store } from "./store/store";
 import { registerCanvas } from "./canvas";
@@ -14,8 +15,9 @@ import {
   resolveModelConfig,
   saveApiKey,
 } from "./settings";
-import { addProviderModelConfig, deleteProviderModelConfig, ensureLoomAgentDefaults, writeGlobalDefaultModel } from "./modelConfig/files";
+import { addProviderModelConfig, deleteProviderConfig, deleteProviderModelConfig, ensureLoomAgentDefaults, writeGlobalDefaultModel } from "./modelConfig/files";
 import { modelsJsonPath } from "./modelConfig/paths";
+import { createJsonCredentialStore } from "./modelConfig/credentialStore";
 import { ModelRegistry } from "./modelConfig/registry";
 import { refreshModelsDevCatalog } from "./modelConfig/catalog/updateService";
 import { loadScopedModelSettings, resolveSelectedModel } from "./modelConfig/scopes";
@@ -34,6 +36,8 @@ import { assertRendererSender } from "./fileIpcAuthorization";
 import { registerMcpIpc } from "./mcp/ipc";
 import { FileArtifactRegistry } from "./fileArtifacts";
 import { parseArtifactActionRequest } from "../common/fileArtifacts";
+import type { AuthEvent, AuthPrompt } from "@earendil-works/pi-ai";
+import { createRuntimeModelsFromRegistry } from "./modelConfig/runtimeModels";
 
 // ---------------------------------------------------------------------------
 // 主进程：持久化(store) + 设置 + 会话 + 画布引擎(pi 多节点)。
@@ -51,6 +55,19 @@ let memory: MemoryRuntimeService | null = null;
 let menuLocale: "zh-CN" | "en" = app.getLocale().toLowerCase().startsWith("en") ? "en" : "zh-CN";
 let mcpIpcDispose: (() => void) | undefined;
 let fileArtifacts: FileArtifactRegistry;
+const pendingAuthPrompts = new Map<string, { sender: WebContents; providerId: string; resolve: (value: string) => void; reject: (error: Error) => void; cleanup: () => void }>();
+const activeAuthLogins = new Map<string, { controller: AbortController; sender: WebContents }>();
+
+function cancelProviderAuth(providerId: string) {
+  activeAuthLogins.get(providerId)?.controller.abort();
+  activeAuthLogins.delete(providerId);
+  for (const [requestId, pending] of pendingAuthPrompts) {
+    if (pending.providerId !== providerId) continue;
+    pendingAuthPrompts.delete(requestId);
+    pending.cleanup();
+    pending.reject(new Error("Authentication cancelled."));
+  }
+}
 
 // productName 只在 electron-builder 打包时写入 Info.plist；开发态 Electron
 // 二进制没有 Info.plist，app.getName() 默认返回 "Electron"，必须显式覆盖。
@@ -86,6 +103,17 @@ function registerIpc() {
     menuLocale = locale === "en" ? "en" : "zh-CN";
     invalidateAgent();
     buildMenu();
+  });
+  ipcMain.on("settings:auth-prompt-response", (event, response: unknown) => {
+    if (!response || typeof response !== "object" || event.sender !== win?.webContents) return;
+    const payload = response as { requestId?: unknown; value?: unknown; cancelled?: unknown };
+    if (typeof payload.requestId !== "string") return;
+    const pending = pendingAuthPrompts.get(payload.requestId);
+    if (!pending || pending.sender !== event.sender) return;
+    pendingAuthPrompts.delete(payload.requestId);
+    pending.cleanup();
+    if (payload.cancelled) pending.reject(new Error("Authentication cancelled."));
+    else pending.resolve(typeof payload.value === "string" ? payload.value : "");
   });
   ipcMain.handle("settings:get", async () => {
     const s = store.getSettings();
@@ -146,8 +174,77 @@ function registerIpc() {
     invalidateAgent();
     return { ok: true };
   });
+  ipcMain.handle("settings:loginProvider", async (event, providerId: unknown) => {
+    if (typeof providerId !== "string" || !providerId.trim()) return { ok: false, error: "Invalid provider." };
+    const registry = await ModelRegistry.load();
+    const provider = registry.listProviders().find((item) => item.id === providerId);
+    if (!provider?.authMethods?.some((method) => method.type === "oauth")) return { ok: false, error: "This provider does not support subscription login." };
+    cancelProviderAuth(providerId);
+    const controller = new AbortController();
+    activeAuthLogins.set(providerId, { controller, sender: event.sender });
+    try {
+      const models = await createRuntimeModelsFromRegistry(registry);
+      await models.login(providerId, "oauth", {
+        signal: controller.signal,
+        prompt: (prompt: AuthPrompt) => {
+          const requestId = randomUUID();
+          event.sender.send("settings:auth-prompt", { requestId, providerId, prompt });
+          return new Promise<string>((resolve, reject) => {
+            const onAbort = () => {
+              if (pendingAuthPrompts.get(requestId)?.providerId !== providerId) return;
+              pendingAuthPrompts.delete(requestId);
+              cleanup();
+              reject(new Error("Authentication cancelled."));
+            };
+            const cleanup = () => prompt.signal?.removeEventListener("abort", onAbort);
+            pendingAuthPrompts.set(requestId, { sender: event.sender, providerId, resolve, reject, cleanup });
+            prompt.signal?.addEventListener("abort", onAbort, { once: true });
+            if (prompt.signal?.aborted) onAbort();
+          });
+        },
+        notify: (authEvent: AuthEvent) => {
+          if (authEvent.type === "auth_url") void shell.openExternal(authEvent.url);
+          event.sender.send("settings:auth-event", { providerId, ...authEvent });
+        },
+      });
+      invalidateAgent();
+      return { ok: true, type: "oauth" as const };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : "Subscription login failed." };
+    } finally {
+      if (activeAuthLogins.get(providerId)?.controller === controller) activeAuthLogins.delete(providerId);
+      for (const [requestId, pending] of pendingAuthPrompts) {
+        if (pending.providerId !== providerId) continue;
+        pendingAuthPrompts.delete(requestId);
+        pending.cleanup();
+        pending.reject(new Error("Authentication cancelled."));
+      }
+    }
+  });
+  ipcMain.handle("settings:cancelLoginProvider", (_event, providerId: unknown) => {
+    if (typeof providerId !== "string" || !providerId.trim()) return { ok: false };
+    cancelProviderAuth(providerId);
+    return { ok: true };
+  });
+  ipcMain.handle("settings:logoutProvider", async (_event, providerId: unknown) => {
+    if (typeof providerId !== "string" || !providerId.trim()) return { ok: false };
+    cancelProviderAuth(providerId);
+    const registry = await ModelRegistry.load();
+    const models = await createRuntimeModelsFromRegistry(registry);
+    await models.logout(providerId);
+    invalidateAgent();
+    return { ok: true };
+  });
   ipcMain.handle("settings:deleteProviderModel", (_e, model: { providerId: string; modelId: string }) => {
     deleteProviderModelConfig(app.getPath("home"), model);
+    invalidateAgent();
+    return { ok: true };
+  });
+  ipcMain.handle("settings:deleteProvider", async (_e, providerId: unknown) => {
+    if (typeof providerId !== "string" || !providerId.trim()) return { ok: false };
+    cancelProviderAuth(providerId);
+    deleteProviderConfig(app.getPath("home"), providerId);
+    await createJsonCredentialStore(app.getPath("home")).delete(providerId);
     invalidateAgent();
     return { ok: true };
   });
@@ -297,6 +394,8 @@ function registerIpc() {
     assertMemoryProjectScope(arg?.patch?.scope);
     return memory?.edit(arg.id, arg.patch);
   });
+  ipcMain.handle("memory:restore", (_e, id: string) => memory?.restore(id));
+  ipcMain.handle("memory:purge", (_e, id: string) => memory?.purge(id));
   ipcMain.handle("memory:archive", (_e, arg: { id: string; reason?: string }) => memory?.archive(arg.id, arg.reason));
   ipcMain.handle("memory:forget", (_e, arg: { id: string; reason?: string }) => memory?.forget(arg.id, arg.reason));
   ipcMain.handle("memory:approve", (_e, arg: { id: string; overrides?: Parameters<MemoryRuntimeService["approveCandidate"]>[1] }) => {
@@ -336,7 +435,6 @@ function buildMenu() {
         { type: "separator" as const },
         { label: en ? "Project" : "项目", accelerator: "CmdOrCtrl+1", click: menuAction("surface:project") },
         { label: en ? "Observatory" : "工作站", accelerator: "CmdOrCtrl+2", click: menuAction("surface:observatory") },
-        { label: en ? "Memory" : "记忆", accelerator: "CmdOrCtrl+3", click: menuAction("surface:memory") },
         { type: "separator" as const },
         { role: "toggleDevTools" as const },
         { role: "resetZoom" as const },

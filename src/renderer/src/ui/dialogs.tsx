@@ -13,6 +13,8 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  error,
+  confirmDisabled = false,
   onConfirm,
 }: {
   open: boolean;
@@ -20,6 +22,8 @@ export function ConfirmDialog({
   title: string;
   description?: ReactNode;
   confirmLabel?: string;
+  error?: ReactNode;
+  confirmDisabled?: boolean;
   onConfirm: () => void;
 }) {
   const { t } = useI18n();
@@ -39,12 +43,13 @@ export function ConfirmDialog({
               <div className={cn("dlg-desc", dialogDescriptionClassName)}>{displayDescription}</div>
             </AlertDialog.Description>
           )}
+          {error && <div className="dlg-error" role="alert">{error}</div>}
           <div className={cn("dlg-actions", dialogActionsClassName)}>
             <AlertDialog.Cancel asChild>
               <button className={buttonClassName()} onClick={() => onOpenChange(false)}>{t("common.cancel")}</button>
             </AlertDialog.Cancel>
             <AlertDialog.Action asChild>
-              <button className={buttonClassName("danger")} onClick={onConfirm}>{confirmLabel ?? t("nav.delete")}</button>
+              <button className={buttonClassName("danger")} disabled={confirmDisabled} onClick={onConfirm}>{confirmLabel ?? t("nav.delete")}</button>
             </AlertDialog.Action>
           </div>
         </AlertDialog.Content>

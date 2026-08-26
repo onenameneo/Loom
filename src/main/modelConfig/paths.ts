@@ -8,6 +8,10 @@ export function modelsJsonPath(homeDir: string) {
   return join(loomAgentDir(homeDir), "models.json");
 }
 
+export function authJsonPath(homeDir: string) {
+  return join(loomAgentDir(homeDir), "auth.json");
+}
+
 export function globalSettingsPath(homeDir: string) {
   return join(loomAgentDir(homeDir), "settings.json");
 }

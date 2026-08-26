@@ -1,18 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
-import type { SettingsPayload } from "../env";
+import type { ModelAuthPrompt, SettingsPayload } from "../env";
 import type { SurfaceCtx } from "../surfaces";
 import { ConfirmDialog, Modal } from "../ui/dialogs";
 import { LoomSelect, LoomSelectGroup, LoomSelectItem } from "../ui/controls";
-import { iconButtonClassName } from "../ui/styles";
+import { buttonClassName, iconButtonClassName } from "../ui/styles";
 import { useI18n } from "../i18n/I18nProvider";
 import { CustomModelForm } from "./CustomModelForm";
 import { ModelAuthenticationFields } from "./ModelAuthenticationFields";
-import { ModelCapabilitySummary } from "./ModelCapabilitySummary";
 import { ModelCatalogPicker } from "./ModelCatalogPicker";
 import { ModelCatalogRefreshButton, type CatalogRefreshResult } from "./ModelCatalogRefreshButton";
 import { ModelProviderPicker } from "./ModelProviderPicker";
 import { configuredProviders, isCatalogSource, type RendererModel, type RendererProvider } from "./modelCatalogState";
+import { SettingsToolbar } from "./components/SettingsSection";
+import { ModelAuthPromptDialog } from "./ModelAuthPromptDialog";
 
 type ModelEntryMode = "registry" | "custom";
 
@@ -27,11 +28,12 @@ function isProviderCatalogModel(model: RendererModel) {
   return isCatalogSource(model.source);
 }
 
-export function ModelSettingsPanel({ ctx, settings, selectedModel, onDefaultModelChange }: {
+export function ModelSettingsPanel({ ctx, settings, selectedModel, onDefaultModelChange, showHeader = true }: {
   ctx: Pick<SurfaceCtx, "reloadSettings">;
   settings: SettingsPayload;
   selectedModel: string;
   onDefaultModelChange: (value: string) => void;
+  showHeader?: boolean;
 }) {
   const { t } = useI18n();
   const providers = settings.modelRegistry?.providers ?? [];
@@ -42,6 +44,7 @@ export function ModelSettingsPanel({ ctx, settings, selectedModel, onDefaultMode
   const [addOpen, setAddOpen] = useState(false);
   const [editingModel, setEditingModel] = useState<{ providerId: string; modelId: string } | null>(null);
   const [pendingDeleteModel, setPendingDeleteModel] = useState<{ providerId: string; modelId: string; name: string } | null>(null);
+  const [pendingDeleteProvider, setPendingDeleteProvider] = useState<{ providerId: string; name: string } | null>(null);
   const [providerId, setProviderId] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -54,6 +57,20 @@ export function ModelSettingsPanel({ ctx, settings, selectedModel, onDefaultMode
   const [maxTokens, setMaxTokens] = useState("8192");
   const [reasoning, setReasoning] = useState(false);
   const [images, setImages] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authPrompt, setAuthPrompt] = useState<ModelAuthPrompt | null>(null);
+  const [authMessage, setAuthMessage] = useState<string | undefined>();
+
+  useEffect(() => {
+    const removePrompt = window.api?.settings?.onAuthPrompt?.((prompt) => setAuthPrompt(prompt));
+    const removeEvent = window.api?.settings?.onAuthEvent?.((event) => {
+      if (event.type === "device_code") setAuthMessage(`请在浏览器中输入 ${event.userCode} 完成授权：${event.verificationUri}`);
+      else if (event.type === "auth_url") setAuthMessage(t("settings.authOpeningBrowser"));
+      else setAuthMessage(event.message);
+    });
+    return () => { removePrompt?.(); removeEvent?.(); };
+  }, [t]);
 
   function applyModelDefaults(model: RendererModel | undefined, fallbackProviderId: string) {
     setModelId(model?.id ?? "");
@@ -80,10 +97,16 @@ export function ModelSettingsPanel({ ctx, settings, selectedModel, onDefaultMode
     setMaxTokens("8192");
     setReasoning(false);
     setImages(false);
+    setAuthBusy(false);
+    setAuthPrompt(null);
+    setAuthMessage(undefined);
   }
 
   function openAddForm() {
     const firstProvider = providerOptions[0];
+    setAuthBusy(false);
+    setAuthPrompt(null);
+    setAuthMessage(undefined);
     setEditingModel(null);
     setModelEntryMode("registry");
     setProviderId(firstProvider?.id ?? "");
@@ -93,6 +116,9 @@ export function ModelSettingsPanel({ ctx, settings, selectedModel, onDefaultMode
   }
 
   function editProviderModel(provider: RendererProvider, model: RendererModel) {
+    setAuthBusy(false);
+    setAuthPrompt(null);
+    setAuthMessage(undefined);
     setEditingModel({ providerId: provider.id, modelId: model.id });
     setModelEntryMode("registry");
     setProviderId(provider.id);
@@ -107,6 +133,7 @@ export function ModelSettingsPanel({ ctx, settings, selectedModel, onDefaultMode
     setModelEntryMode("registry");
     setProviderId(nextProviderId);
     setBaseUrl(nextProvider?.baseUrl ?? "");
+    setAuthMessage(undefined);
     applyModelDefaults(nextProvider?.models[0], nextProviderId);
   }
 
@@ -131,6 +158,7 @@ export function ModelSettingsPanel({ ctx, settings, selectedModel, onDefaultMode
   }
 
   async function addProviderModel() {
+    if (saving) return;
     const cleanProviderId = providerId.trim();
     const cleanModelId = modelId.trim();
     const cleanBaseUrl = baseUrl.trim();
@@ -138,49 +166,96 @@ export function ModelSettingsPanel({ ctx, settings, selectedModel, onDefaultMode
     const selectedProvider = providerOptions.find((provider) => provider.id === cleanProviderId);
     const providerModels = selectedProvider?.models ?? [];
     const useRegistryModel = modelEntryMode === "registry" && providerModels.length > 0;
-    if (useRegistryModel) {
-      const selectedModels = providerModels.filter((model) => selectedModelIds.includes(model.id));
-      if (selectedModels.length === 0) return;
-      for (const model of selectedModels) {
+    setSaving(true);
+    try {
+      if (useRegistryModel) {
+        const selectedModels = providerModels.filter((model) => selectedModelIds.includes(model.id));
+        if (selectedModels.length === 0) return;
+        for (const model of selectedModels) {
+          await window.api.settings.addProviderModel({
+            providerId: cleanProviderId,
+            providerName: selectedProvider?.name,
+            baseUrl: cleanBaseUrl,
+            apiKey: apiKey.trim() || undefined,
+            modelId: model.id,
+            modelName: model.name,
+            api: model.api,
+            contextWindow: model.capabilities.contextWindow,
+            maxTokens: model.capabilities.maxOutputTokens,
+            reasoning: model.capabilities.reasoning,
+            images: model.capabilities.images,
+            modelFromProvider: isProviderCatalogModel(model),
+          });
+        }
+      } else {
+        if (!cleanModelId) return;
         await window.api.settings.addProviderModel({
           providerId: cleanProviderId,
           providerName: selectedProvider?.name,
           baseUrl: cleanBaseUrl,
           apiKey: apiKey.trim() || undefined,
-          modelId: model.id,
-          modelName: model.name,
-          api: model.api,
-          contextWindow: model.capabilities.contextWindow,
-          maxTokens: model.capabilities.maxOutputTokens,
-          reasoning: model.capabilities.reasoning,
-          images: model.capabilities.images,
-          modelFromProvider: isProviderCatalogModel(model),
+          modelId: cleanModelId,
+          modelName: modelName.trim() || cleanModelId,
+          api,
+          contextWindow: Number(contextWindow) || 0,
+          maxTokens: Number(maxTokens) || 0,
+          reasoning,
+          images,
+          modelFromProvider: false,
         });
       }
-    } else {
-      if (!cleanModelId) return;
-      await window.api.settings.addProviderModel({
-        providerId: cleanProviderId,
-        providerName: selectedProvider?.name,
-        baseUrl: cleanBaseUrl,
-        apiKey: apiKey.trim() || undefined,
-        modelId: cleanModelId,
-        modelName: modelName.trim() || cleanModelId,
-        api,
-        contextWindow: Number(contextWindow) || 0,
-        maxTokens: Number(maxTokens) || 0,
-        reasoning,
-        images,
-        modelFromProvider: false,
-      });
+      setAddOpen(false);
+      resetAddForm();
+      ctx.reloadSettings();
+    } finally {
+      setSaving(false);
     }
-    setAddOpen(false);
-    resetAddForm();
-    ctx.reloadSettings();
+  }
+
+  async function loginSubscription() {
+    if (!providerId || authBusy) return;
+    setAuthBusy(true);
+    setAuthMessage(undefined);
+    try {
+      const result = await window.api.settings.loginProvider(providerId);
+      if (!result.ok) setAuthMessage(result.error ?? t("settings.authLoginFailed"));
+      else { setAuthMessage(t("settings.subscriptionConnected")); ctx.reloadSettings(); }
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : t("settings.authLoginFailed"));
+    } finally {
+      setAuthBusy(false);
+      setAuthPrompt(null);
+    }
+  }
+
+  async function cancelSubscriptionLogin() {
+    if (!authBusy) return;
+    const activeProviderId = providerId;
+    setAuthBusy(false);
+    setAuthPrompt(null);
+    setAuthMessage(undefined);
+    if (activeProviderId) await window.api.settings.cancelLoginProvider(activeProviderId);
+  }
+
+  async function logoutSubscription() {
+    if (!providerId || authBusy) return;
+    setAuthBusy(true);
+    try {
+      await window.api.settings.logoutProvider(providerId);
+      setAuthMessage(undefined);
+      ctx.reloadSettings();
+    } finally {
+      setAuthBusy(false);
+    }
   }
 
   async function deleteProviderModel(providerIdToDelete: string, modelIdToDelete: string) {
     await window.api.settings.deleteProviderModel({ providerId: providerIdToDelete, modelId: modelIdToDelete });
+    ctx.reloadSettings();
+  }
+
+  async function deleteProvider(providerIdToDelete: string) {
+    await window.api.settings.deleteProvider(providerIdToDelete);
     ctx.reloadSettings();
   }
 
@@ -195,25 +270,24 @@ export function ModelSettingsPanel({ ctx, settings, selectedModel, onDefaultMode
   const providerModelOptions = selectedProvider?.models ?? [];
   const selectedModelOption = providerModelOptions.find((model) => model.id === modelId);
   const useRegistryModel = modelEntryMode === "registry" && providerModelOptions.length > 0;
-  const selectedRegistryModels = providerModelOptions.filter((model) => selectedModelIds.includes(model.id));
   const canSaveModel = providerOptions.length > 0 && Boolean(providerId.trim()) && Boolean(baseUrl.trim()) && (useRegistryModel ? selectedModelIds.length > 0 : Boolean(modelId.trim()));
+  const modelActions = (
+    <div className="settings-inline model-config__actions">
+      <ModelCatalogRefreshButton onRefresh={refreshCatalog} label={t("settings.refreshModels")} />
+      <button className={iconButtonClassName("primary")} type="button" onClick={openAddForm} aria-label={t("settings.addModel")} title={t("settings.addModel")}><Plus size={17} /></button>
+    </div>
+  );
 
   return (
     <>
       <section className="model-config">
-        <div className="model-config__head">
-          <div>
-            <h3>{t("settings.modelConfig")}</h3>
-            <p>{t("settings.manageModels")}</p>
-          </div>
-          <div className="settings-inline">
-              <ModelCatalogRefreshButton onRefresh={refreshCatalog} label="刷新模型目录" />
-            <button className={iconButtonClassName("primary")} type="button" onClick={openAddForm} aria-label={t("settings.addModel")} title={t("settings.addModel")}><Plus size={17} /></button>
-          </div>
-        </div>
+        <SettingsToolbar
+          title={showHeader ? t("settings.modelConfig") : t("settings.configuredModels")}
+          description={showHeader ? t("settings.manageModels") : undefined}
+          actions={modelActions}
+        />
 
         <div className="model-config__block">
-          <div className="model-config__label">{t("settings.configuredModels")}</div>
           <div className="connection-list">
             {configured.map((provider) => (
               <div key={provider.id} className="connection-row">
@@ -223,7 +297,10 @@ export function ModelSettingsPanel({ ctx, settings, selectedModel, onDefaultMode
                       <div className="connection-name">{provider.name}</div>
                       <div className="connection-meta">{provider.id} · {provider.source} · {provider.baseUrl || t("settings.defaultBaseUrl")}</div>
                     </div>
-                    <span className={`status-pill ${provider.availability}`}>{provider.availability === "available" ? t("settings.connected") : provider.availability}</span>
+                    <div className="connection-title-actions">
+                      <span className={`status-pill ${provider.availability}`}>{provider.availability === "available" ? t("settings.connected") : provider.availability}</span>
+                      <button className={iconButtonClassName("danger")} type="button" onClick={() => setPendingDeleteProvider({ providerId: provider.id, name: provider.name })} aria-label={t("settings.deleteProvider")} title={t("settings.deleteProvider")}><Trash2 size={14} /></button>
+                    </div>
                   </div>
                   <div className="model-chip-row">
                     {provider.models.map((model) => (
@@ -259,7 +336,7 @@ export function ModelSettingsPanel({ ctx, settings, selectedModel, onDefaultMode
         {hasPlaintextSecret && <div className="warn-note">{t("settings.plaintextSecret")}</div>}
       </section>
 
-      <Modal open={addOpen} onOpenChange={setAddOpen} ariaLabel={t("settings.modelDialogAria")}>
+      <Modal open={addOpen} onOpenChange={(open) => { setAddOpen(open); if (!open) { setAuthPrompt(null); void cancelSubscriptionLogin(); } }} ariaLabel={t("settings.modelDialogAria")}>
         <div className="settings-modal__panel">
           <div className="settings-modal__head">
             <h3>{editingModel ? t("settings.editModel") : t("settings.addModel")}</h3>
@@ -269,13 +346,12 @@ export function ModelSettingsPanel({ ctx, settings, selectedModel, onDefaultMode
           <div className="settings-grid">
             <label className="field">
               <span>Provider</span>
-              <ModelProviderPicker providers={providerOptions} value={providerId} onChange={selectProvider} disabled={providerOptions.length === 0 || Boolean(editingModel)} placeholder={t("settings.chooseProvider")} ariaLabel="Provider" />
+              <ModelProviderPicker providers={providerOptions} value={providerId} onChange={selectProvider} disabled={providerOptions.length === 0 || Boolean(editingModel) || authBusy} placeholder={t("settings.chooseProvider")} ariaLabel="Provider" />
             </label>
-            <ModelAuthenticationFields baseUrl={baseUrl} apiKey={apiKey} onBaseUrlChange={setBaseUrl} onApiKeyChange={setApiKey} />
+            <ModelAuthenticationFields baseUrl={baseUrl} apiKey={apiKey} onBaseUrlChange={setBaseUrl} onApiKeyChange={setApiKey} authMethods={selectedProvider?.authMethods} configuredAuthTypes={selectedProvider?.configuredAuthTypes} authBusy={authBusy} authMessage={authMessage} onLogin={() => void loginSubscription()} onLogout={() => void logoutSubscription()} />
             {useRegistryModel ? (
               <>
-                {editingModel ? <div className="field model-static"><span>{t("settings.modelConfig")}</span><div className="model-static__value"><strong>{selectedModelOption?.name ?? modelId}</strong><em>{selectedModelOption?.id ?? modelId}</em></div></div> : <ModelCatalogPicker models={providerModelOptions} selectedIds={selectedModelIds} onToggle={(nextId) => setRegistryModelSelection(selectedModelIds.includes(nextId) ? selectedModelIds.filter((id) => id !== nextId) : [...selectedModelIds, nextId])} onSelectAll={() => setRegistryModelSelection(providerModelOptions.map((model) => model.id))} onClear={() => setRegistryModelSelection([])} onAddCustom={openCustomModelForm} editing={Boolean(editingModel)} selectedCountLabel={t("settings.selectedCount")} selectAllLabel={t("settings.selectAll")} clearLabel={t("settings.clear")} addCustomLabel={t("settings.addCustomModel")} />}
-                <ModelCapabilitySummary models={selectedRegistryModels} emptyLabel={t("settings.selectAtLeastOne")} sharedLabel={t("settings.modelsWillShare", { count: selectedRegistryModels.length })} />
+                {editingModel ? <div className="field model-static"><span>{t("settings.modelConfig")}</span><div className="model-static__value"><strong>{selectedModelOption?.name ?? modelId}</strong><em>{selectedModelOption?.id ?? modelId}</em></div></div> : <ModelCatalogPicker models={providerModelOptions} selectedIds={selectedModelIds} onToggle={(nextId) => setRegistryModelSelection(selectedModelIds.includes(nextId) ? selectedModelIds.filter((id) => id !== nextId) : [...selectedModelIds, nextId])} onSelectAll={() => setRegistryModelSelection(providerModelOptions.map((model) => model.id))} onClear={() => setRegistryModelSelection([])} onAddCustom={openCustomModelForm} editing={Boolean(editingModel)} selectAllLabel={t("settings.selectAll")} clearLabel={t("settings.clear")} addCustomLabel={t("settings.addCustomModel")} />}
               </>
             ) : (
               <>
@@ -284,11 +360,14 @@ export function ModelSettingsPanel({ ctx, settings, selectedModel, onDefaultMode
               </>
             )}
           </div>
-          <div className="settings-foot"><button className={iconButtonClassName("primary")} type="button" onClick={() => void addProviderModel()} disabled={!canSaveModel} aria-label={t("settings.saveModel")} title={t("settings.saveModel")}><Check size={16} /></button></div>
+          <div className="settings-foot model-dialog__foot"><div className="model-dialog__hint">{!providerId ? t("settings.chooseProvider") : useRegistryModel && selectedModelIds.length === 0 ? t("settings.selectAtLeastOne") : undefined}</div><button className={buttonClassName("primary")} type="button" onClick={() => void addProviderModel()} disabled={!canSaveModel || saving} aria-label={t("settings.saveModel")}><Check size={16} />{saving ? "…" : t("settings.saveModel")}{useRegistryModel && selectedModelIds.length > 0 ? ` · ${selectedModelIds.length}` : ""}</button></div>
         </div>
       </Modal>
 
+      <ModelAuthPromptDialog prompt={authPrompt} onRespond={(value, cancelled) => { if (authPrompt) window.api.settings.respondToAuthPrompt({ requestId: authPrompt.requestId, value, cancelled }); setAuthPrompt(null); }} />
+
       <ConfirmDialog open={Boolean(pendingDeleteModel)} onOpenChange={(open) => { if (!open) setPendingDeleteModel(null); }} title={t("settings.deleteModel")} description={pendingDeleteModel ? t("settings.deleteModelDescription", { name: pendingDeleteModel.name }) : undefined} onConfirm={() => { if (!pendingDeleteModel) return; void deleteProviderModel(pendingDeleteModel.providerId, pendingDeleteModel.modelId); setPendingDeleteModel(null); }} />
+      <ConfirmDialog open={Boolean(pendingDeleteProvider)} onOpenChange={(open) => { if (!open) setPendingDeleteProvider(null); }} title={t("settings.deleteProvider")} description={pendingDeleteProvider ? t("settings.deleteProviderDescription", { name: pendingDeleteProvider.name }) : undefined} onConfirm={() => { if (!pendingDeleteProvider) return; void deleteProvider(pendingDeleteProvider.providerId); setPendingDeleteProvider(null); }} />
     </>
   );
 }

@@ -143,3 +143,14 @@ export function deleteProviderModelConfig(homeDir: string, input: ModelRef) {
 
   writeFileSync(filePath, `${JSON.stringify(current, null, 2)}\n`, "utf-8");
 }
+
+export function deleteProviderConfig(homeDir: string, providerId: string) {
+  ensureLoomAgentDefaults({ homeDir });
+  const filePath = modelsJsonPath(homeDir);
+  const current = readJsonObject(filePath);
+  const providers = objectValue(current.providers);
+
+  delete providers[providerId.trim()];
+  current.providers = providers;
+  writeFileSync(filePath, `${JSON.stringify(current, null, 2)}\n`, "utf-8");
+}

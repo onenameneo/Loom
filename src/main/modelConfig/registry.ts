@@ -4,6 +4,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { adaptPiModel, loadBuiltinModelCatalog } from "./builtinCatalog";
 import { resolveConfigValue } from "./interpolation";
 import { modelsJsonPath } from "./paths";
+import { createJsonCredentialStore } from "./credentialStore";
 import type {
   ConfigSource,
   ModelAvailability,
@@ -156,6 +157,7 @@ export class ModelRegistry {
   private constructor(
     private readonly providers: RegistryProvider[],
     private readonly secrets: Map<string, ProviderSecret>,
+    private readonly homeDir: string,
   ) {}
 
   static async load(options: ModelRegistryOptions = {}) {
@@ -165,9 +167,12 @@ export class ModelRegistry {
     const providers = catalog.providers.map((provider) => ({
       ...provider,
       diagnostics: [...provider.diagnostics],
+      authMethods: (provider.authMethods ?? []).map((method) => ({ ...method })),
+      configuredAuthTypes: [...(provider.configuredAuthTypes ?? [])],
       models: provider.models.map((model) => ({ ...model, diagnostics: [...model.diagnostics] })),
     }));
     const secrets = new Map<string, ProviderSecret>();
+    const storedAuthTypes = new Map((await createJsonCredentialStore(homeDir).list()).map((entry) => [entry.providerId, entry.type]));
     const file = readJsonFile(modelsJsonPath(homeDir));
     const providerPatches = objectEntries(file.value?.providers).map(([id, raw]): ProviderPatch => ({ id, raw }));
 
@@ -183,6 +188,8 @@ export class ModelRegistry {
           diagnostics: [],
           hasAuthentication: false,
           hasPlaintextSecret: false,
+          authMethods: [{ type: "api_key", label: "API key" }],
+          configuredAuthTypes: [],
           models: [],
         };
         providers.push(provider);
@@ -204,7 +211,11 @@ export class ModelRegistry {
 
       provider.diagnostics.push(...apiKey.diagnostics, ...headerDiagnostics);
       provider.hasPlaintextSecret ||= apiKey.plaintext;
-      provider.hasAuthentication = Boolean(apiKey.value);
+      provider.configuredAuthTypes = [
+        ...(apiKey.value ? ["api_key" as const] : []),
+        ...(storedAuthTypes.get(patch.id) === "oauth" ? ["oauth" as const] : []),
+      ];
+      provider.hasAuthentication = provider.configuredAuthTypes.length > 0;
       secrets.set(patch.id, {
         apiKey: apiKey.value,
         headers: Object.keys(headers).length ? headers : undefined,
@@ -233,6 +244,11 @@ export class ModelRegistry {
     }
 
     for (const provider of providers) {
+      const configuredAuthTypes = provider.configuredAuthTypes ?? (provider.configuredAuthTypes = []);
+      if (storedAuthTypes.get(provider.id) === "oauth" && !configuredAuthTypes.includes("oauth")) {
+        configuredAuthTypes.push("oauth");
+        provider.hasAuthentication = true;
+      }
       const providerCustom = provider.source === "user-custom";
       provider.availability = worstAvailability(provider.diagnostics, provider.hasAuthentication);
       for (const model of provider.models) {
@@ -243,11 +259,15 @@ export class ModelRegistry {
       }
     }
 
-    return new ModelRegistry(providers, secrets);
+    return new ModelRegistry(providers, secrets, homeDir);
   }
 
   listProviders() {
     return this.providers;
+  }
+
+  getHomeDir() {
+    return this.homeDir;
   }
 
   requireModel(ref: ModelRef) {
@@ -271,6 +291,8 @@ export class ModelRegistry {
         diagnostics: provider.diagnostics,
         hasAuthentication: provider.hasAuthentication,
         hasPlaintextSecret: provider.hasPlaintextSecret,
+        authMethods: provider.authMethods ?? [{ type: "api_key", label: "API key" }],
+        configuredAuthTypes: provider.configuredAuthTypes ?? [],
         models: provider.models.map((model) => ({
           id: model.id,
           providerId: model.providerId,

@@ -101,6 +101,12 @@ afterEach(() => {
   if (originalPlatform) Object.defineProperty(navigator, "platform", originalPlatform);
 });
 
+describe("top-level surfaces", () => {
+  it("keeps memory management inside Settings", () => {
+    expect(SURFACES.map((surface) => surface.id)).toEqual(["project", "observatory", "settings"]);
+  });
+});
+
 describe("ProjectPanel empty creation state", () => {
   it("opens the shared project dialog instead of mutating projects directly", async () => {
     const openCreateProject = vi.fn();
@@ -571,6 +577,7 @@ describe("SettingsPanel model registry", () => {
   it("edits and deletes an added model from the configured model list", async () => {
     const addProviderModel = vi.fn(async () => ({ ok: true }));
     const deleteProviderModel = vi.fn(async () => ({ ok: true }));
+    const deleteProvider = vi.fn(async () => ({ ok: true }));
     window.api = {
       platform: "darwin",
       settings: {
@@ -578,6 +585,7 @@ describe("SettingsPanel model registry", () => {
         setGlobalModel: vi.fn(),
         addProviderModel,
         deleteProviderModel,
+        deleteProvider,
         openModelsJson: vi.fn(),
       },
       monitor: { setNotify: vi.fn() },
@@ -667,6 +675,10 @@ describe("SettingsPanel model registry", () => {
     const confirm = screen.getByRole("alertdialog");
     await user.click(within(confirm).getByRole("button", { name: "删除" }));
     expect(deleteProviderModel).toHaveBeenCalledWith({ providerId: "openai", modelId: "gpt-5.2" });
+
+    await user.click(screen.getByRole("button", { name: "删除 Provider" }));
+    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "删除" }));
+    expect(deleteProvider).toHaveBeenCalledWith("openai");
   });
 
   it("opens the add-model dialog with provider registry options before any provider is connected", async () => {
@@ -780,11 +792,11 @@ describe("SettingsPanel model registry", () => {
 
     expect(screen.getByRole("dialog", { name: "添加模型配置" })).toBeTruthy();
     await user.click(screen.getByRole("combobox", { name: "Provider" }));
-    expect(screen.getByRole("option", { name: "Anthropic · anthropic" })).toBeTruthy();
-    expect(screen.getByRole("option", { name: "OpenAI · openai" })).toBeTruthy();
-    await user.click(screen.getByRole("option", { name: "OpenAI · openai" }));
+    expect(screen.getByRole("option", { name: "Anthropic anthropic" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "OpenAI openai" })).toBeTruthy();
+    await user.click(screen.getByRole("option", { name: "OpenAI openai" }));
     expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
-    expect(screen.getByText("GPT 5.2")).toBeTruthy();
+    expect(screen.getAllByText("GPT 5.2").length).toBeGreaterThan(0);
     await user.type(screen.getByLabelText("API key"), "$OPENAI_API_KEY");
     await user.click(screen.getByRole("button", { name: "保存模型" }));
 

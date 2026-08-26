@@ -86,6 +86,40 @@ describe("MemoryStore", () => {
     expect((await store.stats()).archived).toBe(1);
   });
 
+  it("restores archived memories and permanently purges them when requested", async () => {
+    const root = await tempRoot();
+    const store = new MemoryStore({ rootDir: root, now: () => 10 });
+    const record = await store.remember({ type: "reference", scope: { kind: "user" }, description: "Reference", content: "Keep provenance.", source: { trigger: "manual" } });
+    await store.archive(record.id, "obsolete");
+
+    const edited = await store.edit(record.id, { content: "Keep provenance and its source." });
+    expect(edited).toMatchObject({ id: record.id, status: "archived", content: "Keep provenance and its source." });
+
+    const restored = await store.restore(record.id);
+    expect(restored).toMatchObject({ id: record.id, status: "active" });
+
+    await store.archive(record.id, "obsolete again");
+    const purged = await store.purge(record.id);
+    expect(purged).toMatchObject({ id: record.id, status: "archived" });
+    expect((await store.scan()).records.some((item) => item.id === record.id)).toBe(false);
+  });
+
+  it("restores rejected candidates to the candidate queue", async () => {
+    const root = await tempRoot();
+    const store = new MemoryStore({ rootDir: root, now: () => 10 });
+    const candidate = await store.createCandidate({
+      type: "feedback",
+      scope: { kind: "user" },
+      description: "Correction",
+      content: "Use Chinese when the user writes Chinese.",
+      source: { trigger: "extracted", sessionId: "session-1" },
+    });
+    await store.rejectCandidate(candidate!.id, "not sure");
+
+    const restored = await store.restore(candidate!.id);
+    expect(restored).toMatchObject({ id: candidate!.id, status: "candidate" });
+  });
+
   it("updates an existing explicit memory instead of duplicating it", async () => {
     const root = await tempRoot();
     const store = new MemoryStore({ rootDir: root, now: () => 10 });

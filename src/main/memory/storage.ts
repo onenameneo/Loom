@@ -218,7 +218,7 @@ export class MemoryStore {
 
   async edit(id: string, patch: Partial<MemoryWriteInput>): Promise<MemoryRecord | undefined> {
     const current = await this.find(id);
-    if (!current || current.status === "archived" || current.status === "rejected") return undefined;
+    if (!current) return undefined;
     const next: MemoryWriteInput = {
       id: current.id,
       type: patch.type ?? current.type,
@@ -231,17 +231,49 @@ export class MemoryStore {
       supersedes: patch.supersedes ?? current.supersedes,
       dedupeKey: patch.dedupeKey ?? current.dedupeKey,
     };
-    const updated = this.toRecord(next, current.status === "candidate" ? "candidate" : "active");
+    const bucket = current.status === "candidate" ? "candidate" : current.status === "archived" || current.status === "rejected" ? "archive" : "active";
+    const updated = this.toRecord(next, current.status);
     updated.createdAt = current.createdAt;
     updated.updatedAt = this.now();
-    if (current.path && current.status === "candidate") {
-      await this.atomicWrite(this.locationFor(updated, "candidate"), markdownForRecord(updated));
-      if (current.path !== this.locationFor(updated, "candidate")) await fs.rm(current.path, { force: true });
-    } else {
+    if (current.status === "archived" || current.status === "rejected") {
+      updated.archivedReason = current.archivedReason;
+    }
+    const nextPath = this.locationFor(updated, bucket);
+    if (bucket === "active") {
       await this.writeActive(updated);
-      if (current.path && current.path !== this.locationFor(updated, "active")) await fs.rm(current.path, { force: true });
+    } else {
+      updated.path = nextPath;
+      await this.atomicWrite(nextPath, markdownForRecord(updated));
+      if (current.path && current.path !== nextPath) await fs.rm(current.path, { force: true });
+      await this.rebuildIndex();
     }
     return updated;
+  }
+
+  async restore(id: string): Promise<MemoryRecord | undefined> {
+    const current = await this.find(id);
+    if (!current || (current.status !== "archived" && current.status !== "rejected")) return undefined;
+    const status = current.status === "rejected" ? "candidate" : "active";
+    const restored: MemoryRecord = { ...current, status, updatedAt: this.now() };
+    delete restored.archivedReason;
+    const nextPath = this.locationFor(restored, status === "candidate" ? "candidate" : "active");
+    if (status === "candidate") {
+      restored.path = nextPath;
+      await this.atomicWrite(nextPath, markdownForRecord(restored));
+      await this.rebuildIndex();
+    } else {
+      await this.writeActive(restored);
+    }
+    if (current.path && current.path !== nextPath) await fs.rm(current.path, { force: true });
+    return restored;
+  }
+
+  async purge(id: string): Promise<MemoryRecord | undefined> {
+    const current = await this.find(id);
+    if (!current || (current.status !== "archived" && current.status !== "rejected")) return undefined;
+    if (current.path) await fs.rm(current.path, { force: true });
+    await this.rebuildIndex();
+    return current;
   }
 
   async createCandidate(input: MemoryCandidateInput): Promise<MemoryRecord | undefined> {
@@ -274,7 +306,8 @@ export class MemoryStore {
 
   async archive(id: string, reason = "archived by user"): Promise<MemoryRecord | undefined> {
     const current = await this.find(id);
-    return current ? this.archiveRecord(current, reason, "archived") : undefined;
+    if (!current || current.status === "archived" || current.status === "rejected") return undefined;
+    return this.archiveRecord(current, reason, "archived");
   }
 
   private async archiveRecord(current: MemoryRecord, reason: string, status: "archived" | "rejected"): Promise<MemoryRecord> {

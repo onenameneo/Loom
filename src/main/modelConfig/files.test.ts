@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { addProviderModelConfig, deleteProviderModelConfig, ensureLoomAgentDefaults, writeGlobalDefaultModel } from "./files";
+import { addProviderModelConfig, deleteProviderConfig, deleteProviderModelConfig, ensureLoomAgentDefaults, writeGlobalDefaultModel } from "./files";
 
 const tempDirs: string[] = [];
 
@@ -158,5 +158,41 @@ describe("model config files", () => {
     deleteProviderModelConfig(home, { providerId: "anthropic", modelId: "claude-sonnet-4-5" });
     models = JSON.parse(readFileSync(join(home, ".loom", "agent", "models.json"), "utf-8"));
     expect(models.providers.anthropic.modelOverrides["claude-sonnet-4-5"]).toBeUndefined();
+  });
+
+  it("deletes an entire provider while preserving other providers", async () => {
+    const home = await mkdtemp(join(tmpdir(), "loom-home-"));
+    tempDirs.push(home);
+
+    addProviderModelConfig(home, {
+      providerId: "openai",
+      providerName: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      modelId: "gpt-5.2",
+      modelName: "GPT 5.2",
+      api: "openai-responses",
+      contextWindow: 128000,
+      maxTokens: 16000,
+      reasoning: true,
+      images: true,
+    });
+    addProviderModelConfig(home, {
+      providerId: "anthropic",
+      providerName: "Anthropic",
+      baseUrl: "https://api.anthropic.com",
+      modelId: "claude-sonnet-4-5",
+      modelName: "Claude Sonnet 4.5",
+      api: "anthropic-messages",
+      contextWindow: 200000,
+      maxTokens: 64000,
+      reasoning: true,
+      images: true,
+    });
+
+    deleteProviderConfig(home, "openai");
+    const models = JSON.parse(readFileSync(join(home, ".loom", "agent", "models.json"), "utf-8"));
+
+    expect(models.providers.openai).toBeUndefined();
+    expect(models.providers.anthropic).toBeDefined();
   });
 });

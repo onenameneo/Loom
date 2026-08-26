@@ -37,6 +37,8 @@ export interface MemoryRuntimeService extends MemoryRuntimePort {
   preview(id: string): Promise<Awaited<ReturnType<MemoryStore["preview"]>>>;
   remember(input: MemoryWriteInput): Promise<MemoryRecord>;
   edit(id: string, patch: Partial<MemoryWriteInput>): Promise<MemoryRecord | undefined>;
+  restore(id: string): Promise<MemoryRecord | undefined>;
+  purge(id: string): Promise<MemoryRecord | undefined>;
   archive(id: string, reason?: string): Promise<MemoryRecord | undefined>;
   forget(id: string, reason?: string): Promise<MemoryRecord | undefined>;
   approveCandidate(id: string, overrides?: Parameters<MemoryStore["approveCandidate"]>[1]): Promise<MemoryRecord | undefined>;
@@ -123,6 +125,18 @@ export function createMemoryRuntime(options: {
         notePrimaryWrite(record);
         emit({ type: "changed", action: "edit", record });
       }
+      return record;
+    },
+    async restore(id: string) {
+      await ensureCurrentStore();
+      const record = await store.restore(id);
+      if (record) emit({ type: "changed", action: "restore", record });
+      return record;
+    },
+    async purge(id: string) {
+      await ensureCurrentStore();
+      const record = await store.purge(id);
+      if (record) emit({ type: "changed", action: "purge", record });
       return record;
     },
     async archive(id: string, reason?: string) {

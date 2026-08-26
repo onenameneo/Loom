@@ -1,37 +1,14 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Brain, Check, RefreshCw, Trash2, X } from "lucide-react";
 import type { ProjectMeta } from "../env";
 import { ConfirmDialog, Modal, Tip } from "../ui/dialogs";
 import { LoomSelect, LoomSelectItem } from "../ui/controls";
 import { buttonClassName, cn, fieldClassName, iconButtonClassName } from "../ui/styles";
 import { useI18n } from "../i18n/I18nProvider";
+import { useMemoryManagement } from "./useMemoryManagement";
+import type { MemoryRecord, MemoryRecordType } from "./memoryDomain";
 
-type MemoryRecord = {
-  id: string;
-  type: "user" | "feedback" | "project" | "reference";
-  scope: { kind: "user" } | { kind: "project"; projectId: string };
-  status: "active" | "candidate" | "rejected" | "archived" | "stale" | "conflicted";
-  confidence: number;
-  description: string;
-  content: string;
-  source: { trigger: string; sessionId?: string; nodeId?: string; excerpt?: string };
-  updatedAt: number;
-  archivedReason?: string;
-};
-
-type AutoDreamStatus = {
-  status?: "idle" | "running" | "completed" | "failed" | "cancelled" | "interrupted" | "checking";
-  phase?: string;
-  progress?: number;
-  newSessions?: number;
-  changedCount?: number;
-  skippedCount?: number;
-  failedCount?: number;
-  lastError?: string;
-  gate?: { eligible: boolean; reason: "disabled" | "interval" | "sessions" | "throttled" | "locked" | "ready"; nextEligibleAt?: number };
-};
-
-const TYPE_LABEL: Record<MemoryRecord["type"], string> = {
+const TYPE_LABEL: Record<MemoryRecordType, string> = {
   user: "用户",
   feedback: "反馈",
   project: "项目",
@@ -72,133 +49,62 @@ const STATUS_PILL_CLASS: Record<MemoryRecord["status"], string> = {
   conflicted: "text-loom-err",
 };
 
-export default function MemoryPanel({ project }: { project?: ProjectMeta }) {
+export function MemoryManagementPanel({ project, enabled = true, autoDreamEnabled = enabled }: { project?: ProjectMeta; enabled?: boolean; autoDreamEnabled?: boolean }) {
   const { t } = useI18n();
-  const [records, setRecords] = useState<MemoryRecord[]>([]);
-  const [stats, setStats] = useState({ active: 0, candidates: 0, archived: 0, stale: 0, conflicted: 0, issues: 0 });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | "candidate" | "active" | "archived">("all");
-  const [loading, setLoading] = useState(false);
-  const [dreaming, setDreaming] = useState(false);
-  const [dreamStatus, setDreamStatus] = useState<AutoDreamStatus>({ status: "idle" });
+  const management = useMemoryManagement({ projectId: project?.id, enabled, autoDreamEnabled });
+  const {
+    records,
+    visibleRecords: visible,
+    stats,
+    selected,
+    selectedId,
+    setSelectedId,
+    filter,
+    setFilter,
+    loading,
+    error,
+    mutationError,
+    mutating,
+    reload,
+    approve,
+    reject,
+    archive,
+    forget,
+    edit,
+    restore,
+    purge,
+    remember,
+    dreaming,
+    dreamStatus,
+    autoDreamDisabled,
+    runAutoDream,
+    cancelAutoDream,
+  } = management;
   const [forgetting, setForgetting] = useState<MemoryRecord | null>(null);
+  const [forgetMode, setForgetMode] = useState<"archive" | "forget" | "purge">("forget");
+  const [editing, setEditing] = useState<MemoryRecord | null>(null);
+  const [editDescription, setEditDescription] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editingBusy, setEditingBusy] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [remembering, setRemembering] = useState(false);
   const [rememberError, setRememberError] = useState<string | null>(null);
   const [quickContent, setQuickContent] = useState("");
-  const [quickType, setQuickType] = useState<MemoryRecord["type"]>("user");
+  const [quickType, setQuickType] = useState<MemoryRecordType>("user");
 
-  const reload = useCallback(async () => {
-    if (!window.api?.memory) return;
-    setLoading(true);
-    try {
-      const result = await window.api.memory.list({ projectId: project?.id, includeArchived: true });
-      setRecords(result.records as MemoryRecord[]);
-      setStats(result.stats);
-    } finally {
-      setLoading(false);
-    }
-  }, [project?.id]);
-
-  const refreshDreamStatus = useCallback(async () => {
-    if (!window.api?.memory?.autodreamStatus) return;
-    const status = await window.api.memory.autodreamStatus() as AutoDreamStatus | undefined;
-    if (!status) return;
-    setDreamStatus(status);
-    setDreaming(status.status === "running");
-  }, []);
-
-  useEffect(() => {
-    void reload();
-    void refreshDreamStatus();
-    if (!window.api?.memory) return;
-    return window.api.memory.onEvent((event) => {
-      if (event.type === "autodream") {
-        const progress = event.progress as AutoDreamStatus & { summary?: { changed?: string[]; skipped?: string[]; failed?: unknown[] } } | undefined;
-        const summary = progress?.summary;
-        setDreamStatus((current) => ({
-          ...current,
-          ...progress,
-          ...(summary ? { changedCount: summary.changed?.length ?? 0, skippedCount: summary.skipped?.length ?? 0, failedCount: summary.failed?.length ?? 0 } : {}),
-        }));
-        if (progress?.phase === "completed" || progress?.phase === "failed" || progress?.phase === "cancelled") {
-          setDreaming(false);
-          void refreshDreamStatus();
-        }
-      }
-      void reload();
-    });
-  }, [refreshDreamStatus, reload]);
-
-  const visible = useMemo(() => records.filter((record) => filter === "all" || record.status === filter), [filter, records]);
-  const selected = records.find((record) => record.id === selectedId);
-
-  async function approve(record: MemoryRecord) {
-    await window.api?.memory.approve(record.id);
-    await reload();
-  }
-
-  async function reject(record: MemoryRecord) {
-    await window.api?.memory.reject(record.id, "rejected from memory center");
-    await reload();
-  }
-
-  async function archive() {
-    if (!forgetting) return;
-    await window.api?.memory.forget(forgetting.id, "forgotten from memory center");
-    setSelectedId(null);
-    setForgetting(null);
-    await reload();
-  }
-
-  async function runAutoDream() {
-    if (!window.api?.memory) return;
-    setDreamStatus((current) => ({ ...current, status: "checking", phase: undefined, progress: undefined }));
-    try {
-      const status = await window.api.memory.autodreamStatus() as AutoDreamStatus | undefined;
-      if (!status) return;
-      setDreamStatus(status);
-      if (status.gate && !status.gate.eligible) return;
-      setDreaming(true);
-      const summary = await window.api.memory.autodreamRun() as { status?: AutoDreamStatus["status"]; changed?: string[]; skipped?: string[]; failed?: unknown[] } | undefined;
-      if (summary) {
-        setDreamStatus((current) => ({
-          ...current,
-          status: summary.status ?? "completed",
-          phase: summary.status ?? "completed",
-          progress: 1,
-          changedCount: summary.changed?.length ?? 0,
-          skippedCount: summary.skipped?.length ?? 0,
-          failedCount: summary.failed?.length ?? 0,
-        }));
-      }
-      if (!summary) await refreshDreamStatus();
-      await reload();
-    } catch (error) {
-      setDreamStatus((current) => ({ ...current, status: "failed", phase: "failed", lastError: error instanceof Error ? error.message : String(error) }));
-    } finally {
-      setDreaming(false);
-    }
-  }
-
-  async function cancelAutoDream() {
-    await window.api?.memory.autodreamCancel();
-    setDreamStatus((current) => ({ ...current, status: "cancelled", phase: "cancelled" }));
-    setDreaming(false);
-  }
-
-  async function quickRemember() {
+  async function quickRemember(): Promise<boolean> {
     const content = quickContent.trim();
-    if (!content || !window.api?.memory) return;
-    await window.api.memory.remember({
+    if (!content || !window.api?.memory) return false;
+    const saved = await remember({
       type: quickType,
       scope: quickType === "project" && project ? { kind: "project", projectId: project.id } : { kind: "user" },
       description: content.length > 64 ? `${content.slice(0, 61)}...` : content,
       content,
       source: { trigger: "explicit" },
     });
-    setQuickContent("");
-    await reload();
+    if (saved) setQuickContent("");
+    return saved;
   }
 
   async function submitRemember(event: FormEvent<HTMLFormElement>) {
@@ -208,12 +114,64 @@ export default function MemoryPanel({ project }: { project?: ProjectMeta }) {
     setRemembering(true);
     setRememberError(null);
     try {
-      await quickRemember();
-      setAddOpen(false);
+      const saved = await quickRemember();
+      if (saved) setAddOpen(false);
+      else setRememberError(mutationError ?? t("memory.saveFailed"));
     } catch (error) {
       setRememberError(error instanceof Error ? error.message : String(error));
     } finally {
       setRemembering(false);
+    }
+  }
+
+  function openEdit(record: MemoryRecord) {
+    setEditError(null);
+    setEditDescription(record.description);
+    setEditContent(record.content);
+    setEditing(record);
+  }
+
+  async function submitEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editing) return;
+    const description = editDescription.trim();
+    const content = editContent.trim();
+    if (!description || !content) {
+      setEditError(t("memory.editValidation"));
+      return;
+    }
+    setEditingBusy(true);
+    setEditError(null);
+    const saved = await edit(editing.id, { description, content });
+    if (saved) setEditing(null);
+    else setEditError(mutationError ?? t("memory.editFailed"));
+    setEditingBusy(false);
+  }
+
+  async function confirmForget() {
+    if (!forgetting) return;
+    const saved = await forget(forgetting.id, "forgotten from memory settings");
+    if (saved) {
+      setSelectedId(null);
+      setForgetting(null);
+    }
+  }
+
+  async function confirmArchive() {
+    if (!forgetting) return;
+    const saved = await archive(forgetting.id, "archived from memory settings");
+    if (saved) {
+      setSelectedId(null);
+      setForgetting(null);
+    }
+  }
+
+  async function confirmPurge() {
+    if (!forgetting) return;
+    const saved = await purge(forgetting.id);
+    if (saved) {
+      setSelectedId(null);
+      setForgetting(null);
     }
   }
 
@@ -247,43 +205,42 @@ export default function MemoryPanel({ project }: { project?: ProjectMeta }) {
     return t("memory.defaultDream");
   }
 
-  const autoDreamDisabled = dreaming || dreamStatus.status === "checking" || Boolean(dreamStatus.gate && !dreamStatus.gate.eligible);
-
   return (
-    <div className="h-full min-w-0 overflow-auto bg-loom-bg p-loom-6 max-[820px]:p-loom-4">
-      <header className="mx-auto mb-loom-4 flex max-w-[1100px] items-start justify-between gap-loom-5 max-[820px]:flex-col max-[820px]:gap-loom-4">
+    <div className="memory-management min-w-0">
+      <header className="settings-toolbar settings-toolbar--settings memory-management__toolbar flex max-[820px]:flex-col max-[820px]:items-start">
         <div>
           <div className="inline-flex items-center gap-[6px] font-loom-mono text-[10px] tracking-[.04em] text-loom-muted"><Brain size={13} /> CROSS-SESSION MEMORY</div>
-          <h1 className="mb-loom-1 mt-loom-2 text-[22px] font-semibold tracking-[-.02em]">{t("memory.title")}</h1>
+          <h2 className="mb-loom-1 mt-loom-2 text-[18px] font-semibold tracking-[-.02em]">{t("memory.title")}</h2>
           <p className="m-0 text-[12px] text-loom-muted">{t("memory.subtitle")}</p>
         </div>
-        <div className="flex items-start gap-loom-2 max-[820px]:w-full max-[820px]:flex-wrap">
-          <button className={iconButtonClassName("default", "h-10 w-10")} type="button" onClick={() => void reload()} disabled={loading} title={t("memory.refresh")} aria-label={t("memory.refresh")}><RefreshCw size={16} /></button>
-          <button className={buttonClassName("primary", "min-h-10")} type="button" onClick={() => { setRememberError(null); setAddOpen(true); }}>{t("memory.add")}</button>
-          <div className="grid min-w-0 gap-loom-1 max-[820px]:order-3 max-[820px]:min-w-full">
-            <div className="flex gap-loom-2">
+        <div className="memory-management__actions max-[820px]:w-full">
+          <button className={iconButtonClassName("default", "h-9 w-9")} type="button" onClick={() => void reload()} disabled={loading || mutating} title={t("memory.refresh")} aria-label={t("memory.refresh")}><RefreshCw size={16} /></button>
+          <button className={buttonClassName("primary")} type="button" onClick={() => { setRememberError(null); setAddOpen(true); }} disabled={mutating}>{t("memory.add")}</button>
+          <div className="memory-management__autodream">
+            <div className="memory-management__autodream-row">
               <Tip label={dreamStatusText()}>
                 <span className="inline-flex">
-                  <button className={buttonClassName("default", "justify-center whitespace-nowrap min-h-10")} type="button" onClick={() => void runAutoDream()} disabled={autoDreamDisabled}>{dreaming ? t("memory.running") : t("memory.runAutoDream")}</button>
+                  <button className={buttonClassName("default", "justify-center whitespace-nowrap")} type="button" onClick={() => void runAutoDream()} disabled={autoDreamDisabled}>{dreaming ? t("memory.running") : t("memory.runAutoDream")}</button>
                 </span>
               </Tip>
-              {dreaming && <button className={buttonClassName("default", "min-h-10")} type="button" onClick={() => void cancelAutoDream()}>{t("memory.cancel")}</button>}
+              {dreaming && <button className={buttonClassName("default")} type="button" onClick={() => void cancelAutoDream()}>{t("memory.cancel")}</button>}
             </div>
             {dreaming && <div className="h-[3px] overflow-hidden rounded-loom-pill bg-loom-surface-2" aria-hidden="true"><span className="block h-full rounded-[inherit] bg-loom-accent transition-[width] duration-200 ease-loom" style={{ width: `${Math.max(4, Math.round((dreamStatus.progress ?? 0) * 100))}%` }} /></div>}
           </div>
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-[1100px] gap-loom-4 border-y border-loom-border py-loom-3 font-loom-mono text-[11px] text-loom-muted" aria-label={t("memory.stats")}>
-        <span><strong className="font-semibold text-loom-text">{stats.active}</strong> active</span>
-        <span className={stats.candidates ? "text-loom-warn" : ""}><strong className="font-semibold text-loom-text">{stats.candidates}</strong> candidates</span>
-        <span><strong className="font-semibold text-loom-text">{stats.archived}</strong> archived</span>
-        {stats.issues > 0 && <span className="text-loom-err"><strong className="font-semibold text-loom-text">{stats.issues}</strong> {t("memory.issues")}</span>}
-      </div>
+      {!enabled && <div className="mb-loom-4 rounded-loom-sm border border-loom-warn/30 bg-loom-warn/10 px-loom-3 py-loom-2 text-[12px] text-loom-muted" role="status">{t("settings.memoryDisabledManagement")}</div>}
+      {(error || mutationError) && <div className="mb-loom-4 rounded-loom-sm border border-loom-err/30 bg-loom-err/10 px-loom-3 py-loom-2 text-[12px] text-loom-err" role="alert">{error ?? mutationError}</div>}
 
       <div className="mx-auto mt-loom-5 flex max-w-[1100px] items-center justify-between pb-loom-2">
-        <div className="flex gap-loom-1" role="tablist" aria-label={t("memory.stats")}>
-          {(["all", "candidate", "active", "archived"] as const).map((item) => <button key={item} className={cn("inline-flex h-8 items-center rounded-loom-sm border-0 bg-transparent px-[10px] font-loom-mono text-[11px] text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text", filter === item && "bg-loom-surface-2 text-loom-text")} type="button" onClick={() => setFilter(item)}>{item === "all" ? t("memory.all") : item}</button>)}
+        <div className="flex flex-wrap items-center gap-loom-3" role="tablist" aria-label={t("memory.stats")}>
+          {(["all", "candidate", "active", "archived"] as const).map((item) => {
+            const label = item === "all" ? t("memory.all") : item;
+            const count = item === "all" ? records.length : stats[item === "candidate" ? "candidates" : item];
+            return <button key={item} className={cn("inline-flex h-8 items-center gap-loom-1 rounded-loom-sm border-0 bg-transparent px-[10px] font-loom-mono text-[11px] text-loom-muted hover:bg-loom-surface-2 hover:text-loom-text", filter === item && "bg-loom-surface-2 text-loom-text")} role="tab" aria-label={`${label} ${count}`} aria-selected={filter === item} type="button" onClick={() => setFilter(item)}><span>{label}</span><strong className="font-semibold text-loom-text">{count}</strong></button>;
+          })}
+          {(stats.stale > 0 || stats.conflicted > 0 || stats.issues > 0) && <span className="font-loom-mono text-[10px] text-loom-faint">{stats.stale > 0 && `stale ${stats.stale}`} {stats.conflicted > 0 && `conflicts ${stats.conflicted}`} {stats.issues > 0 && `${stats.issues} ${t("memory.issues")}`}</span>}
         </div>
         <span className="font-loom-mono text-[10px] text-loom-faint">{project ? `${t("memory.projectScope")} · ${project.name}` : t("memory.userScope")}</span>
       </div>
@@ -329,6 +286,22 @@ export default function MemoryPanel({ project }: { project?: ProjectMeta }) {
           </div>
         </form>
       </Modal>
+      <Modal open={Boolean(editing)} onOpenChange={(open) => { if (!open) setEditing(null); }} ariaLabel={t("memory.editTitle")}>
+        {editing && (
+          <form className="settings-modal__panel memory-edit-dialog w-[min(640px,calc(100vw-48px))] p-loom-6 max-[820px]:p-loom-5" onSubmit={(event) => void submitEdit(event)}>
+            <div className="mb-loom-5 flex items-start justify-between gap-loom-4">
+              <div><h2 className="m-0 text-[20px] leading-[1.4]">{t("memory.editTitle")}</h2><p className="mt-loom-1 mb-0 text-[12.5px] leading-[1.6] text-loom-muted">{t("memory.editDescription")}</p></div>
+              <button className={iconButtonClassName()} type="button" onClick={() => setEditing(null)} aria-label={t("memory.closeEdit")} title={t("common.cancel")}><X size={16} /></button>
+            </div>
+            <div className="grid gap-loom-4">
+              <label className="mb-0 flex flex-col gap-[6px]"><span>{t("memory.description")}</span><input className={fieldClassName} value={editDescription} onChange={(event) => setEditDescription(event.target.value)} /></label>
+              <label className="mb-0 flex flex-col gap-[6px]"><span>{t("memory.content")}</span><textarea className={cn(fieldClassName, "min-h-[144px] resize-y px-3 py-[11px] leading-[1.65]")} value={editContent} onChange={(event) => setEditContent(event.target.value)} rows={6} /></label>
+              {editError && <div className="rounded-loom-sm border border-loom-err/30 bg-loom-err/10 px-loom-3 py-loom-2 text-[12px] text-loom-err" role="alert">{editError}</div>}
+            </div>
+            <div className="mt-loom-6 flex justify-end gap-loom-2 border-t border-loom-border pt-loom-4"><button className={buttonClassName()} type="button" onClick={() => setEditing(null)}>{t("memory.cancel")}</button><button className={buttonClassName("primary")} type="submit" disabled={editingBusy || !editDescription.trim() || !editContent.trim()}>{editingBusy ? t("memory.saving") : t("memory.saveEdit")}</button></div>
+          </form>
+        )}
+      </Modal>
       <Modal open={Boolean(selected)} onOpenChange={(open) => { if (!open) setSelectedId(null); }} ariaLabel={t("memory.detail")}>
         {selected && (
           <div className="settings-modal__panel memory-detail-dialog w-[min(640px,calc(100vw-48px))] p-loom-4">
@@ -339,15 +312,20 @@ export default function MemoryPanel({ project }: { project?: ProjectMeta }) {
             <p className="my-loom-5 whitespace-pre-wrap text-[13px] leading-[1.7] text-loom-text">{selected.content}</p>
             <dl className="grid grid-cols-3 gap-loom-2 m-0"><div className="rounded-loom-sm border border-loom-border p-loom-2"><dt className="font-loom-mono text-[9px] text-loom-faint">confidence</dt><dd className="m-0 mt-1 font-loom-mono text-[10px] text-loom-text">{Math.round(selected.confidence * 100)}%</dd></div><div className="rounded-loom-sm border border-loom-border p-loom-2"><dt className="font-loom-mono text-[9px] text-loom-faint">source</dt><dd className="m-0 mt-1 font-loom-mono text-[10px] text-loom-text">{selected.source.trigger}</dd></div><div className="rounded-loom-sm border border-loom-border p-loom-2"><dt className="font-loom-mono text-[9px] text-loom-faint">updated</dt><dd className="m-0 mt-1 font-loom-mono text-[10px] text-loom-text">{new Date(selected.updatedAt).toLocaleString()}</dd></div></dl>
             {selected.source.excerpt && <blockquote className="my-loom-4 border-l-2 border-loom-accent pl-loom-3 text-[11px] leading-[1.6] text-loom-muted">{selected.source.excerpt}</blockquote>}
-            <div className="mt-loom-5 flex items-center gap-loom-2">
-              {selected.status === "candidate" && <><button className={buttonClassName("primary")} type="button" onClick={() => void approve(selected)}><Check size={14} /> {t("memory.approved")}</button><button className={buttonClassName()} type="button" onClick={() => void reject(selected)}>{t("memory.rejected")}</button></>}
-              {selected.status !== "archived" && selected.status !== "rejected" && <button className={iconButtonClassName("danger")} type="button" onClick={() => setForgetting(selected)} aria-label={t("memory.forgetAction")} title={t("memory.forgetAction")}><Trash2 size={16} /></button>}
-              {selected.status === "archived" && <span className="text-[11px] text-loom-muted">{t("memory.restoreHint")}</span>}
+            <div className="mt-loom-5 flex flex-wrap items-center gap-loom-2">
+              <button className={buttonClassName()} type="button" onClick={() => openEdit(selected)} disabled={mutating}>{t("memory.edit")}</button>
+              {selected.status === "candidate" && <><button className={buttonClassName("primary")} type="button" onClick={() => void approve(selected.id)} disabled={mutating}><Check size={14} /> {t("memory.approved")}</button><button className={buttonClassName()} type="button" onClick={() => void reject(selected.id)} disabled={mutating}>{t("memory.rejected")}</button></>}
+              {selected.status !== "archived" && selected.status !== "rejected" && <><button className={buttonClassName()} type="button" onClick={() => { setForgetMode("archive"); setForgetting(selected); }} disabled={mutating}>{t("memory.archiveAction")}</button><button className={iconButtonClassName("danger")} type="button" onClick={() => { setForgetMode("forget"); setForgetting(selected); }} disabled={mutating} aria-label={t("memory.forgetAction")} title={t("memory.forgetAction")}><Trash2 size={16} /></button></>}
+              {(selected.status === "archived" || selected.status === "rejected") && <><button className={buttonClassName("primary")} type="button" onClick={() => void restore(selected.id)} disabled={mutating}><Check size={14} /> {t("memory.restore")}</button><button className={buttonClassName("danger")} type="button" onClick={() => { setForgetMode("purge"); setForgetting(selected); }} disabled={mutating}><Trash2 size={14} /> {t("memory.permanentlyDelete")}</button></>}
+              {mutationError && <div className="w-full text-[12px] text-loom-err" role="alert">{mutationError}</div>}
+              {(selected.status === "archived" || selected.status === "rejected") && <span className="text-[11px] text-loom-muted">{t("memory.restoreHint")}</span>}
             </div>
           </div>
         )}
       </Modal>
-      <ConfirmDialog open={Boolean(forgetting)} onOpenChange={(open) => { if (!open) setForgetting(null); }} title={t("memory.forgetTitle")} description={forgetting ? t("memory.forgetDescription", { description: forgetting.description }) : undefined} onConfirm={() => void archive()} />
+      <ConfirmDialog open={Boolean(forgetting)} onOpenChange={(open) => { if (!open) setForgetting(null); }} title={forgetMode === "archive" ? t("memory.archiveTitle") : forgetMode === "purge" ? t("memory.purgeTitle") : t("memory.forgetTitle")} description={forgetting ? t(forgetMode === "archive" ? "memory.archiveDescription" : forgetMode === "purge" ? "memory.purgeDescription" : "memory.forgetDescription", { description: forgetting.description }) : undefined} confirmLabel={forgetMode === "purge" ? t("memory.permanentlyDelete") : undefined} error={mutationError} confirmDisabled={mutating} onConfirm={() => void (forgetMode === "archive" ? confirmArchive() : forgetMode === "purge" ? confirmPurge() : confirmForget())} />
     </div>
   );
 }
+
+export default MemoryManagementPanel;
