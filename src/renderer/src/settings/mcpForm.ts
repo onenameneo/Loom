@@ -12,7 +12,14 @@ export type McpFormState = {
   inheritEnv: string[];
   cwd: string;
   url: string;
+  bearerCredentialSource: "managed" | "environment";
+  bearerToken: string;
   bearerTokenEnv: string;
+  managedCredentialConfigured: boolean;
+  managedCredentialReference: boolean;
+  managedCredentialKey?: string;
+  managedCredentialStatus?: "configured" | "missing" | "expired" | "unavailable";
+  clearManagedBearer: boolean;
   headers: McpKeyValueRow[];
   headerEnv: McpKeyValueRow[];
   enabled: boolean;
@@ -29,7 +36,12 @@ export function emptyMcpForm(): McpFormState {
     inheritEnv: [""],
     cwd: "",
     url: "https://",
+    bearerCredentialSource: "managed",
+    bearerToken: "",
     bearerTokenEnv: "",
+    managedCredentialConfigured: false,
+    managedCredentialReference: false,
+    clearManagedBearer: false,
     headers: [{ key: "", value: "" }],
     headerEnv: [{ key: "", value: "" }],
     enabled: true,
@@ -60,6 +72,7 @@ export function formFromMcpServer(server: McpSafeServerDto): McpFormState {
   }
   const credentialReferences = transport.credentialReferences ?? [];
   const bearer = credentialReferences.find((reference) => reference.name.toLowerCase() === "authorization");
+  const managedSecret = bearer?.source === "secret" ? server.secrets.find((secret) => secret.source === "secret" && secret.key === bearer.identifier) : undefined;
   const headerEnvNames = credentialReferences.filter((reference) => reference.name.toLowerCase() !== "authorization").map((reference) => reference.name);
   const staticHeaders = transport.headerValues ?? [];
   return {
@@ -68,7 +81,14 @@ export function formFromMcpServer(server: McpSafeServerDto): McpFormState {
     name: server.config.name,
     transport: "streamable-http",
     url: transport.url ?? "",
-    bearerTokenEnv: bearer?.identifier ?? "",
+    bearerCredentialSource: bearer?.source === "environment" ? "environment" : "managed",
+    bearerToken: "",
+    bearerTokenEnv: bearer?.source === "environment" ? bearer.identifier : "",
+    managedCredentialConfigured: managedSecret?.status === "configured",
+    managedCredentialReference: bearer?.source === "secret",
+    managedCredentialKey: bearer?.source === "secret" ? bearer.identifier : undefined,
+    managedCredentialStatus: managedSecret?.status,
+    clearManagedBearer: false,
     headers: staticHeaders.length ? staticHeaders.map(({ name, value }) => ({ key: name, value })) : [{ key: "", value: "" }],
     headerEnv: headerEnvNames.length ? headerEnvNames.map((key) => ({ key, value: refValue(server, key) })) : [{ key: "", value: "" }],
     enabled: server.config.enabled,
@@ -78,8 +98,21 @@ export function formFromMcpServer(server: McpSafeServerDto): McpFormState {
 function nonEmpty(values: string[]): string[] { return [...new Set(values.map((value) => value.trim()).filter(Boolean))]; }
 function rows(values: McpKeyValueRow[]): McpKeyValueRow[] { return values.map((row) => ({ key: row.key.trim(), value: row.value.trim() })).filter((row) => row.key || row.value); }
 function isSensitiveHttpHeader(name: string): boolean { return /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key)$/i.test(name); }
+function managedBearerKey(form: McpFormState): string { return form.managedCredentialKey ?? `mcp.${serverId(form)}.authorization`; }
+function bearerReference(form: McpFormState): { source: "environment"; name: string } | { source: "secret"; key: string } | undefined {
+  if (form.clearManagedBearer) return undefined;
+  if ((form.bearerCredentialSource ?? "environment") === "managed") {
+    if (form.bearerToken.trim() || form.managedCredentialConfigured || form.managedCredentialReference) return { source: "secret", key: managedBearerKey(form) };
+    // Preserve the pre-managed form shape for callers that still populate
+    // bearerTokenEnv without the source discriminator.
+    if (form.bearerTokenEnv.trim()) return { source: "environment", name: form.bearerTokenEnv.trim().toUpperCase() };
+    return undefined;
+  }
+  const name = form.bearerTokenEnv.trim();
+  return name ? { source: "environment", name: name.toUpperCase() } : undefined;
+}
 function usableStaticHeaders(form: McpFormState): McpKeyValueRow[] {
-  const bearerConfigured = form.transport === "streamable-http" && form.bearerTokenEnv.trim().length > 0;
+  const bearerConfigured = form.transport === "streamable-http" && Boolean(bearerReference(form));
   return rows(form.headers).filter((row) => !(bearerConfigured && row.key.toLowerCase() === "authorization"));
 }
 function serverId(form: McpFormState): string {
@@ -91,7 +124,8 @@ export function mcpFormToConfig(form: McpFormState, revision = 1): McpConfigInpu
   const envRows = rows(form.env);
   const env = Object.fromEntries(envRows.map((row) => [row.key.toUpperCase(), { source: "environment", name: row.value.toUpperCase() }]));
   const headers: Record<string, unknown> = Object.fromEntries(usableStaticHeaders(form).map((row) => [row.key, isSensitiveHttpHeader(row.key) ? { source: "environment", name: row.value.toUpperCase() } : row.value]));
-  if (form.bearerTokenEnv.trim()) headers.Authorization = { source: "environment", name: form.bearerTokenEnv.trim().toUpperCase() };
+  const bearer = form.transport === "streamable-http" ? bearerReference(form) : undefined;
+  if (bearer) headers.Authorization = bearer;
   for (const row of rows(form.headerEnv)) if (!(form.bearerTokenEnv.trim() && row.key.toLowerCase() === "authorization")) headers[row.key] = { source: "environment", name: row.value.toUpperCase() };
   const transport = form.transport === "stdio"
     ? { type: "stdio" as const, command: form.command.trim(), args: nonEmpty(form.args), ...(envRows.length ? { env } : {}), ...(nonEmpty(form.inheritEnv).length ? { inheritEnv: nonEmpty(form.inheritEnv) } : {}), ...(form.cwd.trim() ? { cwd: form.cwd.trim() } : {}) }
@@ -105,6 +139,15 @@ export function mcpFormToConfig(form: McpFormState, revision = 1): McpConfigInpu
     exposure: { mode: "all", allow: [], deny: [] },
     approval: { mode: "on-request", defaultScope: "once" },
     revision,
+  };
+}
+
+export function mcpFormToSaveRequest(form: McpFormState, revision = 1): { config: McpConfigInput; bearerToken?: string; clearManagedBearer?: boolean } {
+  const bearerToken = form.transport === "streamable-http" && (form.bearerCredentialSource ?? "environment") === "managed" ? form.bearerToken.trim() : "";
+  return {
+    config: mcpFormToConfig(form, revision),
+    ...(bearerToken ? { bearerToken } : {}),
+    ...(form.clearManagedBearer ? { clearManagedBearer: true } : {}),
   };
 }
 
@@ -131,7 +174,7 @@ export function validateMcpForm(form: McpFormState): string | undefined {
       if (!row.key || !row.value) return "incomplete-pair";
       if (isSensitiveHttpHeader(row.key) && !/^[A-Z_][A-Z0-9_]*$/.test(row.value.toUpperCase())) return "invalid-env-ref";
     }
-    if (form.bearerTokenEnv.trim() && !/^[A-Z_][A-Z0-9_]*$/.test(form.bearerTokenEnv.trim().toUpperCase())) return "invalid-env-ref";
+    if ((form.bearerCredentialSource ?? "environment") === "environment" && form.bearerTokenEnv.trim() && !/^[A-Z_][A-Z0-9_]*$/.test(form.bearerTokenEnv.trim().toUpperCase())) return "invalid-env-ref";
   }
   return undefined;
 }

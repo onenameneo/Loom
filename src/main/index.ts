@@ -277,6 +277,8 @@ function registerIpc() {
         getWin: () => win,
         manager: canvas.mcp.manager,
         provider: canvas.mcp.provider,
+        secretStore: canvas.mcp.secretStore,
+        vault: canvas.mcp.vault,
         homeDir: app.getPath("home"),
       })
     : undefined;

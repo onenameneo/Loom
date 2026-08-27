@@ -212,4 +212,39 @@ describe("createApprovalGate", () => {
     })).resolves.toEqual({ block: true, reason: "outside_workspace" });
     expect(eventLog.items).toHaveLength(0);
   });
+
+  it("does not open an approval prompt for MCP in full access", async () => {
+    const eventLog = events();
+    const mcpTool = {
+      ...mutationTool,
+      name: "mcp__neo-site__list_posts",
+      permission: {
+        request: async () => ({
+          capability: "mcp" as const,
+          target: "mcp://neo-site/list_posts",
+          normalizedTarget: "mcp://neo-site/list_posts",
+          trusted: false,
+          destructive: true,
+        }),
+        preview: () => ({ title: "List posts" }),
+      },
+    };
+    const gate = createApprovalGate({
+      approvals: createApprovalBroker({ events: eventLog.sink, clock: { now: () => 1 } }),
+      policies: createApprovalPolicyStore(),
+      getTool: () => mcpTool,
+      getPermissionContext: () => ({ profile: "full-access", sandboxMode: "danger-full-access", approvalPolicy: "on-request", networkAccess: true }),
+      setAwaitingApproval: () => true,
+      setRunning: () => true,
+    });
+
+    await expect(gate.onToolCall?.({
+      nodeId: "n1",
+      turnId: "t1",
+      toolName: mcpTool.name,
+      toolCallId: "tc-mcp",
+      args: {},
+    })).resolves.toBeUndefined();
+    expect(eventLog.items).toHaveLength(0);
+  });
 });

@@ -42,6 +42,17 @@ describe("normalizeMcpServerConfig", () => {
     expect(remote.issues.map((issue) => issue.code)).toContain("http_url");
   });
 
+  it("rejects plaintext values for sensitive HTTP headers", () => {
+    const result = normalizeMcpServerConfig({
+      id: "remote",
+      name: "Remote",
+      transport: { type: "streamable-http", url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer plaintext" } },
+    });
+
+    expect(result.config).toBeUndefined();
+    expect(result.issues.map((issue) => issue.code)).toContain("http_header");
+  });
+
   it("isolates unknown fields as diagnostics while keeping a valid entry", () => {
     const result = normalizeMcpServerConfig({
       id: "notes",

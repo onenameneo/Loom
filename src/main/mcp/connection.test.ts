@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { McpServerConfig } from "./config";
-import { createMcpConnectionManager, type McpClientLike, type McpTransportLike } from "./connection";
+import { createMcpConnectionManager, createMcpSdkClientFactory, type McpClientLike, type McpTransportLike } from "./connection";
+import { createMcpSecretStore } from "./secrets";
 
 function server(overrides: Partial<McpServerConfig> = {}): McpServerConfig {
   return { version: 1, id: "local-tools", name: "Local tools", enabled: true, transport: { type: "stdio", command: "node", args: ["server.mjs"], cwd: "/tmp", env: { TOKEN: { source: "environment", name: "TOKEN" } } }, exposure: { mode: "all", allow: [], deny: [] }, approval: { mode: "on-request", defaultScope: "once" }, revision: 1, ...overrides };
@@ -77,5 +78,19 @@ describe("McpConnectionManager", () => {
       expect(create).toHaveBeenCalledTimes(2);
       expect(manager.status("local-tools").state).toBe("connected");
     } finally { vi.useRealTimers(); }
+  });
+
+  it("resolves managed HTTP header references through the injected secret store", async () => {
+    const resolve = vi.fn(async () => "managed-token");
+    const secretStore = createMcpSecretStore({ secret: resolve, secretStatus: () => true });
+    const factory = createMcpSdkClientFactory({ secretStore });
+    await factory({
+      server: server({
+        id: "remote-tools",
+        transport: { type: "streamable-http", url: "https://mcp.example.com/mcp", headers: { "X-Api-Key": { source: "secret", key: "mcp.remote.authorization" } } },
+      }),
+      transportKind: "streamable-http",
+    });
+    expect(resolve).toHaveBeenCalledWith("mcp.remote.authorization");
   });
 });

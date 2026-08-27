@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { McpSafeServerDto, McpSettingsSnapshot } from "../../../../common/mcp";
-import { emptyMcpForm, formFromMcpServer, mcpFormToConfig, validateMcpForm, type McpFormState } from "../mcpForm";
+import { emptyMcpForm, formFromMcpServer, mcpFormToConfig, mcpFormToSaveRequest, validateMcpForm, type McpFormState } from "../mcpForm";
 import { useI18n, type TranslationKey } from "../../i18n/I18nProvider";
 
 export function useMcpSettings() {
@@ -50,9 +50,9 @@ export function useMcpSettings() {
     const existing = servers.find((server) => server.config.id === config.id);
     setBusyId(form.id || "new");
     try {
-      const result = await window.api.mcp.save(mcpFormToConfig(form, existing ? existing.config.revision + 1 : 1));
+      const result = await window.api.mcp.save(mcpFormToSaveRequest(form, existing ? existing.config.revision + 1 : 1));
       if (!result.ok) {
-        setError(result.issues?.map((issue) => `${issue.path}: ${issue.message}`).join(" · ") || t("settings.mcpConnectionFailed"));
+        setError(result.issues?.map((issue: { path: string; message: string }) => `${issue.path}: ${issue.message}`).join(" · ") || t("settings.mcpConnectionFailed"));
         return;
       }
       setFormOpen(false);

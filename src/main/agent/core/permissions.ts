@@ -123,7 +123,7 @@ function profileDefaults(mode: PermissionProfileName): Omit<CompiledPermissionPr
     case "full-auto":
       return { sandboxMode: "workspace-write", approvalPolicy: "on-request", networkAccess: false, mutation: "allow-in-boundary", command: "allow-in-boundary" };
     case "full-access":
-      return { sandboxMode: "danger-full-access", approvalPolicy: "on-request", networkAccess: true, mutation: "allow", command: "allow" };
+      return { sandboxMode: "danger-full-access", approvalPolicy: "never", networkAccess: true, mutation: "allow", command: "allow" };
     case "auto-edit":
     default:
       return { sandboxMode: "workspace-write", approvalPolicy: "on-request", networkAccess: false, mutation: "allow-in-boundary", command: "ask" };
@@ -145,7 +145,9 @@ export function normalizePermissionProfile(value: Partial<PermissionProfileInput
   return {
     mode,
     ...defaults,
-    approvalPolicy: isApprovalPolicy(value?.approvalPolicy) ? value.approvalPolicy : defaults.approvalPolicy,
+    // Codex's Full Access preset is an explicit no-approval mode. Ignore a
+    // stale persisted policy so the profile shown in Settings matches runtime.
+    approvalPolicy: mode === "full-access" ? "never" : isApprovalPolicy(value?.approvalPolicy) ? value.approvalPolicy : defaults.approvalPolicy,
     networkAccess: mode === "full-access" ? true : value?.networkAccess === true,
     writableRoots: Array.isArray(value?.writableRoots) ? value.writableRoots.filter((root): root is string => typeof root === "string") : undefined,
     approvalsReviewer: isApprovalsReviewer(value?.approvalsReviewer) ? value.approvalsReviewer : undefined,
@@ -181,7 +183,11 @@ export function permissionInstructionsFor(value: Partial<PermissionProfileInput>
     `- Effective mode: ${name}.`,
     `- ${mutation}; ${command}; ${network}.`,
     `- Writable boundary: ${roots}.`,
-    ...(profile.approvalPolicy === "never" ? ["- Actions that require approval are denied; do not claim or imply that the model can self-approve them."] : []),
+    ...(profile.mode === "full-access"
+      ? ["- Full Access is enabled: actions run with unrestricted local access and do not show approval prompts."]
+      : profile.approvalPolicy === "never"
+        ? ["- Actions that require approval are denied; do not claim or imply that the model can self-approve them."]
+        : []),
     "- Stay within the declared workspace and preserve bounded previews, exact targets, and expected-version checks for file mutations.",
     "- Never claim that an operation succeeded until the tool returns a successful result.",
   ].join("\n");
@@ -255,6 +261,13 @@ export function evaluatePermission(
   const context = normalizePermissionContext(contextInput);
   const unavailable = denyIfUnavailable(context, request);
   if (unavailable) return unavailable;
+
+  // Full Access is the Codex "danger-full-access + never" combination. It
+  // intentionally bypasses approval checks for all capabilities; the only
+  // fail-closed exception is an unavailable full-access adapter above.
+  if (context.sandboxMode === "danger-full-access" && context.approvalPolicy === "never") {
+    return { action: "allow", target: request.target, normalizedTarget: request.normalizedTarget };
+  }
 
   const reason = reasonForBoundary(request, context);
   if (!reason) return { action: "allow", target: request.target, normalizedTarget: request.normalizedTarget };

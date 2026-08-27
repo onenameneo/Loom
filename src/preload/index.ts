@@ -3,7 +3,7 @@ import type { FileMentionRef } from "../common/fileMentions";
 import type { ComposerBudgetPreviewInput } from "../common/composerBudget";
 import type { SelectionContextNote } from "../common/selectionContext";
 import type { AgentMetricTotals } from "../common/telemetry";
-import type { McpConfigInput, McpSafeServerDto, McpSettingsSnapshot } from "../common/mcp";
+import type { McpConfigInput, McpSafeServerDto, McpSettingsSnapshot, McpSaveRequest, McpSaveResult } from "../common/mcp";
 import type { LiveTurnEvent, LiveTurnSnapshot } from "../common/liveTurns";
 import type { FileArtifactActionRequest, FileArtifactActionResult } from "../common/fileArtifacts";
 import {
@@ -241,7 +241,7 @@ const api = {
   mcp: {
     list: (): Promise<McpSettingsSnapshot> => ipcRenderer.invoke("mcp:list"),
     get: (id: string): Promise<McpSafeServerDto | undefined> => ipcRenderer.invoke("mcp:get", { id }),
-    save: (config: McpConfigInput): Promise<{ ok: boolean; config?: McpConfigInput; issues?: Array<{ code: string; path: string; message: string }> }> => ipcRenderer.invoke("mcp:save", { config }),
+    save: (request: McpSaveRequest): Promise<McpSaveResult> => ipcRenderer.invoke("mcp:save", request),
     remove: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("mcp:remove", { id }),
     setEnabled: (id: string, enabled: boolean): Promise<{ ok: boolean; config?: McpConfigInput }> => ipcRenderer.invoke("mcp:setEnabled", { id, enabled }),
     consent: (id: string, revision: number): Promise<{ ok: boolean; status: unknown }> => ipcRenderer.invoke("mcp:consent", { id, revision }),

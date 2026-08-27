@@ -42,6 +42,17 @@ export interface McpSettingsSnapshot {
   servers: McpSafeServerDto[];
   diagnostics: Array<{ code: string; path: string; message: string }>;
   revision: number;
+  managedCredentialStorage?: "available" | "unavailable";
 }
 
 export type McpConfigInput = Record<string, unknown>;
+export interface McpSaveRequest {
+  config: McpConfigInput;
+  bearerToken?: string;
+  clearManagedBearer?: boolean;
+}
+export interface McpSaveResult {
+  ok: boolean;
+  config?: McpConfigInput;
+  issues?: Array<{ code: string; path: string; message: string }>;
+}

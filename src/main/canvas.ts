@@ -23,6 +23,7 @@ import type { ComposerBudgetPreviewInput } from "../common/composerBudget";
 import type { SelectionContextNote } from "../common/selectionContext";
 import { createMcpConnectionManager } from "./mcp/connection";
 import { createMcpToolProvider } from "./mcp/provider";
+import { createMcpCredentialVault, createMcpSecretStore } from "./mcp/secrets";
 import { loadMcpConfiguration, loadMcpConsent, saveMcpConsent } from "./mcp/store";
 import { connectEnabledMcpServers } from "./mcp/startup";
 import type { FileArtifactRegistry } from "./fileArtifacts";
@@ -74,7 +75,10 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     loadRegistry: () => ModelRegistry.load(),
   });
   let mcpProvider: ReturnType<typeof createMcpToolProvider>;
+  const mcpVault = createMcpCredentialVault({ homeDir: opts.homeDir });
+  const mcpSecretStore = createMcpSecretStore({ vault: mcpVault });
   const mcpManager = createMcpConnectionManager({
+    secretStore: mcpSecretStore,
     isConsentPersisted: (serverId, configRevision) => loadMcpConsent({ homeDir: opts.homeDir })[serverId] === configRevision,
     persistConsent: (serverId, configRevision) => saveMcpConsent({ homeDir: opts.homeDir, serverId, configRevision }),
     onStatus: (status) => sendToWindow(getWin, "mcp:status", status),
@@ -197,6 +201,6 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     disposeSession: (sessionId: string) => runtime.disposeSession(sessionId),
     disposeProject: (projectId: string) => runtime.disposeProject(projectId),
     closeMcp: () => mcpManager.closeAll(),
-    mcp: { manager: mcpManager, provider: mcpProvider },
+    mcp: { manager: mcpManager, provider: mcpProvider, secretStore: mcpSecretStore, vault: mcpVault },
   };
 }

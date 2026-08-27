@@ -79,6 +79,7 @@ describe("permission settings persistence", () => {
     expect(new JsonStore(join(dir, "canvas-data.json")).getSettings().permissions).toMatchObject({
       profile: "full-access",
       sandboxMode: "danger-full-access",
+      approvalPolicy: "never",
       networkAccess: true,
     });
   });

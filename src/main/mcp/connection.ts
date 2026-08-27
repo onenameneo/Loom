@@ -55,6 +55,7 @@ export interface McpConnectionHandle {
 
 export interface McpConnectionManagerOptions {
   create?: McpClientFactory;
+  secretStore?: McpSecretStore;
   requestConsent?: (consent: McpConnectionConsent) => boolean | Promise<boolean>;
   isConsentPersisted?: (serverId: string, configRevision: number) => boolean;
   persistConsent?: (serverId: string, configRevision: number) => void;
@@ -170,6 +171,7 @@ export function createMcpConnectionManager(options: McpConnectionManagerOptions 
   const reconnectBaseMs = options.reconnectBaseMs ?? DEFAULT_RECONNECT_BASE_MS;
   const maxReconnectAttempts = options.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
   const redact = options.redact ?? ((value: string) => redactMcpText(value));
+  const createClient = options.create ?? createMcpSdkClientFactory({ secretStore: options.secretStore });
   const connections = new Map<string, ConnectionRecord>();
   const consented = new Set<string>();
 
@@ -244,7 +246,7 @@ export function createMcpConnectionManager(options: McpConnectionManagerOptions 
     let created: McpClientFactoryResult | undefined;
     try {
       const transportKind: McpTransportKind = record.server.transport.type === "stdio" ? "stdio" : "streamable-http";
-      created = await withTimeout((options.create ?? createMcpSdkClientFactory())({ server: record.server, transportKind, onToolsChanged: (error) => options.onToolsChanged?.(record.server.id, error) }), timeoutMs, signal);
+      created = await withTimeout(createClient({ server: record.server, transportKind, onToolsChanged: (error) => options.onToolsChanged?.(record.server.id, error) }), timeoutMs, signal);
       attachTransport(record, created);
       await withTimeout(created.client.connect(created.transport), timeoutMs, signal);
     } catch (firstError) {

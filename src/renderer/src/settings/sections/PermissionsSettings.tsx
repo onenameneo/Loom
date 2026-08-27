@@ -41,7 +41,7 @@ export function PermissionsSettings({ ctx }: { ctx: SurfaceCtx }) {
         </label>
         <label className="field">
           <span>{t("settings.reviewer")}</span>
-          <LoomSelect value={draft.draft.approvalsReviewer} onValueChange={(approvalsReviewer) => draft.setDraft((current) => ({ ...current, approvalsReviewer: approvalsReviewer as typeof current.approvalsReviewer }))} placeholder={t("settings.chooseReviewer")} ariaLabel={t("settings.reviewer")}>
+          <LoomSelect disabled={draft.draft.profile === "full-access"} value={draft.draft.approvalsReviewer} onValueChange={(approvalsReviewer) => draft.setDraft((current) => ({ ...current, approvalsReviewer: approvalsReviewer as typeof current.approvalsReviewer }))} placeholder={t("settings.chooseReviewer")} ariaLabel={t("settings.reviewer")}>
             <LoomSelectItem value="user">{t("settings.me")}</LoomSelectItem>
             <LoomSelectItem value="auto-review">{t("settings.autoReview")}</LoomSelectItem>
           </LoomSelect>

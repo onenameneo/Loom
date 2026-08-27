@@ -5,6 +5,7 @@ import { useI18n } from "../../i18n/I18nProvider";
 import { ConfirmDialog, Modal } from "../../ui/dialogs";
 import { buttonClassName, iconButtonClassName } from "../../ui/styles";
 import { McpKeyValueRows, McpStringRows } from "../McpRepeatableRows";
+import { McpBearerCredentialField } from "../McpBearerCredentialField";
 import { McpTransportToggle } from "../McpTransportToggle";
 import { SettingsToolbar } from "../components/SettingsSection";
 import { useMcpSettings } from "../hooks/useMcpSettings";
@@ -45,7 +46,7 @@ export function McpSettings(_props: { ctx: SurfaceCtx }) {
                   </div>
                   <div className="model-chip-row">
                     <span className="model-chip">{t("settings.mcpTools", { count: server.runtime.toolCount })}</span>
-                    {server.secrets.map((secret) => <span key={`${secret.source}:${secret.key}`} className={`model-chip ${secret.status === "missing" ? "empty" : ""}`}>{secret.status === "missing" ? t("settings.mcpSecretMissing") : t("settings.mcpSecretConfigured")}</span>)}
+                    {server.secrets.map((secret) => <span key={`${secret.source}:${secret.key}`} className={`model-chip ${secret.status !== "configured" ? "empty" : ""}`}>{secret.status === "missing" ? t("settings.mcpSecretMissing") : secret.status === "unavailable" ? t("settings.mcpSecretUnavailable") : t("settings.mcpSecretConfigured")}</span>)}
                   </div>
                   {server.runtime.tools && server.runtime.tools.length > 0 && <div className="connection-meta mt-loom-2">{server.runtime.tools.map((tool) => `${tool.exposed ? "✓" : "—"} ${tool.title ?? tool.name}`).join(" · ")}</div>}
                   {server.runtime.diagnostics.length > 0 && <div className="warn-note">{server.runtime.diagnostics[server.runtime.diagnostics.length - 1].message}</div>}
@@ -90,7 +91,7 @@ export function McpSettings(_props: { ctx: SurfaceCtx }) {
                   ) : (
                     <>
                       <label className="field"><span>{t("settings.endpoint")}</span><input value={state.form.url} onChange={(event) => state.setForm((current) => ({ ...current, url: event.target.value }))} placeholder="https://mcp.example.com/mcp" /></label>
-                      <label className="field"><span>Bearer 令牌环境变量</span><input value={state.form.bearerTokenEnv} onChange={(event) => state.setForm((current) => ({ ...current, bearerTokenEnv: event.target.value }))} placeholder="MCP_BEARER_TOKEN" /></label>
+                      <McpBearerCredentialField form={state.form} managedCredentialStorage={state.snapshot?.managedCredentialStorage} onChange={(update) => state.setForm((current) => ({ ...current, ...update }))} />
                       <McpKeyValueRows label="标头" values={state.form.headers} valuePlaceholder="值" onChange={(headers) => state.setForm((current) => ({ ...current, headers }))} />
                       <McpKeyValueRows label="来自环境变量的标头" values={state.form.headerEnv} valuePlaceholder="环境变量名" onChange={(headerEnv) => state.setForm((current) => ({ ...current, headerEnv }))} />
                     </>

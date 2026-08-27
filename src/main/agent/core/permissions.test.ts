@@ -25,6 +25,16 @@ describe("permission policy", () => {
     expect(normalizePermissionContext({ sandboxMode: "danger-full-access" })).toMatchObject({
       profile: "full-access",
       sandboxMode: "danger-full-access",
+      approvalPolicy: "never",
+    });
+  });
+
+  it("makes full access a no-approval profile even when stale approval data remains", () => {
+    expect(normalizePermissionProfile({ mode: "full-access", approvalPolicy: "on-request" })).toMatchObject({
+      mode: "full-access",
+      sandboxMode: "danger-full-access",
+      approvalPolicy: "never",
+      networkAccess: true,
     });
   });
 
@@ -64,6 +74,7 @@ describe("permission policy", () => {
   it("generates model instructions from the effective profile", () => {
     expect(permissionInstructionsFor({ mode: "full-access" })).toContain("Full Access");
     expect(permissionInstructionsFor({ mode: "full-access" })).toContain("ordinary file edits are allowed");
+    expect(permissionInstructionsFor({ mode: "full-access" })).toContain("do not show approval prompts");
     expect(permissionInstructionsFor({ mode: "auto-edit" })).toContain("ask for approval before running commands");
     expect(permissionInstructionsFor({ mode: "suggest" })).toContain("do not modify files automatically");
     expect(permissionInstructionsFor({ mode: "auto-edit", approvalPolicy: "never" })).toContain("Actions that require approval are denied");
@@ -135,6 +146,16 @@ describe("permission policy", () => {
       capability: "network",
       target: "https://example.com",
       normalizedTarget: "network:example.com",
+    })).toMatchObject({ action: "allow" });
+  });
+
+  it("allows an MCP tool in full access without an approval request", () => {
+    expect(evaluatePermission({ profile: "full-access" }, {
+      capability: "mcp",
+      target: "mcp://neo-site/list_posts",
+      normalizedTarget: "mcp://neo-site/list_posts",
+      trusted: false,
+      destructive: true,
     })).toMatchObject({ action: "allow" });
   });
 

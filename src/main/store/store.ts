@@ -90,7 +90,7 @@ export function normalizePermissionSettings(value: unknown): PermissionSettings 
   return {
     profile: compiled.mode,
     sandboxMode: compiled.sandboxMode,
-    approvalPolicy: isApprovalPolicy(raw.approvalPolicy) ? raw.approvalPolicy : compiled.approvalPolicy,
+    approvalPolicy: compiled.approvalPolicy,
     approvalsReviewer: isApprovalsReviewer(raw.approvalsReviewer) ? raw.approvalsReviewer : DEFAULT_SETTINGS.permissions.approvalsReviewer,
     networkAccess: compiled.networkAccess,
     writableRoots: Array.isArray(raw.writableRoots)

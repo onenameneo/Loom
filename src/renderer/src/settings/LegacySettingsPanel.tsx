@@ -8,8 +8,9 @@ import { ConfirmDialog, Modal } from "../ui/dialogs";
 import { LoomCheckboxField, LoomSelect, LoomSelectItem } from "../ui/controls";
 import { buttonClassName, iconButtonClassName } from "../ui/styles";
 import { useI18n, type TranslationKey } from "../i18n/I18nProvider";
-import { emptyMcpForm, formFromMcpServer, mcpFormToConfig, validateMcpForm, type McpFormState } from "./mcpForm";
+import { emptyMcpForm, formFromMcpServer, mcpFormToConfig, mcpFormToSaveRequest, validateMcpForm, type McpFormState } from "./mcpForm";
 import { McpKeyValueRows, McpStringRows } from "./McpRepeatableRows";
+import { McpBearerCredentialField } from "./McpBearerCredentialField";
 import { McpTransportToggle } from "./McpTransportToggle";
 import { ModelSettingsPanel } from "./ModelSettingsPanel";
 
@@ -150,9 +151,9 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
     const existing = mcpServers.find((server) => server.config.id === mcpFormToConfig(mcpForm).id);
     setMcpBusyId(mcpForm.id || "new");
     try {
-      const result = await window.api.mcp.save(mcpFormToConfig(mcpForm, existing ? existing.config.revision + 1 : 1));
+      const result = await window.api.mcp.save(mcpFormToSaveRequest(mcpForm, existing ? existing.config.revision + 1 : 1));
       if (!result.ok) {
-        setMcpError(result.issues?.map((issue) => `${issue.path}: ${issue.message}`).join(" · ") || t("settings.mcpConnectionFailed"));
+        setMcpError(result.issues?.map((issue: { path: string; message: string }) => `${issue.path}: ${issue.message}`).join(" · ") || t("settings.mcpConnectionFailed"));
         return;
       }
       setMcpFormOpen(false);
@@ -301,7 +302,7 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                     </div>
                     <div className="model-chip-row">
                       <span className="model-chip">{t("settings.mcpTools", { count: server.runtime.toolCount })}</span>
-                      {server.secrets.map((secret) => <span key={`${secret.source}:${secret.key}`} className={`model-chip ${secret.status === "missing" ? "empty" : ""}`}>{secret.status === "missing" ? t("settings.mcpSecretMissing") : t("settings.mcpSecretConfigured")}</span>)}
+                      {server.secrets.map((secret) => <span key={`${secret.source}:${secret.key}`} className={`model-chip ${secret.status !== "configured" ? "empty" : ""}`}>{secret.status === "missing" ? t("settings.mcpSecretMissing") : secret.status === "unavailable" ? t("settings.mcpSecretUnavailable") : t("settings.mcpSecretConfigured")}</span>)}
                     </div>
                     {server.runtime.tools && server.runtime.tools.length > 0 && <div className="connection-meta mt-loom-2">{server.runtime.tools.map((tool) => `${tool.exposed ? "✓" : "—"} ${tool.title ?? tool.name}`).join(" · ")}</div>}
                     {server.runtime.diagnostics.length > 0 && <div className="warn-note">{server.runtime.diagnostics[server.runtime.diagnostics.length - 1].message}</div>}
@@ -359,7 +360,7 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
                       <label className="field"><span>{t("settings.endpoint")}</span><input value={mcpForm.url} onChange={(event) => setMcpForm((current) => ({ ...current, url: event.target.value }))} placeholder="https://mcp.example.com/mcp" /></label>
                     </div>
                     <div className="mcp-field-grid mcp-field-grid--single">
-                      <label className="field"><span>Bearer 令牌环境变量</span><input value={mcpForm.bearerTokenEnv} onChange={(event) => setMcpForm((current) => ({ ...current, bearerTokenEnv: event.target.value }))} placeholder="MCP_BEARER_TOKEN" /></label>
+                      <McpBearerCredentialField form={mcpForm} managedCredentialStorage={mcpSnapshot?.managedCredentialStorage} onChange={(update) => setMcpForm((current) => ({ ...current, ...update }))} />
                     </div>
                     <McpKeyValueRows label="标头" values={mcpForm.headers} valuePlaceholder="值" onChange={(headers) => setMcpForm((current) => ({ ...current, headers }))} />
                     <McpKeyValueRows label="来自环境变量的标头" values={mcpForm.headerEnv} valuePlaceholder="环境变量名" onChange={(headerEnv) => setMcpForm((current) => ({ ...current, headerEnv }))} />
@@ -419,7 +420,7 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
           </label>
           <label className="field">
             <span>{t("settings.reviewer")}</span>
-            <LoomSelect value={approvalsReviewer} onValueChange={(value) => setApprovalsReviewer(value as typeof approvalsReviewer)} placeholder={t("settings.chooseReviewer")} ariaLabel={t("settings.reviewer")}>
+            <LoomSelect disabled={profile === "full-access"} value={approvalsReviewer} onValueChange={(value) => setApprovalsReviewer(value as typeof approvalsReviewer)} placeholder={t("settings.chooseReviewer")} ariaLabel={t("settings.reviewer")}>
               <LoomSelectItem value="user">{t("settings.me")}</LoomSelectItem>
               <LoomSelectItem value="auto-review">{t("settings.autoReview")}</LoomSelectItem>
             </LoomSelect>
