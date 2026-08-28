@@ -149,6 +149,8 @@ export interface CanvasRuntimeDeps {
   command?: CommandPort;
   /** Electron app.getPath("userData"). Used for session-local tool result sidecars. */
   userDataDir?: string;
+  /** Electron app.getPath("home"). Used as the base for ~/.loom/skills. */
+  homeDir?: string;
   /** Resolves the final selected model and its context capabilities for a node. */
   resolveContextModel?: (nodeId: string, selection?: StoredModelSelection) => Promise<ContextModelMetadata>;
   compaction?: {
@@ -541,6 +543,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       settings: store.getSettings(),
       projects: store.listProjects(),
       projectId: node?.projectId,
+      homeDir: deps.homeDir,
     });
   }
 
@@ -1783,6 +1786,9 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
 
   function reset(nodeId: string) {
     const node = loadNode(nodeId);
+    const plan = runtime.get(nodeId)?.todoPlan;
+    if (plan && plan.status !== "cleared") clearTodoPlanForTurn(nodeId, plan.turnId);
+    else store.deleteNodePlan?.(nodeId);
     store.deleteMessagesFrom(nodeId, 0);
     if (node) {
       node.messages = [];

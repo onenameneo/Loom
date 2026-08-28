@@ -81,6 +81,55 @@ describe("SlashPalette model command", () => {
     expect(setValue).toHaveBeenCalledWith("");
   });
 
+  it("fuzzy-matches skill arguments across separators and skipped characters", async () => {
+    const enableSkill = vi.fn();
+    (window as any).api = {
+      canvas: {
+        skills: vi.fn(async () => ({
+          catalog: {
+            activeSkills: [
+              { id: "mao-zedong-perspective", name: "Mao Zedong Perspective", description: "Thinking framework", sourceId: "global:/skills", scope: "global", hash: "abc" },
+            ],
+          },
+        })),
+      },
+    };
+    render(
+      React.createElement(SlashPalette, {
+        value: "/skill mzd",
+        setValue: vi.fn(),
+        ctx: { ...ctx(), enableSkill },
+        modelOptions: [],
+      }),
+    );
+
+    await waitFor(() => expect(screen.getByRole("option", { name: /Mao Zedong/ })).toBeTruthy());
+  });
+
+  it("treats slash command names case-insensitively while matching arguments", async () => {
+    (window as any).api = {
+      canvas: {
+        skills: vi.fn(async () => ({
+          catalog: {
+            activeSkills: [
+              { id: "research", name: "Research", description: "Research helper", sourceId: "global:/skills", scope: "global", hash: "abc" },
+            ],
+          },
+        })),
+      },
+    };
+    render(
+      React.createElement(SlashPalette, {
+        value: "/Skill sea",
+        setValue: vi.fn(),
+        ctx: ctx(),
+        modelOptions: [],
+      }),
+    );
+
+    await waitFor(() => expect(screen.getByRole("option", { name: /Research/ })).toBeTruthy());
+  });
+
   it("runs the compact command from the slash palette", () => {
     const compact = vi.fn();
     const setValue = vi.fn();

@@ -104,6 +104,7 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     getLocale: opts.getLocale,
     command: createCommandPort(),
     userDataDir: opts.userDataDir,
+    homeDir: opts.homeDir,
     compaction: {
       summarize: (input, options) => summarizer.summarize(input, options),
     },

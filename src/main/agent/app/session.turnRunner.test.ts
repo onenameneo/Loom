@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { FrozenNodeContext } from "../core/context";
+import type { TodoPlanSnapshot } from "../core/todoPlan";
 import { createAgentSession } from "./session";
 import type { EngineFactory, EngineHandle, EventSinkPort, LlmEnginePort, NodeInit } from "../ports";
 import type { AgentTool } from "../core/tool";
@@ -30,6 +31,7 @@ class MemoryStore implements Store {
     { id: "sess2", projectId: "ws", title: "Second", createdAt: 1, updatedAt: 1, order: 1 },
   ];
   nodes = new Map<string, NodeRecord>();
+  plans = new Map<string, TodoPlanSnapshot>();
 
   constructor(messages: AgentMessage[] = []) {
     this.nodes.set("n1", {
@@ -139,6 +141,9 @@ class MemoryStore implements Store {
     if (node) node.messages = node.messages.slice(0, seq);
   }
   listMessages(nodeId: string) { return this.nodes.get(nodeId)?.messages ?? []; }
+  getNodePlan(nodeId: string) { return this.plans.get(nodeId); }
+  upsertNodePlan(snapshot: TodoPlanSnapshot) { this.plans.set(snapshot.nodeId, snapshot); }
+  deleteNodePlan(nodeId: string) { this.plans.delete(nodeId); }
 }
 
 function events() {
@@ -578,6 +583,51 @@ describe("createAgentSession turn runner integration", () => {
 
       expect(getTools?.("n1").map((tool) => tool.name)).toContain("skill_read");
       expect(getTools?.("n1").map((tool) => tool.name)).not.toContain("skill_list");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the runtime home directory and owning project skill directory for slash and agent skill discovery", () => {
+    const root = mkdtempSync(join(tmpdir(), "loom-session-skill-scope-"));
+    const homeDir = join(root, "home");
+    const projectRoot = join(root, "project");
+    try {
+      mkdirSync(join(homeDir, ".loom", "skills", "home-research"), { recursive: true });
+      writeFileSync(
+        join(homeDir, ".loom", "skills", "home-research", "SKILL.md"),
+        "---\nname: home-research\ndescription: Home skill\n---\n",
+        "utf-8",
+      );
+      mkdirSync(join(projectRoot, ".loom", "skills", "project-research"), { recursive: true });
+      writeFileSync(
+        join(projectRoot, ".loom", "skills", "project-research", "SKILL.md"),
+        "---\nname: project-research\ndescription: Project skill\n---\n",
+        "utf-8",
+      );
+
+      const store = new MemoryStore();
+      store.projects[0].sourceRoots = [projectRoot];
+      store.settings = { ...DEFAULT_SETTINGS, skills: { globalSources: [] } };
+      let getNodeInit: ((nodeId: string) => NodeInit | undefined) | undefined;
+      const session = createAgentSession({
+        store,
+        events: events().sink,
+        ids: { message: () => "id" },
+        clock: { now: () => 1 },
+        getApiKey: () => "key",
+        homeDir,
+        createEngine: (hooks) => {
+          getNodeInit = hooks.getNodeInit;
+          return createEngine(createHandle([], vi.fn()));
+        },
+      });
+
+      expect(session.listSkills("n1").catalog.activeSkills.map((item) => item.id)).toEqual(
+        expect.arrayContaining(["home-research", "project-research"]),
+      );
+      expect(getNodeInit?.("n1")?.systemPrompt).toEqual(expect.stringContaining("home-research"));
+      expect(getNodeInit?.("n1")?.systemPrompt).toEqual(expect.stringContaining("project-research"));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -2063,6 +2113,39 @@ describe("createAgentSession turn runner integration", () => {
 
     await expect(run).resolves.toEqual({ ok: false, reason: "stale" });
     expect(session.liveTurns()).toEqual([]);
+  });
+
+  it("clears the durable todo plan and publishes its cleared projection when a Node is reset", () => {
+    const store = new MemoryStore();
+    store.upsertNodePlan({
+      planId: "plan-1",
+      nodeId: "n1",
+      sessionId: "sess",
+      turnId: "turn-1",
+      revision: 3,
+      status: "active",
+      todos: [{ id: "one", content: "Do one thing", status: "in_progress" }],
+      updatedAt: 1,
+    });
+    const eventLog = events();
+    const session = createAgentSession({
+      store,
+      events: eventLog.sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 2 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    expect(session.reset("n1")).toEqual({ ok: true });
+    expect(store.getNodePlan("n1")).toBeUndefined();
+    expect(eventLog.items).toContainEqual(expect.objectContaining({
+      nodeId: "n1",
+      type: "todo",
+      payload: expect.objectContaining({
+        snapshot: expect.objectContaining({ status: "cleared", revision: 4 }),
+      }),
+    }));
   });
 
   it("records request, tool, and response trace entries during a turn", async () => {

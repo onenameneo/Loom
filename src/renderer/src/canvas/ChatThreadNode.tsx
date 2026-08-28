@@ -101,6 +101,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   const footRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(1);
+  const clearingRef = useRef(false);
 
   const toMsgs = useCallback((items: NodeMsg[] = []) => (
     items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, fileMentions: m.fileMentions, selectionNotes: m.selectionNotes, artifacts: m.artifacts, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }))
@@ -465,9 +466,23 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   }
 
   async function clearNode() {
-    setMsgs([]);
-    if (window.api) await window.api.canvas.reset(id);
-    void refreshMetrics();
+    if (clearingRef.current) return;
+    clearingRef.current = true;
+    try {
+      if (!window.api) throw new Error(t("chat.browserPreview"));
+      const result = await window.api.canvas.reset(id);
+      if (!result?.ok) throw new Error(t("chat.genericError"));
+      setMsgs([]);
+      setTurn(null);
+      setThinking(false);
+      setBusy(false);
+      setStopPending(false);
+      void refreshMetrics();
+    } catch (error) {
+      setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: error instanceof Error ? error.message : t("chat.genericError") }]);
+    } finally {
+      clearingRef.current = false;
+    }
   }
 
   async function setModel(model: string) {

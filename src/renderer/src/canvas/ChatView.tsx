@@ -114,6 +114,7 @@ export default function ChatView({
   const threadRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
+  const clearingRef = useRef(false);
   const [tb, setTb] = useState<{ text: string; x: number; y: number } | null>(null);
   const [selectionNoteCaptureOpen, setSelectionNoteCaptureOpen] = useState(false);
   const [selectionNotes, setSelectionNotes] = useState<SelectionContextNote[]>(() => {
@@ -427,9 +428,23 @@ export default function ChatView({
   }, [onMessageBranch]);
 
   async function clearNode() {
-    setMsgs([]);
-    if (window.api) await window.api.canvas.reset(nodeId);
-    void refreshMetrics();
+    if (clearingRef.current) return;
+    clearingRef.current = true;
+    try {
+      if (!window.api) throw new Error(t("chat.browserPreview"));
+      const result = await window.api.canvas.reset(nodeId);
+      if (!result?.ok) throw new Error(t("chat.genericError"));
+      setMsgs([]);
+      setTurn(null);
+      setThinking(false);
+      setBusy(false);
+      setStopPending(false);
+      void refreshMetrics();
+    } catch (error) {
+      setMsgs((m) => [...m, { id: idRef.current++, role: "error", text: error instanceof Error ? error.message : t("chat.genericError") }]);
+    } finally {
+      clearingRef.current = false;
+    }
   }
 
   async function savePersona() {

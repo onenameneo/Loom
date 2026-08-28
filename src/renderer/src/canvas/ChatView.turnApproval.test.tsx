@@ -14,12 +14,14 @@ let send: ReturnType<typeof vi.fn>;
 let decideApproval: ReturnType<typeof vi.fn>;
 let compact: ReturnType<typeof vi.fn>;
 let abort: ReturnType<typeof vi.fn>;
+let reset: ReturnType<typeof vi.fn>;
 
 function installApi() {
   send = vi.fn(async () => ({ ok: true }));
   decideApproval = vi.fn(async () => ({ ok: true }));
   compact = vi.fn(async () => ({ ok: false, reason: "not_needed" }));
   abort = vi.fn(async () => ({ ok: true }));
+  reset = vi.fn(async () => ({ ok: true }));
   (window as any).api = {
     canvas: {
       budget: vi.fn(async () => ({ withoutAncestors: 0, withAncestors: 0, estimated: true })),
@@ -28,7 +30,7 @@ function installApi() {
       regenerate: vi.fn(async () => ({ ok: true })),
       editResend: vi.fn(async () => ({ ok: true })),
       setMount: vi.fn(async () => ({ ok: true, budget: { withoutAncestors: 0, withAncestors: 0, estimated: true } })),
-      reset: vi.fn(async () => ({ ok: true })),
+      reset,
       setSystemPrompt: vi.fn(async () => ({ ok: true })),
       setModel: vi.fn(async () => ({ ok: true })),
       compact,
@@ -409,5 +411,56 @@ describe("ChatView turn and approval controls", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(send).toHaveBeenCalledWith("n1", "hello", [], []);
+  });
+
+  it("keeps the conversation and reports an error when slash clear cannot reset the node", async () => {
+    reset.mockRejectedValueOnce(new Error("reset failed"));
+    render(
+      <ChatView
+        nodeId="n1"
+        initialMessages={[{ role: "user", text: "keep this", seq: 0 } as any]}
+        hasFrozenContext={false}
+        onBranch={vi.fn()}
+        onExpandCanvas={vi.fn()}
+        noKey={false}
+        goSettings={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText(/随心输入/);
+    fireEvent.change(input, { target: { value: "/clear" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(reset).toHaveBeenCalledWith("n1");
+    expect(await screen.findByText("keep this")).toBeTruthy();
+    expect(await screen.findByText("reset failed")).toBeTruthy();
+  });
+
+  it("coalesces repeated slash clear requests while the first reset is pending", async () => {
+    let resolveReset: ((value: { ok: boolean }) => void) | undefined;
+    reset.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveReset = resolve;
+    }));
+    render(
+      <ChatView
+        nodeId="n1"
+        initialMessages={[{ role: "user", text: "keep this", seq: 0 } as any]}
+        hasFrozenContext={false}
+        onBranch={vi.fn()}
+        onExpandCanvas={vi.fn()}
+        noKey={false}
+        goSettings={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText(/随心输入/);
+    fireEvent.change(input, { target: { value: "/clear" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "/clear" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(reset).toHaveBeenCalledTimes(1);
+    await act(async () => resolveReset?.({ ok: true }));
+    await waitFor(() => expect(screen.queryByText("keep this")).toBeNull());
   });
 });

@@ -11,6 +11,32 @@ function parseSlash(value: string): { name: string; arg: string; hasSpace: boole
   return { name: raw.slice(0, space), arg: raw.slice(space + 1), hasSpace: true };
 }
 
+function normalizeSearchText(value: string): string {
+  return value
+    .toLocaleLowerCase()
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function fuzzyMatches(value: string, query: string): boolean {
+  const candidate = normalizeSearchText(value);
+  const needle = normalizeSearchText(query);
+  if (!needle) return true;
+  if (candidate.includes(needle)) return true;
+
+  const compactCandidate = candidate.replace(/\s/g, "");
+  const compactNeedle = needle.replace(/\s/g, "");
+  if (compactCandidate.includes(compactNeedle)) return true;
+
+  let needleIndex = 0;
+  for (const character of compactCandidate) {
+    if (character === compactNeedle[needleIndex]) needleIndex += 1;
+    if (needleIndex === compactNeedle.length) return true;
+  }
+  return false;
+}
+
 export type SlashPaletteHandle = {
   handleKeyDown: (event: { key: string; preventDefault: () => void }) => void;
 };
@@ -39,19 +65,20 @@ export const SlashPalette = forwardRef<SlashPaletteHandle, {
   const parsed = value.startsWith("/") ? parseSlash(value) : { name: "", arg: "", hasSpace: false };
   const actionCommands = useMemo(() => visibleCommands("action", state), [state]);
   const filtered = actionCommands.filter((cmd) => {
-    const needle = parsed.name.toLowerCase();
+    const needle = normalizeSearchText(parsed.name);
     return !needle || cmd.id.startsWith(needle) || cmd.label.toLowerCase().includes(needle);
   });
   const modelCommand = actionCommands.find((cmd) => cmd.id === "model");
   const skillCommand = actionCommands.find((cmd) => cmd.id === "skill");
-  const modelMode = Boolean(modelCommand && parsed.name === "model" && parsed.hasSpace);
-  const skillMode = Boolean(skillCommand && parsed.name === "skill" && parsed.hasSpace);
+  const commandName = normalizeSearchText(parsed.name);
+  const modelMode = Boolean(modelCommand && commandName === "model" && parsed.hasSpace);
+  const skillMode = Boolean(skillCommand && commandName === "skill" && parsed.hasSpace);
   const [skills, setSkills] = useState<SkillCatalogItemDto[]>([]);
   const models = modelMode ? modelOptions : [];
-  const modelNeedle = parsed.arg.trim().toLowerCase();
-  const modelItems = models.filter((m) => !modelNeedle || m.id.toLowerCase().includes(modelNeedle) || m.name.toLowerCase().includes(modelNeedle));
-  const skillNeedle = parsed.arg.trim().toLowerCase();
-  const skillItems = skillMode ? skills.filter((s) => !skillNeedle || s.id.includes(skillNeedle) || s.name.toLowerCase().includes(skillNeedle) || s.description.toLowerCase().includes(skillNeedle)) : [];
+  const modelNeedle = parsed.arg.trim();
+  const modelItems = models.filter((m) => fuzzyMatches(m.id, modelNeedle) || fuzzyMatches(m.name, modelNeedle));
+  const skillNeedle = parsed.arg.trim();
+  const skillItems = skillMode ? skills.filter((s) => fuzzyMatches(s.id, skillNeedle) || fuzzyMatches(s.name, skillNeedle) || fuzzyMatches(s.description, skillNeedle)) : [];
   const count = modelMode ? modelItems.length : skillMode ? skillItems.length : filtered.length;
   const ModelIcon = modelCommand?.icon;
   const SkillIcon = skillCommand?.icon;
