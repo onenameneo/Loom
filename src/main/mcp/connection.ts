@@ -55,7 +55,6 @@ export interface McpConnectionHandle {
 
 export interface McpConnectionManagerOptions {
   create?: McpClientFactory;
-  secretStore?: McpSecretStore;
   requestConsent?: (consent: McpConnectionConsent) => boolean | Promise<boolean>;
   isConsentPersisted?: (serverId: string, configRevision: number) => boolean;
   persistConsent?: (serverId: string, configRevision: number) => void;
@@ -128,7 +127,7 @@ function diagnostic(code: McpDiagnostic["code"], message: string, retryable: boo
 }
 
 function configuredSecretReferences(transport: McpServerConfig["transport"]): McpSecretReference[] {
-  if (transport.type === "stdio") return Object.values(transport.env ?? {});
+  if (transport.type === "stdio") return Object.values(transport.env ?? {}).filter((value): value is McpSecretReference => typeof value === "object");
   return Object.values(transport.headers ?? {}).filter((value): value is McpSecretReference => typeof value === "object");
 }
 
@@ -171,7 +170,6 @@ export function createMcpConnectionManager(options: McpConnectionManagerOptions 
   const reconnectBaseMs = options.reconnectBaseMs ?? DEFAULT_RECONNECT_BASE_MS;
   const maxReconnectAttempts = options.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
   const redact = options.redact ?? ((value: string) => redactMcpText(value));
-  const createClient = options.create ?? createMcpSdkClientFactory({ secretStore: options.secretStore });
   const connections = new Map<string, ConnectionRecord>();
   const consented = new Set<string>();
 
@@ -246,7 +244,7 @@ export function createMcpConnectionManager(options: McpConnectionManagerOptions 
     let created: McpClientFactoryResult | undefined;
     try {
       const transportKind: McpTransportKind = record.server.transport.type === "stdio" ? "stdio" : "streamable-http";
-      created = await withTimeout(createClient({ server: record.server, transportKind, onToolsChanged: (error) => options.onToolsChanged?.(record.server.id, error) }), timeoutMs, signal);
+      created = await withTimeout((options.create ?? createMcpSdkClientFactory())({ server: record.server, transportKind, onToolsChanged: (error) => options.onToolsChanged?.(record.server.id, error) }), timeoutMs, signal);
       attachTransport(record, created);
       await withTimeout(created.client.connect(created.transport), timeoutMs, signal);
     } catch (firstError) {
@@ -386,7 +384,7 @@ export function createMcpSdkClientFactory(options: McpSdkClientFactoryOptions = 
         const value = (options.environment ?? process.env)[name];
         if (value !== undefined) env[name] = value;
       }
-      for (const [name, reference] of Object.entries(transport.env ?? {})) env[name] = await resolveReference(secretStore, reference);
+      for (const [name, reference] of Object.entries(transport.env ?? {})) env[name] = typeof reference === "string" ? reference : await resolveReference(secretStore, reference);
       sdkTransport = new StdioClientTransport({ command: transport.command, args: transport.args, ...(transport.cwd ? { cwd: transport.cwd } : {}), env, stderr: "pipe" });
     } else {
       if (context.server.transport.type !== "streamable-http") throw new Error("HTTP transport requested for a non-HTTP MCP server.");

@@ -1,4 +1,3 @@
-import "dotenv/config"; // 先加载 .env（ANTHROPIC_API_KEY / BASE_URL）
 import { existsSync, writeFileSync } from "fs";
 import { join } from "path";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell, type WebContents } from "electron";
@@ -41,7 +40,7 @@ import { createRuntimeModelsFromRegistry } from "./modelConfig/runtimeModels";
 
 // ---------------------------------------------------------------------------
 // 主进程：持久化(store) + 设置 + 会话 + 画布引擎(pi 多节点)。
-// 模型配置走「设置优先、env 回退」(resolveModelConfig)。对话/分支画布逻辑在
+// 模型配置走 models.json / scoped settings。对话/分支画布逻辑在
 // canvas.ts（每节点一个 pi Agent + 自定义 convertToLlm 分支上下文装配）。
 // ---------------------------------------------------------------------------
 
@@ -277,8 +276,6 @@ function registerIpc() {
         getWin: () => win,
         manager: canvas.mcp.manager,
         provider: canvas.mcp.provider,
-        secretStore: canvas.mcp.secretStore,
-        vault: canvas.mcp.vault,
         homeDir: app.getPath("home"),
       })
     : undefined;

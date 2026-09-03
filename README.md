@@ -12,13 +12,11 @@ Electron 壳 + pi 大脑（`pi-agent-core` + `pi-ai`）跑在主进程 + React r
 
 ## 运行
 ```bash
-cp .env.example .env                  # 填入 ANTHROPIC_API_KEY（主进程 dotenv 自动加载）
 pnpm install
 pnpm dev                              # 启动 Electron 应用
 ```
-也可直接 `export ANTHROPIC_API_KEY=...` 走 shell 环境变量，不用 .env。
-用自定义 endpoint / 代理时设 `ANTHROPIC_BASE_URL=...`（Anthropic 兼容的 messages API）。
-- 模型默认 `claude-sonnet-4-5`，全局默认模型在应用「设置」中配置（写入 models.json，解析走 resolveSelectedModel）。
+首次启动后，在应用「设置」中添加 Provider、模型和认证信息。
+- 模型默认 `claude-sonnet-4-5`，全局默认模型在应用「设置」中配置（写入 `~/.loom/agent/settings.json`，解析走 `resolveSelectedModel`）。
 - `pnpm build` 构建，`pnpm typecheck` 严格类型检查。
 - 注意：若你的 shell 全局设了 `ELECTRON_RUN_AS_NODE=1`，dev/start 脚本已自动清除它（否则 Electron 会以纯 Node 模式启动主进程而报错）。
 
@@ -37,7 +35,7 @@ pnpm dev                              # 启动 Electron 应用
 - 全局：`~/.loom/mcp.json`
 - 当前 Project：`<project-root>/.loom/mcp.json`
 
-本地 stdio 首次连接会显示命令、参数、工作目录和环境变量名称的授权确认。命令按 argv 启动，不经过 shell；远程地址必须使用 HTTPS，HTTP 仅允许 localhost。凭证只能配置为环境变量、Loom Secret key 或 OAuth profile 引用，不要把 token 写入配置文件。
+本地 stdio 首次连接会显示命令、参数、工作目录和环境变量名称的授权确认。命令按 argv 启动，不经过 shell；远程地址必须使用 HTTPS，HTTP 仅允许 localhost。API Key 可直接在 APP 中填写并保存（本地配置文件仅当前用户可读）；也可选择环境变量名作为高级配置。OAuth profile 由后续登录流程提供。
 
 默认工具暴露采用 allowlist，工具调用继续经过 Loom/pi-agent 的 `beforeToolCall` 审批门；服务端 annotations 只作为不可信元数据，不能绕过审批。当前版本不会自动注入 MCP resources/prompts，也不会隐式读取 resource URI。
 

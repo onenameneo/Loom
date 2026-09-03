@@ -18,7 +18,7 @@ export interface McpStdioTransport {
   command: string;
   args: string[];
   cwd?: string;
-  env?: Record<string, McpSecretReference>;
+  env?: Record<string, string | McpSecretReference>;
   inheritEnv?: string[];
 }
 
@@ -93,12 +93,12 @@ function normalizeTransport(value: unknown, issues: McpConfigIssue[]): McpTransp
     const args = normalizeStringList(value.args, 128, []);
     if (!args) { issues.push(issue("stdio_args", "transport.args", "stdio args must be a bounded string array.")); return undefined; }
     if (value.cwd !== undefined && (!stringValue(value.cwd) || !isAbsolute(value.cwd))) { issues.push(issue("stdio_cwd", "transport.cwd", "stdio cwd must be an absolute path when provided.")); return undefined; }
-    const env: Record<string, McpSecretReference> = {};
+    const env: Record<string, string | McpSecretReference> = {};
     if (value.env !== undefined) {
       if (!isRecord(value.env) || Object.keys(value.env).length > 64) { issues.push(issue("stdio_env", "transport.env", "stdio env must contain bounded secret references.")); return undefined; }
       for (const [name, reference] of Object.entries(value.env)) {
-        const normalized = normalizeReference(reference);
-        if (!/^[A-Z_][A-Z0-9_]*$/.test(name) || !normalized) { issues.push(issue("stdio_env", `transport.env.${name}`, "Environment values must be valid secret references.")); return undefined; }
+        const normalized = typeof reference === "string" && reference.length > 0 && reference.length <= 2048 ? reference : normalizeReference(reference);
+        if (!/^[A-Z_][A-Z0-9_]*$/.test(name) || !normalized) { issues.push(issue("stdio_env", `transport.env.${name}`, "Environment values must be non-empty values or valid secret references.")); return undefined; }
         env[name] = normalized;
       }
     }
@@ -114,8 +114,7 @@ function normalizeTransport(value: unknown, issues: McpConfigIssue[]): McpTransp
       if (!isRecord(value.headers) || Object.keys(value.headers).length > 64) { issues.push(issue("http_header", "transport.headers", "HTTP headers must be bounded key/value entries.")); return undefined; }
       for (const [name, headerValue] of Object.entries(value.headers)) {
         const normalized = typeof headerValue === "string" ? headerValue : normalizeReference(headerValue);
-        const sensitiveHeader = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key)$/i.test(name);
-        if (!/^[A-Za-z0-9-]{1,128}$/.test(name) || !normalized || (typeof normalized === "string" && normalized.length > 2048) || (sensitiveHeader && typeof normalized === "string")) { issues.push(issue("http_header", `transport.headers.${name}`, "Sensitive HTTP headers must use secret references.")); return undefined; }
+        if (!/^[A-Za-z0-9-]{1,128}$/.test(name) || !normalized || (typeof normalized === "string" && normalized.length > 2048)) { issues.push(issue("http_header", `transport.headers.${name}`, "HTTP headers must contain bounded key/value entries.")); return undefined; }
         headers[name] = normalized;
       }
     }

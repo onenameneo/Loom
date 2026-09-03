@@ -1,6 +1,6 @@
 import type { Store } from "./store/store";
 
-export type SourceKind = "settings" | "env" | "default";
+export type SourceKind = "settings" | "default";
 
 export interface ResolvedModel {
   provider: string;
@@ -41,21 +41,19 @@ export function readApiKey(store: Store): string {
   return "";
 }
 
-// 设置优先、env 回退。沿用 P0 的 baseUrl/model 语义。
+// 保留旧 Settings access 结构的兼容读取；实际 Provider、模型和凭证
+// 由 models.json / scoped settings 解析。
 export function resolveModelConfig(store: Store): ResolvedModel {
   const a = store.getSettings().access;
-  // 模型名已迁移到 models.json 全局默认（resolveSelectedModel），不再回退 env MODEL_ID。
   const model = a.model || DEFAULT_MODEL;
-  const baseUrl = a.baseUrl || process.env.ANTHROPIC_BASE_URL || "";
-  const apiKey = process.env.ANTHROPIC_API_KEY || "";
-  return { provider: a.provider || "anthropic", baseUrl, model, apiKey };
+  return { provider: a.provider || "anthropic", baseUrl: a.baseUrl || "", model, apiKey: "" };
 }
 
 export function accessSources(store: Store): AccessSource {
   const a = store.getSettings().access;
   return {
-    baseUrl: a.baseUrl ? "settings" : process.env.ANTHROPIC_BASE_URL ? "env" : "default",
+    baseUrl: a.baseUrl ? "settings" : "default",
     model: a.model ? "settings" : "default",
-    key: process.env.ANTHROPIC_API_KEY ? "env" : "none",
+    key: "none",
   };
 }

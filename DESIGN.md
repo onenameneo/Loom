@@ -108,3 +108,4 @@
 | 2026-07-14 | 画布引擎 React Flow（无头，自定义皮肤） | 富 DOM 聊天节点 + 划词选中最搭；tldraw 会与此刚需打架 |
 | 2026-07-15 | 统一「消息层」：画布节点与 ChatView 共用 `Message` 组件（user 右/assistant 全宽左，compact/comfortable 双密度） | 消除两界面各写一套、对齐不一致；一处改全局 |
 | 2026-07-15 | Markdown = react-markdown + remark-gfm（默认转义 HTML）；代码高亮 = prism-react-renderer + **token 化主题**（`--syntax-*`，随明暗切换） | 最佳实践、安全、轻量；高亮走独立 token 不与设计系统打架 |
+| 2026-08-29 | MCP 默认支持在 APP 内直接填写 API Key 并保存为本地配置；环境变量保留为高级选项；移除 Loom 专属 managed credential / Electron safeStorage UI 与持久化 | 添加体验与模型配置一致；不引入额外凭据托管系统；敏感值不通过安全投影回传 renderer |

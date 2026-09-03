@@ -249,11 +249,9 @@ export function registerAcp(opts: { getWin: () => BrowserWindow | null; store: S
 
   ipcMain.handle("acp:start", async (_e, arg: { cwd?: string; model?: string }) => {
     const cwd = resolve(String(arg?.cwd ?? ""));
-    // ACP adapter 应表现得像用户自己的 claude CLI：用其 Claude Code 登录/配置（~/.claude），
-    // 走真实 Anthropic + 订阅模型。Loom 自己的 .env（经 dotenv 进了 process.env）里有给 pi
-    // 聊天配的 MiMo 代理端点 + key + MODEL_ID——若透传给 adapter 会把它劫持到只服务
-    // mimo-v2.5 的代理，导致 Claude 模型 400。故剔除这些 Loom 覆盖项，让 adapter 回落到
-    // 用户真正的 Claude Code 配置。仅当为本次会话显式指定模型时才覆盖。
+    // ACP adapter 应表现得像用户自己的 claude CLI：使用其 Claude Code 登录/配置（~/.claude）。
+    // 不把 Loom 聊天侧的 Anthropic 环境覆盖项透传给 adapter，避免把 Claude Code
+    // 劫持到 Loom 聊天使用的代理或模型。仅当为本次会话显式指定模型时才覆盖。
     const childEnv: NodeJS.ProcessEnv = { ...process.env };
     for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "MODEL_ID"]) {
       delete childEnv[key];

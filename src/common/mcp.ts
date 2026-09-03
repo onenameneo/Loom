@@ -35,24 +35,19 @@ export interface McpSafeServerDto {
     tools?: Array<{ name: string; title?: string; readOnly: boolean; destructive: boolean; exposed: boolean }>;
     updatedAt: number;
   };
-  secrets: Array<{ source: "environment" | "secret" | "oauth"; key: string; status: "configured" | "missing" | "expired" | "unavailable" }>;
+  secrets: Array<{ source: "environment" | "secret" | "oauth"; key: string; status: "configured" | "missing" }>;
 }
 
 export interface McpSettingsSnapshot {
   servers: McpSafeServerDto[];
   diagnostics: Array<{ code: string; path: string; message: string }>;
   revision: number;
-  managedCredentialStorage?: "available" | "unavailable";
 }
 
 export type McpConfigInput = Record<string, unknown>;
 export interface McpSaveRequest {
   config: McpConfigInput;
-  bearerToken?: string;
-  clearManagedBearer?: boolean;
-}
-export interface McpSaveResult {
-  ok: boolean;
-  config?: McpConfigInput;
-  issues?: Array<{ code: string; path: string; message: string }>;
+  preserveSensitiveHeaders?: string[];
+  clearSensitiveHeaders?: string[];
+  preserveEnvironmentNames?: string[];
 }

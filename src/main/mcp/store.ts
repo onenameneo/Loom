@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { normalizeMcpServerConfig, type McpConfigIssue, type McpExposurePolicy, type McpServerConfig } from "./config";
@@ -58,8 +58,20 @@ function readWritableConfig(filePath: string): McpConfigFile {
 function writeConfig(filePath: string, file: McpConfigFile): void {
   mkdirSync(dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.tmp`;
-  writeFileSync(tempPath, `${JSON.stringify(file, null, 2)}\n`, "utf8");
-  renameSync(tempPath, filePath);
+  writeFileSync(tempPath, `${JSON.stringify(file, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  replaceFile(tempPath, filePath);
+}
+
+function replaceFile(tempPath: string, filePath: string): void {
+  try {
+    renameSync(tempPath, filePath);
+  } catch (error) {
+    // Windows does not replace an existing destination with renameSync.
+    if (process.platform !== "win32") throw error;
+    if (!existsSync(filePath)) throw error;
+    unlinkSync(filePath);
+    renameSync(tempPath, filePath);
+  }
 }
 
 export function loadMcpConsent(options: McpConfigStoreOptions = {}): Record<string, number> {
@@ -85,7 +97,7 @@ export function saveMcpConsent(options: McpConfigStoreOptions & { serverId: stri
   const tempPath = `${filePath}.tmp`;
   const file: McpConsentFile = { version: 1, servers: current };
   writeFileSync(tempPath, `${JSON.stringify(file, null, 2)}\n`, "utf8");
-  renameSync(tempPath, filePath);
+  replaceFile(tempPath, filePath);
 }
 
 export function removeMcpConsent(options: McpConfigStoreOptions & { serverId: string }): void {
@@ -98,14 +110,46 @@ export function removeMcpConsent(options: McpConfigStoreOptions & { serverId: st
   const tempPath = `${filePath}.tmp`;
   const file: McpConsentFile = { version: 1, servers: current };
   writeFileSync(tempPath, `${JSON.stringify(file, null, 2)}\n`, "utf8");
-  renameSync(tempPath, filePath);
+  replaceFile(tempPath, filePath);
 }
 
-export function saveMcpServerConfig(options: { homeDir?: string; config: Partial<McpServerConfig> & { id: string; transport: unknown } }): McpServerConfig {
-  const result = normalizeMcpServerConfig(options.config);
-  if (!result.config || result.issues.some((item) => item.code !== "unknown_field")) throw new Error(result.issues.map((item) => `${item.path}: ${item.message}`).join("; ") || "Invalid MCP configuration.");
+function mergePreservedHeaders(input: Partial<McpServerConfig> & { id: string; transport: unknown }, existing: McpServerConfig | undefined, preserve: string[] = [], clear: string[] = []): Partial<McpServerConfig> & { id: string; transport: unknown } {
+  if (!existing || existing.transport.type !== "streamable-http" || !isRecord(input.transport) || input.transport.type !== "streamable-http") return input;
+  const nextHeaders = isRecord(input.transport.headers) ? { ...input.transport.headers } : {};
+  const existingHeaders = existing.transport.headers ?? {};
+  const findHeader = (headers: Record<string, unknown>, name: string) => Object.keys(headers).find((key) => key.toLowerCase() === name.toLowerCase());
+  for (const name of preserve) {
+    const existingName = findHeader(existingHeaders, name);
+    if (!existingName || findHeader(nextHeaders, name)) continue;
+    nextHeaders[existingName] = existingHeaders[existingName]!;
+  }
+  const sensitiveHeader = (name: string) => /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key)$/i.test(name);
+  for (const [name] of Object.entries(existingHeaders)) {
+    if (sensitiveHeader(name) && !findHeader(nextHeaders, name) && !preserve.some((item) => item.toLowerCase() === name.toLowerCase())) delete nextHeaders[name];
+  }
+  for (const name of clear) {
+    const nextName = findHeader(nextHeaders, name);
+    if (nextName) delete nextHeaders[nextName];
+  }
+  return { ...input, transport: { ...input.transport, ...(Object.keys(nextHeaders).length ? { headers: nextHeaders } : { headers: undefined }) } };
+}
+
+function mergePreservedEnvironment(input: Partial<McpServerConfig> & { id: string; transport: unknown }, existing: McpServerConfig | undefined, preserve: string[] = []): Partial<McpServerConfig> & { id: string; transport: unknown } {
+  if (!existing || existing.transport.type !== "stdio" || !isRecord(input.transport) || input.transport.type !== "stdio") return input;
+  const nextEnv = isRecord(input.transport.env) ? { ...input.transport.env } : {};
+  const existingEnv = existing.transport.env ?? {};
+  for (const name of preserve) if (!(name in nextEnv) && name in existingEnv) nextEnv[name] = existingEnv[name]!;
+  return { ...input, transport: { ...input.transport, ...(Object.keys(nextEnv).length ? { env: nextEnv } : { env: undefined }) } };
+}
+
+export function saveMcpServerConfig(options: { homeDir?: string; config: Partial<McpServerConfig> & { id: string; transport: unknown }; preserveSensitiveHeaders?: string[]; clearSensitiveHeaders?: string[]; preserveEnvironmentNames?: string[] }): McpServerConfig {
   const filePath = globalMcpPath(options.homeDir ?? homedir());
   const file = readWritableConfig(filePath);
+  const existingRaw = file.servers[options.config.id];
+  const existing = normalizeMcpServerConfig(existingRaw).config;
+  const preserved = mergePreservedEnvironment(options.config, existing, options.preserveEnvironmentNames);
+  const result = normalizeMcpServerConfig(mergePreservedHeaders(preserved, existing, options.preserveSensitiveHeaders, options.clearSensitiveHeaders));
+  if (!result.config || result.issues.some((item) => item.code !== "unknown_field")) throw new Error(result.issues.map((item) => `${item.path}: ${item.message}`).join("; ") || "Invalid MCP configuration.");
   file.servers[result.config.id] = result.config;
   writeConfig(filePath, file);
   return result.config;

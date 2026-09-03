@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emptyMcpForm, formFromMcpServer, mcpFormToConfig, mcpFormToSaveRequest, validateMcpForm } from "./mcpForm";
+import { emptyMcpForm, formFromMcpServer, mcpFormToConfig, validateMcpForm } from "./mcpForm";
 
 describe("MCP settings form", () => {
   it("uses a global screenshot-shaped form without project fields", () => {
@@ -9,20 +9,33 @@ describe("MCP settings form", () => {
       transport: "stdio",
       args: [""],
       env: [{ key: "", value: "" }],
+      envRefs: [{ key: "", value: "" }],
       inheritEnv: [""],
       headers: [{ key: "", value: "" }],
       headerEnv: [{ key: "", value: "" }],
+      bearerTokenEnv: "",
+      apiKey: "",
+      apiKeyHeader: "Authorization",
+      apiKeyConfigured: false,
     });
+    expect(form).not.toHaveProperty("bearerToken");
+    expect(form).not.toHaveProperty("bearerCredentialSource");
     expect(form).not.toHaveProperty("scope");
     expect(form).not.toHaveProperty("displayName");
     expect(form).not.toHaveProperty("credentialName");
   });
 
-  it("emits repeatable secret references, never credential values", () => {
-    const form = { ...emptyMcpForm(), id: "notes", name: "Notes", command: "npx", env: [{ key: "MCP_TOKEN", value: "TOKEN_ENV" }] };
+  it("emits repeatable environment references, never credential values", () => {
+    const form = { ...emptyMcpForm(), id: "notes", name: "Notes", command: "npx", envRefs: [{ key: "MCP_TOKEN", value: "TOKEN_ENV" }] };
     const config = mcpFormToConfig(form, 4);
     expect(config).toMatchObject({ revision: 4, name: "Notes", transport: { env: { MCP_TOKEN: { source: "environment", name: "TOKEN_ENV" } } } });
     expect(JSON.stringify(config)).not.toContain("secret-value");
+  });
+
+  it("emits direct stdio environment values from the APP form", () => {
+    const form = { ...emptyMcpForm(), id: "notes", name: "Notes", command: "npx", env: [{ key: "MCP_TOKEN", value: "secret-value" }] };
+    const config = mcpFormToConfig(form);
+    expect(config.transport).toMatchObject({ env: { MCP_TOKEN: "secret-value" } });
   });
 
   it("rejects shell expressions and non-local HTTP", () => {
@@ -30,10 +43,20 @@ describe("MCP settings form", () => {
     expect(validateMcpForm({ ...emptyMcpForm(), id: "notes", name: "Notes", transport: "streamable-http", url: "http://remote.example/mcp" })).toBe("invalid-url");
   });
 
-  it("requires sensitive HTTP headers to be configured as references", () => {
-    const form = { ...emptyMcpForm(), id: "remote", name: "Remote", transport: "streamable-http" as const, url: "https://mcp.example.com/mcp", headers: [{ key: "Authorization", value: "Bearer plaintext" }] };
-    expect(validateMcpForm(form)).toBe("invalid-env-ref");
-    expect(validateMcpForm({ ...form, transport: "stdio", command: "npx" })).not.toBe("invalid-env-ref");
+  it("accepts a direct HTTP API key and emits a bearer authorization header", () => {
+    const form = { ...emptyMcpForm(), id: "remote", name: "Remote", transport: "streamable-http" as const, url: "https://mcp.example.com/mcp", apiKey: "plaintext" };
+    expect(validateMcpForm(form)).toBeUndefined();
+    expect(mcpFormToConfig(form).transport).toMatchObject({ headers: { Authorization: "Bearer plaintext" } });
+  });
+
+  it("accepts an API key header without forcing an environment reference", () => {
+    const form = { ...emptyMcpForm(), id: "remote", name: "Remote", transport: "streamable-http" as const, url: "https://mcp.example.com/mcp", apiKeyHeader: "X-Api-Key" as const, apiKey: "plaintext" };
+    expect(validateMcpForm(form)).toBeUndefined();
+    expect(mcpFormToConfig(form).transport).toMatchObject({ headers: { "X-Api-Key": "plaintext" } });
+  });
+
+  it("keeps environment references as an advanced option", () => {
+    const form = { ...emptyMcpForm(), id: "remote", name: "Remote", transport: "streamable-http" as const, url: "https://mcp.example.com/mcp", bearerTokenEnv: "MCP_BEARER_TOKEN" };
     expect(mcpFormToConfig({ ...form, headers: [{ key: "X-Client", value: "loom" }], bearerTokenEnv: "MCP_BEARER_TOKEN" }).transport).toMatchObject({ headers: { Authorization: { source: "environment", name: "MCP_BEARER_TOKEN" } } });
     const inlineReference = { ...form, headers: [{ key: "Authorization", value: "MCP_BEARER_TOKEN" }] };
     expect(validateMcpForm(inlineReference)).toBeUndefined();
@@ -46,72 +69,33 @@ describe("MCP settings form", () => {
     expect(mcpFormToConfig(referenced).transport).toMatchObject({ headers: { Authorization: { source: "environment", name: "MCP_BEARER_TOKEN" } } });
   });
 
-  it("keeps a direct Bearer token out of the persisted config and sends it only in the save request", () => {
-    const form = {
-      ...emptyMcpForm(),
-      id: "remote",
-      name: "Remote",
-      transport: "streamable-http" as const,
-      url: "https://mcp.example.com/mcp",
-      bearerCredentialSource: "managed" as const,
-      bearerToken: "super-secret-token",
-    };
-    const request = mcpFormToSaveRequest(form, 2);
-
-    expect(request.config).toMatchObject({
-      revision: 2,
-      transport: { headers: { Authorization: { source: "secret", key: "mcp.remote.authorization" } } },
-    });
-    expect(request.bearerToken).toBe("super-secret-token");
-    expect(JSON.stringify(request.config)).not.toContain("super-secret-token");
+  it("uses an environment variable for HTTP Bearer auth, matching Codex config", () => {
+    const form = { ...emptyMcpForm(), id: "remote", name: "Remote", transport: "streamable-http" as const, url: "https://mcp.example.com/mcp", bearerTokenEnv: "MCP_BEARER_TOKEN" };
+    expect(mcpFormToConfig(form).transport).toMatchObject({ headers: { Authorization: { source: "environment", name: "MCP_BEARER_TOKEN" } } });
   });
 
-  it("does not echo an existing managed token and preserves or explicitly clears it", () => {
+  it("does not require re-entering a configured API key when editing", () => {
     const server = {
       config: {
-        version: 1 as const,
+        version: 1,
         id: "remote",
         name: "Remote",
         enabled: true,
-        exposure: { mode: "all" as const, allow: [], deny: [] },
-        approval: { mode: "on-request" as const, defaultScope: "once" as const },
-        revision: 3,
+        revision: 1,
+        exposure: { mode: "all", allow: [], deny: [] },
+        approval: { mode: "on-request", defaultScope: "once" },
         transport: {
           type: "streamable-http" as const,
-          displayTarget: "https://mcp.example.com/mcp",
           url: "https://mcp.example.com/mcp",
-          credentialReferences: [{ name: "Authorization", source: "secret" as const, identifier: "mcp.remote.authorization" }],
+          headerNames: ["Authorization"],
+          headerValues: [],
+          credentialReferences: [],
         },
       },
-      runtime: { serverId: "remote", state: "stopped" as const, transport: "streamable-http" as const, catalogRevision: 0, toolCount: 0, diagnostics: [], updatedAt: 1 },
-      secrets: [{ source: "secret" as const, key: "mcp.remote.authorization", status: "configured" as const }],
-    };
-    const form = formFromMcpServer(server);
-
-    expect(form.bearerCredentialSource).toBe("managed");
-    expect(form.bearerToken).toBe("");
-    expect(form.managedCredentialConfigured).toBe(true);
-    expect(mcpFormToConfig(form).transport).toMatchObject({ headers: { Authorization: { source: "secret", key: "mcp.remote.authorization" } } });
-
-    const missingForm = formFromMcpServer({ ...server, secrets: [{ source: "secret" as const, key: "mcp.remote.authorization", status: "missing" as const }] });
-    expect(missingForm.managedCredentialConfigured).toBe(false);
-    expect(missingForm.managedCredentialReference).toBe(true);
-    expect(mcpFormToConfig(missingForm).transport).toMatchObject({ headers: { Authorization: { source: "secret", key: "mcp.remote.authorization" } } });
-
-    const legacyKeyForm = formFromMcpServer({
-      ...server,
-      config: { ...server.config, transport: { ...server.config.transport, credentialReferences: [{ name: "Authorization", source: "secret" as const, identifier: "legacy.mcp.authorization" }] } },
-      secrets: [{ source: "secret" as const, key: "legacy.mcp.authorization", status: "configured" as const }],
-    });
-    expect(mcpFormToConfig(legacyKeyForm).transport).toMatchObject({ headers: { Authorization: { source: "secret", key: "legacy.mcp.authorization" } } });
-
-    const cleared = { ...form, clearManagedBearer: true };
-    expect(mcpFormToSaveRequest(cleared, 4)).toMatchObject({ clearManagedBearer: true });
-    expect(mcpFormToConfig(cleared).transport).not.toHaveProperty("headers.Authorization");
-  });
-
-  it("supports switching the Bearer source back to an environment reference", () => {
-    const form = { ...emptyMcpForm(), id: "remote", name: "Remote", transport: "streamable-http" as const, url: "https://mcp.example.com/mcp", bearerCredentialSource: "environment" as const, bearerTokenEnv: "MCP_BEARER_TOKEN" };
-    expect(mcpFormToConfig(form).transport).toMatchObject({ headers: { Authorization: { source: "environment", name: "MCP_BEARER_TOKEN" } } });
+      runtime: { serverId: "remote", state: "stopped", transport: "streamable-http", catalogRevision: 0, toolCount: 0, diagnostics: [], updatedAt: 1 },
+      secrets: [],
+    } as never;
+    expect(formFromMcpServer(server).apiKey).toBe("");
+    expect(formFromMcpServer(server).apiKeyConfigured).toBe(true);
   });
 });

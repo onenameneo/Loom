@@ -30,6 +30,28 @@ describe("MCP global configuration store", () => {
     expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({ defaults: { model: { providerId: "test", modelId: "model" } } });
   });
 
+  it("preserves an existing direct API key when the edit form leaves it blank", () => {
+    const homeDir = tempRoot("loom-mcp-preserve-key");
+    saveMcpServerConfig({ homeDir, config: { id: "remote", name: "Remote", enabled: true, transport: { type: "streamable-http", url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer keep-me" } } } });
+    saveMcpServerConfig({ homeDir, preserveSensitiveHeaders: ["Authorization"], config: { id: "remote", name: "Renamed", enabled: true, transport: { type: "streamable-http", url: "https://mcp.example.com/mcp" } } });
+    expect(loadMcpConfiguration({ homeDir }).servers[0]?.config.transport).toMatchObject({ headers: { Authorization: "Bearer keep-me" } });
+  });
+
+  it("clears an existing direct API key when explicitly requested", () => {
+    const homeDir = tempRoot("loom-mcp-clear-key");
+    saveMcpServerConfig({ homeDir, config: { id: "remote", name: "Remote", enabled: true, transport: { type: "streamable-http", url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer remove-me" } } } });
+    saveMcpServerConfig({ homeDir, clearSensitiveHeaders: ["Authorization"], config: { id: "remote", name: "Remote", enabled: true, transport: { type: "streamable-http", url: "https://mcp.example.com/mcp" } } });
+    expect(loadMcpConfiguration({ homeDir }).servers[0]?.config.transport).not.toHaveProperty("headers");
+  });
+
+  it("removes an old sensitive header when the edit changes authentication headers", () => {
+    const homeDir = tempRoot("loom-mcp-switch-key");
+    saveMcpServerConfig({ homeDir, config: { id: "remote", name: "Remote", enabled: true, transport: { type: "streamable-http", url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer old", "X-Trace": "trace" } } } });
+    saveMcpServerConfig({ homeDir, config: { id: "remote", name: "Remote", enabled: true, transport: { type: "streamable-http", url: "https://mcp.example.com/mcp", headers: { "X-Api-Key": "new", "X-Trace": "trace" } } } });
+    expect(loadMcpConfiguration({ homeDir }).servers[0]?.config.transport).toMatchObject({ headers: { "X-Api-Key": "new", "X-Trace": "trace" } });
+    expect(loadMcpConfiguration({ homeDir }).servers[0]?.config.transport).not.toHaveProperty("headers.Authorization");
+  });
+
   it("applies deny before the global exposure mode", () => {
     const config = { version: 1 as const, id: "tools", name: "Tools", enabled: true, revision: 1, transport: { type: "stdio" as const, command: "node", args: [] }, exposure: { mode: "all" as const, allow: [], deny: ["danger_*"] }, approval: { mode: "on-request" as const, defaultScope: "once" as const } };
     const resolved = { config };

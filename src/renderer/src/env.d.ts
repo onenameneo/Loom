@@ -3,7 +3,7 @@ import type { ComposerBudgetPreviewInput } from "../../../common/composerBudget"
 import type { SelectionContextNote } from "../../../common/selectionContext";
 import type { FileListResult, FilePreviewResult, FileSearchRequest, FileSearchResult, FileWorkspaceRequest } from "../../../common/filePreview";
 import type { FileArtifactActionRequest, FileArtifactActionResult, FileArtifactRef } from "../../../common/fileArtifacts";
-import type { McpConfigInput, McpSafeServerDto, McpSettingsSnapshot, McpSaveRequest, McpSaveResult } from "../../../common/mcp";
+import type { McpConfigInput, McpSafeServerDto, McpSettingsSnapshot, McpSaveRequest } from "../../../common/mcp";
 import type { LiveTurnContentPart, LiveTurnEvent, LiveTurnPatch, LiveTurnSnapshot } from "../../../common/liveTurns";
 
 export {};
@@ -629,7 +629,7 @@ declare global {
       mcp: {
         list: () => Promise<McpSettingsSnapshot>;
         get: (id: string) => Promise<McpSafeServerDto | undefined>;
-        save: (request: McpSaveRequest) => Promise<McpSaveResult>;
+        save: (config: McpConfigInput, options?: Omit<McpSaveRequest, "config">) => Promise<{ ok: boolean; config?: McpConfigInput; issues?: Array<{ code: string; path: string; message: string }> }>;
         remove: (id: string) => Promise<{ ok: boolean }>;
         setEnabled: (id: string, enabled: boolean) => Promise<{ ok: boolean; config?: McpConfigInput }>;
         consent: (id: string, revision: number) => Promise<{ ok: boolean; status: unknown }>;

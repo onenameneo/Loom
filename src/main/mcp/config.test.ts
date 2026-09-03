@@ -42,15 +42,26 @@ describe("normalizeMcpServerConfig", () => {
     expect(remote.issues.map((issue) => issue.code)).toContain("http_url");
   });
 
-  it("rejects plaintext values for sensitive HTTP headers", () => {
+  it("accepts plaintext values for direct local MCP configuration", () => {
     const result = normalizeMcpServerConfig({
       id: "remote",
       name: "Remote",
       transport: { type: "streamable-http", url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer plaintext" } },
     });
 
-    expect(result.config).toBeUndefined();
-    expect(result.issues.map((issue) => issue.code)).toContain("http_header");
+    expect(result.issues).toEqual([]);
+    expect(result.config?.transport).toMatchObject({ headers: { Authorization: "Bearer plaintext" } });
+  });
+
+  it("accepts direct stdio environment values", () => {
+    const result = normalizeMcpServerConfig({
+      id: "github",
+      name: "GitHub",
+      transport: { type: "stdio", command: "npx", args: [], env: { GITHUB_TOKEN: "direct-token" } },
+    });
+
+    expect(result.issues).toEqual([]);
+    expect(result.config?.transport).toMatchObject({ env: { GITHUB_TOKEN: "direct-token" } });
   });
 
   it("isolates unknown fields as diagnostics while keeping a valid entry", () => {

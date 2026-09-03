@@ -5,7 +5,6 @@ import { useI18n } from "../../i18n/I18nProvider";
 import { ConfirmDialog, Modal } from "../../ui/dialogs";
 import { buttonClassName, iconButtonClassName } from "../../ui/styles";
 import { McpKeyValueRows, McpStringRows } from "../McpRepeatableRows";
-import { McpBearerCredentialField } from "../McpBearerCredentialField";
 import { McpTransportToggle } from "../McpTransportToggle";
 import { SettingsToolbar } from "../components/SettingsSection";
 import { useMcpSettings } from "../hooks/useMcpSettings";
@@ -13,6 +12,7 @@ import { useMcpSettings } from "../hooks/useMcpSettings";
 export function McpSettings(_props: { ctx: SurfaceCtx }) {
   const { t } = useI18n();
   const state = useMcpSettings();
+  const stdioCommandPlaceholder = window.api?.platform === "win32" ? "npx.cmd" : "npx";
   const servers: McpSafeServerDto[] = state.snapshot?.servers ?? [];
   const formBusy = state.busyId === (state.form.id || "new");
 
@@ -46,7 +46,7 @@ export function McpSettings(_props: { ctx: SurfaceCtx }) {
                   </div>
                   <div className="model-chip-row">
                     <span className="model-chip">{t("settings.mcpTools", { count: server.runtime.toolCount })}</span>
-                    {server.secrets.map((secret) => <span key={`${secret.source}:${secret.key}`} className={`model-chip ${secret.status !== "configured" ? "empty" : ""}`}>{secret.status === "missing" ? t("settings.mcpSecretMissing") : secret.status === "unavailable" ? t("settings.mcpSecretUnavailable") : t("settings.mcpSecretConfigured")}</span>)}
+                    {server.secrets.map((secret) => <span key={`${secret.source}:${secret.key}`} className={`model-chip ${secret.status === "missing" ? "empty" : ""}`}>{secret.status === "missing" ? t("settings.mcpSecretMissing") : t("settings.mcpSecretConfigured")}</span>)}
                   </div>
                   {server.runtime.tools && server.runtime.tools.length > 0 && <div className="connection-meta mt-loom-2">{server.runtime.tools.map((tool) => `${tool.exposed ? "✓" : "—"} ${tool.title ?? tool.name}`).join(" · ")}</div>}
                   {server.runtime.diagnostics.length > 0 && <div className="warn-note">{server.runtime.diagnostics[server.runtime.diagnostics.length - 1].message}</div>}
@@ -83,15 +83,21 @@ export function McpSettings(_props: { ctx: SurfaceCtx }) {
                 <div className="mcp-form-layout">
                   {state.form.transport === "stdio" ? (
                     <>
-                      <div className="mcp-field-grid"><label className="field"><span>{t("settings.command")}</span><input value={state.form.command} onChange={(event) => state.setForm((current) => ({ ...current, command: event.target.value }))} placeholder="npx" /></label><label className="field"><span>{t("settings.workingDirectory")}</span><input value={state.form.cwd} onChange={(event) => state.setForm((current) => ({ ...current, cwd: event.target.value }))} placeholder="/absolute/project/path" /></label></div>
+                      <div className="mcp-field-grid"><label className="field"><span>{t("settings.command")}</span><input value={state.form.command} onChange={(event) => state.setForm((current) => ({ ...current, command: event.target.value }))} placeholder={stdioCommandPlaceholder} /></label><label className="field"><span>{t("settings.workingDirectory")}</span><input value={state.form.cwd} onChange={(event) => state.setForm((current) => ({ ...current, cwd: event.target.value }))} placeholder="/absolute/project/path" /></label></div>
                       <McpStringRows label={t("settings.arguments")} values={state.form.args} placeholder="-y" onChange={(args) => state.setForm((current) => ({ ...current, args }))} />
-                      <McpKeyValueRows label="环境变量" values={state.form.env} valuePlaceholder="环境变量名" onChange={(env) => state.setForm((current) => ({ ...current, env }))} />
+                      <McpKeyValueRows label="环境变量" values={state.form.env} valuePlaceholder="值" onChange={(env) => state.setForm((current) => ({ ...current, env }))} />
+                      <McpKeyValueRows label="来自环境变量（高级）" values={state.form.envRefs} valuePlaceholder="环境变量名" onChange={(envRefs) => state.setForm((current) => ({ ...current, envRefs }))} />
                       <McpStringRows label="环境变量传递" values={state.form.inheritEnv} placeholder="PATH" onChange={(inheritEnv) => state.setForm((current) => ({ ...current, inheritEnv }))} />
                     </>
                   ) : (
                     <>
                       <label className="field"><span>{t("settings.endpoint")}</span><input value={state.form.url} onChange={(event) => state.setForm((current) => ({ ...current, url: event.target.value }))} placeholder="https://mcp.example.com/mcp" /></label>
-                      <McpBearerCredentialField form={state.form} managedCredentialStorage={state.snapshot?.managedCredentialStorage} onChange={(update) => state.setForm((current) => ({ ...current, ...update }))} />
+                      <div className="mcp-field-grid">
+                        <label className="field"><span>认证方式</span><select value={state.form.apiKeyHeader} onChange={(event) => state.setForm((current) => ({ ...current, apiKeyHeader: event.target.value as "Authorization" | "X-Api-Key", bearerTokenEnv: event.target.value === "X-Api-Key" ? "" : current.bearerTokenEnv }))}><option value="Authorization">Bearer Token</option><option value="X-Api-Key">X-Api-Key</option></select></label>
+                        <label className="field"><span>API Key</span><input type="password" value={state.form.apiKey} onChange={(event) => state.setForm((current) => ({ ...current, apiKey: event.target.value, clearApiKey: false }))} placeholder={state.form.apiKeyConfigured ? "已配置，留空保持不变" : "粘贴 API Key"} autoComplete="new-password" /></label>
+                      </div>
+                      {state.form.apiKeyConfigured && <button className={buttonClassName(state.form.clearApiKey ? "default" : "danger")} type="button" onClick={() => state.setForm((current) => ({ ...current, clearApiKey: !current.clearApiKey }))}>{state.form.clearApiKey ? "取消清除 API Key" : "清除已保存的 API Key"}</button>}
+                      <label className="field"><span>高级：Bearer 令牌环境变量</span><input value={state.form.bearerTokenEnv} onChange={(event) => state.setForm((current) => ({ ...current, bearerTokenEnv: event.target.value }))} placeholder="MCP_BEARER_TOKEN" /></label>
                       <McpKeyValueRows label="标头" values={state.form.headers} valuePlaceholder="值" onChange={(headers) => state.setForm((current) => ({ ...current, headers }))} />
                       <McpKeyValueRows label="来自环境变量的标头" values={state.form.headerEnv} valuePlaceholder="环境变量名" onChange={(headerEnv) => state.setForm((current) => ({ ...current, headerEnv }))} />
                     </>

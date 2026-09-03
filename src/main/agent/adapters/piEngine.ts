@@ -105,7 +105,7 @@ export interface ResolvedModelConfig {
 
 export interface PiEngineDeps {
   events: EventSinkPort;
-  /** 现取模型配置（设置优先、env 回退）。 */
+  /** 读取旧 Settings access 兼容结构；实际模型由 registry/scoped settings 解析。 */
   resolveModel: () => ResolvedModelConfig;
   /** Current UI locale, used when a node has no custom system prompt. */
   getLocale?: () => SystemPromptLocale;

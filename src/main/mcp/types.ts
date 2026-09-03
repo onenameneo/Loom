@@ -75,7 +75,7 @@ export interface McpServerRuntimeStatus {
   updatedAt: number;
 }
 
-export type McpSecretStatus = "configured" | "missing" | "expired" | "unavailable";
+export type McpSecretStatus = "configured" | "missing";
 
 export interface McpSecretStatusProjection {
   source: McpSecretReference["source"];
