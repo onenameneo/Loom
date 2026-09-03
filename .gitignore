@@ -10,7 +10,7 @@ dist
 .context/
 .superpowers/
 .worktrees/
-docs/
+/docs/
 *.bak
 openspec/
 .claude

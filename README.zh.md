@@ -132,7 +132,6 @@ src/main/       Electron 主进程、Agent runtime、工具、MCP、记忆和持
 src/preload/    安全的 contextBridge API
 src/renderer/   React 界面、对话、画布、工作区和设置
 prototype/      画布视觉原型
-docs/           专题文档
 ```
 
 ## 相关项目

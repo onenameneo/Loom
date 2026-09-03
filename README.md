@@ -132,7 +132,6 @@ src/main/       Electron main process, Agent runtime, tools, MCP, memory, and pe
 src/preload/    Secure contextBridge API
 src/renderer/   React UI, conversations, canvas, workspace, and settings
 prototype/      Canvas visual prototype
-docs/           Focused technical documentation
 ```
 
 ## Related Project
