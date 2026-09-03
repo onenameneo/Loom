@@ -1,123 +1,144 @@
-# Loom — 个人 agent 思考会话台
+# Loom
 
-Electron + React + [pi-mono](https://github.com/earendil-works/pi) 的个人向 AI-agent 桌面应用。
-对话是入口，一个会话可铺开成无限分支画布，并盯着本地干活的 agent。
+[中文](README.zh.md) · [English](README.md)
 
-- 产品蓝图：[BLUEPRINT.md](BLUEPRINT.md)
-- 设计系统：[DESIGN.md](DESIGN.md)
-- 画布视觉原型（独立 Vite）：[`prototype/canvas-rf/`](prototype/canvas-rf/)
+> A local Agent workbench that turns AI conversations into an explorable space for thinking.
 
-## 现状：P0 骨架
-Electron 壳 + pi 大脑（`pi-agent-core` + `pi-ai`）跑在主进程 + React renderer + 单节点线性聊天接通 Claude，套上设计系统。是「第一个能用的东西」。
+Loom starts with a conversation and lets you split a question into branches, lay them out on a canvas, and continue exploring. It also brings together project files, Agent tools, long-term memory, and a local activity view for running Agents.
 
-## 运行
+It is designed for research, learning, writing, coding, and any work that benefits from sustained thinking and parallel exploration.
+
+<p align="center">
+  <img src="assets/intro_0.gif" alt="Loom conversation interface and streaming response" width="720">
+</p>
+
+<p align="center">
+  <img src="assets/intro_1.png" alt="Loom branching thought canvas" width="960">
+</p>
+
+## Core Features
+
+### Conversation and Branching Canvas
+
+- Streamed AI conversations with Markdown and code highlighting
+- Select a passage from a response and start a new conversation branch
+- Preserve branch lineage and switch between chat and canvas views
+- Organize multiple sessions inside a project, with each session expanding into a thought graph
+- Regenerate, edit and resend, continue conversations, and arrange the canvas manually
+
+### Context and Session Management
+
+Loom treats “what enters the next request” as a first-class capability instead of concatenating the entire conversation history every time.
+
+- Start a branch from a selected passage to avoid carrying irrelevant context into a new question
+- Manually attach ancestor context when a continuous line of investigation is needed
+- Show context budget and token usage for each node
+- Compact long sessions through structured checkpoints while preserving the original transcript
+- Support manual compaction, automatic compaction, and context-overflow recovery
+- Inspect context projections, budget diagnostics, and Agent lifecycles through Trace
+
+### Agent Workflows
+
+- Read, write, and edit files; run commands; calculate; and make network requests
+- Build task plans, inspect tool timelines, and produce file artifacts
+- Reference images, files, and project files in a conversation
+- Use Skills and enable or disable them per branch
+- Connect MCP Servers
+- Keep tool calls behind permission and approval controls
+
+### Agent Design Highlights
+
+- Invoke tools on demand through a unified runtime for files, commands, calculations, network access, and MCP
+- Apply output budgets and micro-compaction so a single oversized result does not consume the remaining context
+- Track explicit lifecycle states for each Agent turn: start, execution, waiting, completion, failure, and cancellation
+- Return tool failures, timeouts, and denials as structured results so the run can be inspected and continued
+- Load Skills from global or project directories, with support for manual-only Skills to keep irrelevant instructions out of context
+- Validate project scope, paths, and symbolic links before file access; request separate authorization for out-of-scope, network, and destructive operations
+- Persist Trace and metrics for model calls, tool calls, compaction, and timing so a run can be debugged and reviewed
+
+### Project File Workspace
+
+- Organize files, sessions, and branches by project
+- Browse project directories and search files
+- Preview text, image, and code files
+- Edit project files with Monaco Editor
+- Keep Agent file access scoped to project directories
+
+### Models and Providers
+
+- Manage Providers, models, and authentication in Settings
+- Use built-in model metadata, Models.dev catalog data, or custom models
+- Support per-model context windows, reasoning capabilities, and image input capabilities
+- Choose a different model and reasoning level for each branch
+
+### Long-Term Memory and Local Agent Activity
+
+- Store user preferences, project facts, and collaboration feedback as Markdown
+- Support both user-level and project-level memories
+- Review candidate memories before making them active
+- Observe local Claude Code / Codex sessions as they run, wait, and complete
+- Show an activity stream and desktop notifications without taking over running terminal sessions
+
+## Reliability Foundations
+
+Loom’s Agent capabilities are supported by a layered testing and validation harness covering context graphs, budget calculation, compaction, tool approvals, MCP, persistence, IPC, and renderer interactions.
+
+- API keys, tool execution, and file access stay in the Electron main process
+- The renderer is responsible for views and event subscriptions
+- Tool arguments use structured contracts instead of concatenated shell strings
+- Original long-session messages are stored in an append-only transcript
+- Permissions, out-of-scope access, network access, and destructive operations can be approved separately
+
+## Install and Run
+
+### Download
+
+Release packages will be available on GitHub Releases:
+
+**[Download the latest release](https://github.com/onenameneo/Loom/releases)**
+
+The current version is `v0.1.0` preview. Release packages are currently unsigned, so macOS and Windows may show a security warning on first launch.
+
+### Run from Source
+
 ```bash
 pnpm install
-pnpm dev                              # 启动 Electron 应用
-```
-首次启动后，在应用「设置」中添加 Provider、模型和认证信息。
-- 模型默认 `claude-sonnet-4-5`，全局默认模型在应用「设置」中配置（写入 `~/.loom/agent/settings.json`，解析走 `resolveSelectedModel`）。
-- `pnpm build` 构建，`pnpm typecheck` 严格类型检查。
-- 注意：若你的 shell 全局设了 `ELECTRON_RUN_AS_NODE=1`，dev/start 脚本已自动清除它（否则 Electron 会以纯 Node 模式启动主进程而报错）。
-
-### Provider 与模型目录
-
-设置页使用 pi-ai 内置模型作为离线基线，并从 `https://models.dev/catalog.json` 更新可选的 provider/model 元数据。归一化目录缓存位于 `~/.loom/agent/catalog/models-dev.json`，24 小时内不会重复请求；网络失败时继续使用最近一次有效缓存或 pi-ai 内置目录。用户凭证、endpoint 和自定义模型仍保存在 `~/.loom/agent/models.json`，刷新目录不会改写该文件，也不会把 API key 暴露给 renderer。
-
-模型来源优先级为：pi-ai builtin → Models.dev → 用户 `modelOverrides` → 用户自定义模型。目录模型只能使用 Loom 当前明确支持的 pi-ai API 映射；非标准 provider 会显示诊断，不会被猜测成兼容协议。旧的 `builtin` 来源标签仍可读取，新的内置来源标记为 `pi-builtin`。详见 [`docs/model-catalog.md`](docs/model-catalog.md)。
-
-## MCP（pi-agent）
-
-设置 → MCP 服务器支持两类连接：本地 `stdio` 和远程 `Streamable HTTP`。MCP client、连接生命周期、工具目录和审批都在主进程完成，pi-agent 只接收 Loom 的中性工具；renderer 不会拿到 client、子进程句柄或凭证原文。
-
-配置位置：
-
-- 全局：`~/.loom/mcp.json`
-- 当前 Project：`<project-root>/.loom/mcp.json`
-
-本地 stdio 首次连接会显示命令、参数、工作目录和环境变量名称的授权确认。命令按 argv 启动，不经过 shell；远程地址必须使用 HTTPS，HTTP 仅允许 localhost。API Key 可直接在 APP 中填写并保存（本地配置文件仅当前用户可读）；也可选择环境变量名作为高级配置。OAuth profile 由后续登录流程提供。
-
-默认工具暴露采用 allowlist，工具调用继续经过 Loom/pi-agent 的 `beforeToolCall` 审批门；服务端 annotations 只作为不可信元数据，不能绕过审批。当前版本不会自动注入 MCP resources/prompts，也不会隐式读取 resource URI。
-
-最小本地示例（不含凭证）：
-
-```json
-{
-  "version": 1,
-  "servers": {
-    "filesystem": {
-      "version": 1,
-      "id": "filesystem",
-      "displayName": "Project files",
-      "scope": "project",
-      "enabled": true,
-      "trust": "untrusted",
-      "transport": {
-        "type": "stdio",
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/absolute/project/path"]
-      },
-      "exposure": { "mode": "allowlist", "allow": ["read_*", "list_*"], "deny": [] },
-      "approval": { "mode": "on-request", "defaultScope": "once" },
-      "revision": 1
-    }
-  }
-}
+pnpm dev
 ```
 
-开发测试使用 `src/main/mcp/fakeFixture.ts` 的内存 fixture；它不会启动进程或访问网络。
+After launch, add a Provider, model, and authentication details in Settings.
 
-## Agent 权限
+Common commands:
 
-本地命令工具采用 Codex 风格的两层权限模型：`sandboxMode` 控制技术边界，`approvalPolicy` 控制何时询问。默认配置是 `workspace-write + on-request + user reviewer + network disabled`；Bash、Python、Node、git 和包管理器都通过同一个主进程命令端口运行。
-
-当前 macOS 使用系统 `sandbox-exec` 约束进程树的文件和网络访问；其他平台在尚未提供强制沙箱适配器时会对受限模式 fail-closed，只有明确选择 `danger-full-access` 才允许运行不受沙箱约束的命令。命令参数采用 argv，不经过 renderer 或拼接 shell 字符串；输出、环境变量和执行时长均有上限。
-
-## 结构
+```bash
+pnpm build       # Build the application code
+pnpm typecheck   # Run strict type checking
+pnpm test        # Run tests
+pnpm dist:mac    # Build a macOS package
+pnpm dist:win    # Build a Windows package
+pnpm dist:linux  # Build a Linux package
 ```
-src/
-  main/index.ts       ← 主进程：pi Agent + IPC 流式转发（握 API key / 跑工具）
-  preload/index.ts    ← contextBridge 安全暴露 window.api
-  renderer/           ← React 渲染进程：纯视图，订阅事件流
-    src/App.tsx       ← 单节点聊天 UI（流式）
-    src/tokens.css    ← 设计系统语义 token（与 DESIGN.md 一致）
-```
-架构原则：API key / 工具执行 / 文件访问都在主进程，renderer 纯视图。见 BLUEPRINT.md。
 
-## 上下文与 compact
+Local build artifacts are written to `dist/`. For a release, push a Git tag such as `v0.1.0`; GitHub Actions will build platform artifacts and create a Draft Release automatically.
 
-Loom 保留完整的原始 transcript，并以 append-only context checkpoint 投影模型上下文。手动 `/compact`、自动 threshold compact 和 context overflow recovery 共用同一套 turn-safe planner 与结构化 summary；summary 使用 `Goal`、`Constraints & Preferences`、`Progress`、`Key Decisions`、`Next Steps`、`Critical Context` 栏目。
+## Tech Stack
 
-自动 compact 使用当前节点最终选中的模型配置计算安全输入预算：`contextWindow - reserved output`，再扣除 system prompt、tools/skills、冻结分支、seed、checkpoint 和当前输入，剩余部分才是 node-local recent tail。provider usage 可用时优先采用，否则明确标记为估算值。模型缺少有效上下文窗口元数据时，自动 compact 会返回有界诊断而不会假装请求安全。
+Electron · React · TypeScript · React Flow · pi-mono · SQLite · Monaco Editor · MCP
 
-原始消息不会因 compact 被删除；session memory、跨 session recall 和长期事实提取暂不属于当前 compact 流程。
-
-## 跨会话长期记忆
-
-在设置中启用后，Loom 默认将长期记忆保存在 `~/.loom/memory/`。路径由主进程按 Electron home directory 和 Node 原生 path API 解析，macOS、Windows、Linux 使用同一套逻辑 root。
-
-目录布局如下：
+## Project Structure
 
 ```text
-memory/
-  MEMORY.md                 # 由 Markdown 事实文件生成的可读索引
-  user/<type>/<id>.md       # 全局用户记忆，可跨 Project 检索
-  feedback/<id>.md          # 用户级协作反馈
-  reference/<id>.md         # 用户级外部资源指针
-  projects/<projectId>/<type>/<id>.md
-  candidates/<id>.md        # 待审核候选，只能被批准后成为 active
-  archive/<id>-<timestamp>.md
+src/main/       Electron main process, Agent runtime, tools, MCP, memory, and persistence
+src/preload/    Secure contextBridge API
+src/renderer/   React UI, conversations, canvas, workspace, and settings
+prototype/      Canvas visual prototype
+docs/           Focused technical documentation
 ```
 
-每个记忆文件都带 YAML frontmatter（`id`、`type`、`scope`、`status`、`confidence`、描述、来源和时间戳），正文保存事实。Markdown 是唯一事实源；`MEMORY.md` 可以删除后由 Loom 重建，备份时应连同整个 memory 根目录一起备份。
+## Related Project
 
-主 Agent 使用以下逻辑 root 调用通用 `read`、`write`、`edit` 工具：`memory:user`、`memory:project`、`memory:candidates`、只读的 `memory:archive`；Project source roots 则是 `project:0`、`project:1` 等。工具内部仍执行 traversal、realpath、symlink、schema 和 scope 校验，不能跨 root 写入。用户临时提供的 Project 外部绝对文件路径，在 `danger-full-access` 下可以直接交给 `read`；明确请求并通过 approval 后，`write`/`edit` 也可以操作该绝对路径。
+[Loom Chat](https://github.com/onenameneo/dsh-plugin-loom-chat) is a DSH Web client plugin that turns linear sessions into a pannable, zoomable canvas for parallel exploration. It is a lightweight way to experience Loom-style branching inside DSH, with independent history, drafts, and runtime state for each branch.
 
-这里有两个独立边界：`danger-full-access` 会允许文件工具处理用户明确提供的外部绝对路径，但不会取消 MemoryStore 校验，也不会让外部路径获得 memory 生命周期写入权限；现有文件的 `write`/`edit` 还必须使用先前 `read` 返回的 `expectedVersion`，新文件也不会自动创建缺失的父目录。受限模式下外部绝对路径仍会被 Project root 拒绝。shell 能力也不会因为 sandbox 全开放而自动获得 memory root 的生命周期写入权限。
+## Project Status
 
-明确的“记住”请求由主 Agent 通过成功的 `write`/`edit` 结果确认；普通对话中的长期事实可以写入 candidate。回合结束的后台 LLM 提取只是补漏，设置中默认关闭，开启后也只能处理新增 transcript 并写入 candidates。关闭它不影响显式记忆、主 Agent 主动记忆、跨项目 user memory 检索或 AutoDream。
-
-长期记忆与会话 transcript 分离，不会改写已有会话记忆。检索失败不会阻塞对话；AutoDream 受时间、会话数量、节流和锁门控，并将被替换内容移入 `archive/`。所有文件访问发生在主进程，renderer 只通过 IPC 访问记忆摘要和管理操作。
-
-## 路线图
-P0 骨架（当前）→ P1 无限画布（分支上下文引擎）→ P2 观察哨 → P3 能力层（工具/记忆）。
+Loom is currently in the `0.1.0` preview stage. Core conversations, project sessions, branching canvas, context management, Agent tools, MCP, long-term memory, and local Agent activity are integrated; UI details, cross-platform distribution, and broader Provider support are still being refined.

@@ -1,6 +1,6 @@
 {
   "name": "loom",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Loom — 个人 agent 思考工作台（Electron + React + pi-mono）",
   "main": "./out/main/index.js",
   "build": {
@@ -8,6 +8,10 @@
     "productName": "Loom",
     "directories": {
       "buildResources": "build"
+    },
+    "publish": {
+      "provider": "github",
+      "releaseType": "draft"
     },
     "mac": {
       "icon": "build/icon.icns",
