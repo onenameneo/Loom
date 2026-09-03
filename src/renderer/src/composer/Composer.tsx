@@ -13,6 +13,7 @@ import { ContextBudgetIndicator } from "./ContextBudgetIndicator";
 import { useComposerBudget } from "./useComposerBudget";
 import { useI18n } from "../i18n/I18nProvider";
 import { SelectionNotesPopover } from "./SelectionContextNotes";
+import { dismissSlashHint, isSlashHintDismissed, subscribeSlashHint } from "./slashHint";
 
 export type ComposerImage = { data: string; mimeType: string };
 type ComposerSubmitResult = { ok: boolean; reason?: string; errors?: Array<{ path: string; message: string }> };
@@ -83,6 +84,7 @@ export function Composer({
   const fileRef = useRef<HTMLInputElement>(null);
   const slashRef = useRef<SlashPaletteHandle>(null);
   const [slashOpen, setSlashOpen] = useState(false);
+  const [slashHintDismissed, setSlashHintDismissed] = useState(isSlashHintDismissed);
   const [commandError, setCommandError] = useState<string | null>(null);
   const [mentions, setMentions] = useState<FileMentionRef[]>([]);
   const [cursorPosition, setCursorPosition] = useState(value.length);
@@ -174,6 +176,13 @@ export function Composer({
       alive = false;
     };
   }, [slashOpen, value]);
+
+  // slash 提示只在空输入时展示；用户触发过一次命令面板即视为已学会，永久隐藏。
+  useEffect(() => subscribeSlashHint(() => setSlashHintDismissed(true)), []);
+  useEffect(() => {
+    if (slashOpen) dismissSlashHint();
+  }, [slashOpen]);
+  const showSlashHint = !slashHintDismissed && !value && !busy;
 
   useEffect(() => {
     let alive = true;
@@ -577,7 +586,7 @@ export function Composer({
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
-        <div className="composer-hint mt-[-2px] select-none font-loom-mono text-[10px] text-loom-faint">{t("composer.openCommand")}</div>
+        {showSlashHint && <div className="composer-hint mt-[-2px] select-none font-loom-mono text-[10px] text-loom-faint">{t("composer.openCommand")}</div>}
         {commandError && <div className="composer-command-error text-[11px] leading-[1.35] text-loom-err" role="alert">{commandError}</div>}
         <div className="composer-bar flex min-w-0 items-center gap-loom-2">
           <input
