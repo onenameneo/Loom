@@ -38,3 +38,13 @@ describe("agent artifact extraction", () => {
     expect(persistedArtifactRecords({ fileArtifacts: records })).toEqual(records);
   });
 });
+
+
+it("discovers quoted and URL-encoded paths with spaces and parentheses", () => {
+  mkdirSync(root, { recursive: true });
+  const file = join(root, "my report (final).md");
+  writeFileSync(file, "report");
+  expect(discoverArtifactPaths("`" + file + "`")).toEqual([file]);
+  expect(discoverArtifactPaths('[查看](<' + file + '>)')).toEqual([file]);
+  expect(discoverArtifactPaths('[查看](file://' + encodeURI(file).replaceAll("(", "%28").replaceAll(")", "%29") + ')')).toEqual([file]);
+});

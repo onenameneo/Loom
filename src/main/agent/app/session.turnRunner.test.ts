@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -1770,6 +1770,7 @@ describe("createAgentSession turn runner integration", () => {
       expect(messages).toHaveLength(3);
       expect((messages[1]?.meta as any)?.fileArtifacts).toBeUndefined();
       expect((messages[2]?.meta as any)?.fileArtifacts).toHaveLength(1);
+      expect((messages[2]?.meta as any)?.fileArtifacts[0].displayPath).toBe(realpathSync(file));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -59,6 +59,11 @@ export default function SessionCanvas({
     reload();
   }, [sessionId, reload]);
 
+  const refreshChat = useCallback(() => {
+    void reload();
+    onTreeChange?.();
+  }, [reload, onTreeChange]);
+
   const isCanvas = initialMode === "canvas" || (initialMode == null && nodeCount > 1);
   const root = nodeList.find((d) => !d.parentId) ?? nodeList[0] ?? null;
   const chatNode = nodeList.find((d) => d.id === activeNodeId) ?? root;
@@ -155,7 +160,7 @@ export default function SessionCanvas({
           onReturnToBranch={branchSource ? () => onReturnToBranch?.(branchSource) : undefined}
           focusMessageSeq={focusMessageSeq}
           onExpandCanvas={expandCanvas}
-          onTreeChange={onTreeChange}
+          onTreeChange={refreshChat}
           noKey={noKey}
           goSettings={goSettings}
         />

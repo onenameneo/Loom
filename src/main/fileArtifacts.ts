@@ -37,8 +37,9 @@ const highRiskExtensions = new Set([
 ]);
 
 function publicRef(record: FileArtifactRecord): FileArtifactRef {
-  const { absolutePath: _absolutePath, ...ref } = record;
-  return ref;
+  const { absolutePath, ...ref } = record;
+  // Also upgrade historical records whose displayPath was project-relative.
+  return { ...ref, displayPath: absolutePath };
 }
 
 function isHighRiskPath(path: string): boolean {
@@ -68,7 +69,14 @@ export class FileArtifactRegistry {
   }
 
   registerRecord(input: FileArtifactRecord): { ref: FileArtifactRef; record: FileArtifactRecord } {
-    return this.register(input);
+    // Persisted paths are already canonical. Do not re-canonicalize on restore:
+    // that would silently authorize a symlink substituted since registration.
+    const record = { ...input };
+    this.records.set(record.id, record);
+    const resolved = this.resolve(record.id, "reveal");
+    record.status = resolved.ok ? "available" : resolved.error === "stale" ? "stale" : "unavailable";
+    record.error = resolved.ok ? undefined : resolved.message;
+    return { ref: publicRef(record), record: { ...record } };
   }
 
   get(id: string): FileArtifactRef | undefined {
@@ -86,8 +94,8 @@ export class FileArtifactRegistry {
       currentPath = realpathSync(record.absolutePath);
       const stat = statSync(currentPath);
       if (!stat.isFile()) throw new Error("not a file");
-      if (currentPath !== record.absolutePath || fileVersion(stat) !== record.version) {
-        return { ok: false, error: "stale", message: "The generated file changed or was replaced." };
+      if (currentPath !== record.absolutePath) {
+        return { ok: false, error: "stale", message: "The generated file path now points to a different location." };
       }
     } catch {
       return { ok: false, error: "unavailable", message: "The generated file is no longer available." };

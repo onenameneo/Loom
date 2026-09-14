@@ -43,7 +43,7 @@ describe("FileArtifactRegistry", () => {
     expect(restored.ref.displayPath).toBe(project.ref.displayPath);
   });
 
-  it("rejects stale files and high-risk open actions", () => {
+  it("allows revealing updated files but rejects high-risk open actions", () => {
     mkdirSync(tempRoot, { recursive: true });
     const file = join(tempRoot, "script.sh");
     writeFileSync(file, "echo one");
@@ -52,7 +52,7 @@ describe("FileArtifactRegistry", () => {
     expect(registry.resolve(artifact.ref.id, "open")).toMatchObject({ ok: false, error: "unsupported" });
 
     writeFileSync(file, "echo two");
-    expect(registry.resolve(artifact.ref.id, "reveal")).toMatchObject({ ok: false, error: "stale" });
+    expect(registry.resolve(artifact.ref.id, "reveal")).toMatchObject({ ok: true });
   });
 
   it("only resolves registered opaque ids and permits project preview", () => {
@@ -79,5 +79,37 @@ describe("FileArtifactRegistry", () => {
     expect(artifact.record.absolutePath).toBe(file);
     rmSync(file);
     expect(registry.resolve(artifact.ref.id, "reveal")).toMatchObject({ ok: false, error: "unavailable" });
+  });
+});
+
+
+describe("artifact update regressions", () => {
+  it("opens latest content after edits and history restoration", () => {
+    mkdirSync(tempRoot, { recursive: true });
+    const file = join(tempRoot, "report.md");
+    writeFileSync(file, "first");
+    const registry = new FileArtifactRegistry();
+    const artifact = registry.register({ absolutePath: file, kind: "text", operation: "created" });
+    writeFileSync(file, "latest content");
+    expect(registry.resolve(artifact.ref.id, "open")).toMatchObject({ ok: true });
+    registry.clear();
+    registry.registerRecord(artifact.record);
+    expect(registry.resolve(artifact.ref.id, "open")).toMatchObject({ ok: true });
+  });
+
+  it("does not follow a replaced path to a different file, including after history restoration", () => {
+    mkdirSync(tempRoot, { recursive: true });
+    const file = join(tempRoot, "report.md");
+    const other = join(tempRoot, "other.md");
+    writeFileSync(file, "first");
+    writeFileSync(other, "other");
+    const registry = new FileArtifactRegistry();
+    const artifact = registry.register({ absolutePath: file, kind: "text", operation: "created" });
+    rmSync(file);
+    symlinkSync(other, file);
+    expect(registry.resolve(artifact.ref.id, "open")).toMatchObject({ ok: false, error: "stale" });
+    registry.clear();
+    registry.registerRecord(artifact.record);
+    expect(registry.resolve(artifact.ref.id, "open")).toMatchObject({ ok: false, error: "stale" });
   });
 });

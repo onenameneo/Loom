@@ -1,4 +1,5 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { isAbsolute, resolve } from "node:path";
 import type { FileArtifactOperation, FileArtifactRecord } from "../../../common/fileArtifacts";
 
@@ -7,14 +8,20 @@ const trailingPunctuation = /[.,:;!?，。；！？、）》】]+$/;
 
 export function discoverArtifactPaths(text: string): string[] {
   const paths = new Set<string>();
-  for (const match of text.matchAll(absolutePathPattern)) {
-    const candidate = match[1]?.replace(trailingPunctuation, "");
-    if (!candidate || !isAbsolute(candidate) || !existsSync(candidate)) continue;
+  const candidates = [
+    ...Array.from(text.matchAll(/`([^`\n]+)`|"([^"\n]+)"|'([^'\n]+)'|<([^<>\n]+)>/g), (match) => match.slice(1).find(Boolean)!),
+    ...Array.from(text.matchAll(/file:\/\/[^\s<>"'`()]+/g), (match) => match[0]),
+    ...Array.from(text.matchAll(absolutePathPattern), (match) => match[1]!.replace(trailingPunctuation, "")),
+  ];
+  for (let candidate of candidates) {
     try {
+      if (candidate.startsWith("file://")) candidate = fileURLToPath(candidate);
+      if (!isAbsolute(candidate)) continue;
+      if (!existsSync(candidate)) candidate = decodeURIComponent(candidate);
       const canonical = realpathSync(resolve(candidate));
       if (statSync(canonical).isFile()) paths.add(canonical);
     } catch {
-      // A path mentioned by an assistant is only a candidate; stale paths stay text.
+      // A mentioned path is only a candidate; stale paths stay text.
     }
   }
   return [...paths];

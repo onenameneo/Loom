@@ -14,7 +14,7 @@ import { buttonClassName, cn, fieldClassName } from "../ui/styles";
 import { CodeBlock } from "./CodeBlock";
 import { useI18n } from "../i18n/I18nProvider";
 import { splitMarkdownBlocks } from "./markdownBlocks";
-import { linkifyArtifactText } from "./fileArtifacts";
+import { artifactForPath, remarkArtifactLinks } from "./fileArtifacts";
 
 export type MsgRole = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
 export type Density = "compact" | "comfortable";
@@ -22,23 +22,13 @@ type CheckpointInfo = NonNullable<NodeMsg["checkpoint"]>;
 const CHECKPOINT_SUMMARY_LIMIT = 4_000;
 const ARTIFACT_COLLAPSE_LIMIT = 5;
 
-function artifactForInlineCode(value: string, artifacts: FileArtifactRef[]): FileArtifactRef | undefined {
-  const normalized = value.trim().replace(/\\/g, "/");
-  const exact = artifacts.find((artifact) => [artifact.name, artifact.displayPath, artifact.project?.path]
-    .filter(Boolean)
-    .some((candidate) => candidate!.replace(/\\/g, "/") === normalized));
-  if (exact) return exact;
-  const suffixMatches = artifacts.filter((artifact) => normalized.endsWith(`/${artifact.name}`));
-  return suffixMatches.length === 1 ? suffixMatches[0] : undefined;
-}
-
 function renderCode({ className, children }: any, artifacts: FileArtifactRef[] = [], onArtifactOpen?: (id: string) => void) {
   const match = /language-(\w+)/.exec(className || "");
   const raw = String(children ?? "");
   if (match || raw.includes("\n")) {
     return <CodeBlock code={raw.replace(/\n$/, "")} lang={match?.[1]} />;
   }
-  const artifact = artifactForInlineCode(raw, artifacts);
+  const artifact = artifactForPath(raw, artifacts);
   if (!artifact) return <code className="inline-code">{children}</code>;
   return (
     <a
@@ -218,11 +208,11 @@ function AssistantContent({
           {splitMarkdownBlocks(part.text).map((block, index) => (
             <ReactMarkdown
               key={`${part.partId}:block:${index}`}
-              remarkPlugins={[remarkGfm]}
+              remarkPlugins={[remarkGfm, [remarkArtifactLinks, artifacts ?? []]]}
               components={markdownComponents(onArtifactOpen, artifacts)}
               urlTransform={messageUrlTransform}
             >
-              {linkifyArtifactText(block, artifacts)}
+              {block}
             </ReactMarkdown>
           ))}
         </div>
@@ -338,16 +328,22 @@ export const Message = memo(function Message({
     setEditing(false);
   }
 
-  async function artifactAction(id: string, action: "open" | "reveal" | "preview" = "open") {
-    const api = window.api?.artifacts;
-    if (!api) return;
-    const result = await api.action({ id, action });
-    if (!result.ok) setArtifactError(result.message || "无法打开文件。");
-    else {
-      setArtifactError(null);
-      if (action === "preview" && result.preview) {
-        window.dispatchEvent(new CustomEvent("loom:preview-file", { detail: result.preview }));
+  async function artifactAction(id: string, action?: "open" | "reveal" | "preview") {
+    const artifact = artifacts?.find((item) => item.id === id);
+    action ??= artifact?.project && (artifact.kind === "text" || artifact.kind === "image") ? "preview" : "open";
+    try {
+      const api = window.api?.artifacts;
+      if (!api) throw new Error("文件打开服务不可用，请重新启动 Loom。");
+      const result = await api.action({ id, action });
+      if (!result.ok) setArtifactError(result.message || "无法打开文件。");
+      else {
+        setArtifactError(null);
+        if (action === "preview" && result.preview) {
+          window.dispatchEvent(new CustomEvent("loom:preview-file", { detail: result.preview }));
+        }
       }
+    } catch (error) {
+      setArtifactError(error instanceof Error ? error.message : "无法打开文件。");
     }
   }
 

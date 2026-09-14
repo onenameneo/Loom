@@ -379,3 +379,74 @@ describe("Message selection notes", () => {
     expect(container.querySelector(".m__selection-notes")).toBeTruthy();
   });
 });
+
+
+describe("artifact opening regressions", () => {
+  const artifact = { id: "artifact_12345678", name: "report.md", displayPath: "/tmp/report.md", kind: "text" as const, operation: "created" as const, status: "available" as const };
+
+  it.each(["[查看文件](/tmp/report.md)", "[查看文件](file:///tmp/report.md)", "[查看文件](report.md)", "[查看文件](</tmp/report.md>)"])("routes registered Markdown links through IPC: %s", async (text) => {
+    const action = vi.fn(async () => ({ ok: true }));
+    window.api = { artifacts: { action } } as any;
+    render(<Message role="assistant" text={text} artifacts={[artifact]} />);
+    fireEvent.click(screen.getByRole("link", { name: "查看文件" }));
+    await act(async () => undefined);
+    expect(action).toHaveBeenCalledWith({ id: artifact.id, action: "open" });
+  });
+
+  it("does not rewrite external links or match a different absolute path by basename", () => {
+    render(<Message role="assistant" text={"[remote](https://example.com/report.md) `" + "/other/report.md" + "`"} artifacts={[artifact]} />);
+    expect(screen.getByRole("link", { name: "remote" }).getAttribute("href")).toBe("https://example.com/report.md");
+    expect(screen.queryByRole("link", { name: "/other/report.md" })).toBeNull();
+  });
+
+  it("does not guess between duplicate filenames", () => {
+    render(<Message role="assistant" text="report.md" artifacts={[artifact, { ...artifact, id: "artifact_abcdefgh", displayPath: "/other/report.md" }]} />);
+    expect(screen.queryByRole("link", { name: "report.md" })).toBeNull();
+  });
+
+  it("shows IPC failures instead of leaving a rejected promise", async () => {
+    window.api = { artifacts: { action: vi.fn(async () => { throw new Error("bridge disconnected"); }) } } as any;
+    render(<Message role="assistant" text="report.md" artifacts={[artifact]} />);
+    fireEvent.click(screen.getByRole("link", { name: "report.md" }));
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", "bridge disconnected");
+  });
+});
+
+
+it("reports an unavailable artifact bridge", async () => {
+  render(<Message role="assistant" text="[file](loom-file://artifact/artifact_12345678)" />);
+  fireEvent.click(screen.getByRole("link", { name: "file" }));
+  expect(await screen.findByRole("status")).toHaveProperty("textContent", "文件打开服务不可用，请重新启动 Loom。");
+});
+
+it("opens an encoded local link with spaces and parentheses", async () => {
+  const action = vi.fn(async () => ({ ok: true }));
+  window.api = { artifacts: { action } } as any;
+  render(<Message role="assistant" text="[查看](file:///tmp/my%20report%20%28final%29.md)" artifacts={[{ id: "artifact_12345678", name: "my report (final).md", displayPath: "/tmp/my report (final).md", kind: "text", operation: "created", status: "available" }]} />);
+  fireEvent.click(screen.getByRole("link", { name: "查看" }));
+  await act(async () => undefined);
+  expect(action).toHaveBeenCalledWith({ id: "artifact_12345678", action: "open" });
+});
+
+it.each(["text", "image"] as const)("prefers Files for project %s artifacts from links and cards", async (kind) => {
+  const project = { projectId: "project-1", root: "project:0", path: "HiNeo.md" };
+  const action = vi.fn(async () => ({ ok: true, preview: project }));
+  const onPreview = vi.fn();
+  window.api = { artifacts: { action } } as any;
+  window.addEventListener("loom:preview-file", onPreview);
+  try {
+    render(<Message role="assistant" text="`HiNeo.md`" artifacts={[{ id: "artifact_12345678", name: "HiNeo.md", displayPath: "/project/HiNeo.md", kind, operation: "created", status: "available", project }]} />);
+    fireEvent.click(screen.getByRole("link", { name: "HiNeo.md" }));
+    await act(async () => undefined);
+    expect(action).toHaveBeenLastCalledWith({ id: "artifact_12345678", action: "preview" });
+    expect(onPreview.mock.calls[0][0].detail).toEqual(project);
+    fireEvent.click(screen.getByRole("button", { name: "HiNeo.md HiNeo.md" }));
+    await act(async () => undefined);
+    expect(action).toHaveBeenLastCalledWith({ id: "artifact_12345678", action: "preview" });
+    fireEvent.click(screen.getByRole("button", { name: "Reveal file in folder" }));
+    await act(async () => undefined);
+    expect(action).toHaveBeenLastCalledWith({ id: "artifact_12345678", action: "reveal" });
+  } finally {
+    window.removeEventListener("loom:preview-file", onPreview);
+  }
+});

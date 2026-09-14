@@ -379,7 +379,7 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
     return {
       absolutePath: canonical,
       name: basename(canonical),
-      displayPath: project?.path || canonical,
+      displayPath: canonical,
       kind: artifactKindForPath(canonical),
       operation,
       ...(project ? { project } : {}),
