@@ -28,8 +28,8 @@ import {
 import {
   applyToolResultBudget,
   createToolResultBudgetState,
-  persistToolResultSidecars,
   toolResultSidecarPathForMessage,
+  tryPersistToolResultSidecar,
   type ToolResultBudgetState,
 } from "../core/toolResultBudget";
 import {
@@ -662,8 +662,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       skipToolNames: TOOL_RESULT_BUDGET_OPT_OUT_TOOLS,
       referenceFor: (message) =>
         deps.userDataDir ? toolResultSidecarPathForMessage(deps.userDataDir, node.sessionId, message) : `toolResult:${message.toolCallId}`,
+      persistResult: tryPersistToolResultSidecar,
     });
-    persistToolResultSidecars(result.persistedResults);
     return result.messages;
   }
 
@@ -684,8 +684,8 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
       skipToolNames: TOOL_RESULT_BUDGET_OPT_OUT_TOOLS,
       referenceFor: (message) =>
         deps.userDataDir ? toolResultSidecarPathForMessage(deps.userDataDir, node.sessionId, message) : `toolResult:${message.toolCallId}`,
+      persistResult: tryPersistToolResultSidecar,
     });
-    persistToolResultSidecars(result.persistedResults);
     if (result.diagnostics) emitMicroCompactDiagnostics(node, result.diagnostics);
     return result.messages;
   }

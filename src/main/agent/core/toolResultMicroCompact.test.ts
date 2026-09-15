@@ -100,7 +100,10 @@ describe("applyToolResultMicroCompact", () => {
     expect((result.messages[0] as ToolResultMessage).content[0]).toMatchObject({
       text: expect.stringContaining("fullResult: /tmp/tc-1.txt"),
     });
-    expect((result.messages[0] as ToolResultMessage).content[0]).not.toMatchObject({ text: expect.stringContaining("first output") });
+    expect((result.messages[0] as ToolResultMessage).content[0]).toMatchObject({
+      text: expect.stringContaining("Preview:\nfirst output"),
+    });
+    expect((result.messages[0] as ToolResultMessage).content[0]).toMatchObject({ text: expect.stringContaining("first output") });
     expect((result.messages[1] as ToolResultMessage).content[0]).toMatchObject({ text: "second output" });
     expect((result.messages[2] as ToolResultMessage).content[0]).toMatchObject({ text: "third output" });
     expect(result.persistedResults).toEqual([{ toolCallId: "tc-1", toolName: "search", path: "/tmp/tc-1.txt", content: "first output" }]);
@@ -112,6 +115,22 @@ describe("applyToolResultMicroCompact", () => {
       estimatedCharsSaved: expect.any(Number),
     });
     expect(JSON.stringify(result.diagnostics)).not.toContain("first output");
+  });
+
+  it("keeps the original result when persistence fails", () => {
+    const original = toolResult("tc-fail", "search", "first output");
+    const recent = toolResult("tc-recent", "search", "recent output");
+
+    const result = applyToolResultMicroCompact([original, recent], createToolResultMicroCompactState(), {
+      now,
+      sourceMessages: [assistant(now - 90 * minute)],
+      keepRecentToolResults: 1,
+      referenceFor: () => "/unwritable/tc-fail.txt",
+      persistResult: () => false,
+    });
+
+    expect(result.messages[0]).toBe(original);
+    expect(result.persistedResults).toEqual([]);
   });
 
   it("floors the retain count at one", () => {

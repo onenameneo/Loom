@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import type { Message, TextContent, ToolResultMessage } from "@earendil-works/pi-ai";
 
 export const DEFAULT_MAX_TOOL_RESULT_GROUP_CHARS = 200_000;
+export const DEFAULT_TOOL_RESULT_PREVIEW_BYTES = 2_000;
 export const TOOL_RESULTS_SUBDIR = "tool-results";
 
 export interface ToolResultBudgetState {
@@ -14,6 +15,8 @@ export interface ToolResultBudgetOptions {
   maxToolResultGroupChars?: number;
   skipToolNames?: Iterable<string>;
   referenceFor?: (message: ToolResultMessage, originalChars: number) => string;
+  /** Persist before replacing. Return false to keep the original content. */
+  persistResult?: (request: PersistedToolResultRequest) => boolean;
 }
 
 export interface PersistedToolResultRequest {
@@ -83,18 +86,24 @@ export function applyToolResultBudget(
       for (const item of candidates) {
         if (groupChars <= maxChars) break;
         const reference = options.referenceFor?.(item.message, item.originalChars) ?? `toolResult:${item.toolCallId}`;
-        const replacement = buildReplacementText(item.message, {
-          originalChars: item.originalChars,
-          reference,
-        });
-        state.replacements.set(item.toolCallId, replacement);
-        out[item.index] = replaceToolResultContent(item.message, replacement);
-        persistedResults.push({
+        const request: PersistedToolResultRequest = {
           toolCallId: item.toolCallId,
           toolName: item.toolName,
           path: reference.startsWith("toolResult:") ? "" : reference,
           content: serializeToolResultSidecarContent(item.message),
+        };
+        const replacement = buildReplacementText(item.message, {
+          originalChars: item.originalChars,
+          reference,
+          content: request.content,
         });
+        if (options.persistResult && !options.persistResult(request)) {
+          state.seenIds.add(item.toolCallId);
+          continue;
+        }
+        state.replacements.set(item.toolCallId, replacement);
+        out[item.index] = replaceToolResultContent(item.message, replacement);
+        persistedResults.push(request);
         groupChars = groupChars - item.originalChars + replacement.length;
       }
     }
@@ -107,14 +116,21 @@ export function applyToolResultBudget(
 
 export function persistToolResultSidecars(requests: PersistedToolResultRequest[]): void {
   for (const request of requests) {
-    if (!request.path) continue;
+    tryPersistToolResultSidecar(request);
+  }
+}
+
+/** Persist one sidecar and report whether the replacement is safe to expose. */
+export function tryPersistToolResultSidecar(request: PersistedToolResultRequest): boolean {
+  if (!request.path) return true;
+  try {
     mkdirSync(dirname(request.path), { recursive: true });
-    if (existsSync(request.path)) continue;
-    try {
-      writeFileSync(request.path, request.content, { encoding: "utf-8", flag: "wx" });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    }
+    if (existsSync(request.path)) return true;
+    writeFileSync(request.path, request.content, { encoding: "utf-8", flag: "wx" });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return true;
+    return false;
   }
 }
 
@@ -155,7 +171,8 @@ function toItem(message: ToolResultMessage, index: number, state: ToolResultBudg
   };
 }
 
-function buildReplacementText(message: ToolResultMessage, input: { originalChars: number; reference: string }): string {
+function buildReplacementText(message: ToolResultMessage, input: { originalChars: number; reference: string; content: string }): string {
+  const preview = generateToolResultPreview(input.content, DEFAULT_TOOL_RESULT_PREVIEW_BYTES);
   return [
     "<persisted-tool-result>",
     "Tool result omitted from model context because the consecutive tool result group exceeded the configured budget.",
@@ -164,8 +181,33 @@ function buildReplacementText(message: ToolResultMessage, input: { originalChars
     `originalChars: ${input.originalChars}`,
     `reason: tool_result_group_budget_exceeded`,
     `fullResult: ${input.reference}`,
+    "Preview:",
+    preview.text,
+    ...(preview.hasMore ? ["..."] : []),
     "</persisted-tool-result>",
   ].join("\n");
+}
+
+/** Keep a bounded, newline-aware UTF-8 preview of the persisted payload. */
+export function generateToolResultPreview(content: string, maxBytes = DEFAULT_TOOL_RESULT_PREVIEW_BYTES): { text: string; hasMore: boolean } {
+  const limit = Math.max(0, Math.floor(maxBytes));
+  if (Buffer.byteLength(content, "utf8") <= limit) return { text: content, hasMore: false };
+  const truncated = sliceUtf8ByBytes(content, limit);
+  const lastNewline = truncated.lastIndexOf("\n");
+  const cutPoint = lastNewline > truncated.length * 0.5 ? lastNewline : truncated.length;
+  return { text: truncated.slice(0, cutPoint), hasMore: true };
+}
+
+function sliceUtf8ByBytes(content: string, maxBytes: number): string {
+  let bytes = 0;
+  let end = 0;
+  for (const character of content) {
+    const size = Buffer.byteLength(character, "utf8");
+    if (bytes + size > maxBytes) break;
+    bytes += size;
+    end += character.length;
+  }
+  return content.slice(0, end);
 }
 
 function replaceToolResultContent(message: ToolResultMessage, text: string): ToolResultMessage {
@@ -183,7 +225,7 @@ function sidecarExtensionFor(message: ToolResultMessage): ".txt" | ".json" {
   return message.content.length === 1 && message.content[0]?.type === "text" ? ".txt" : ".json";
 }
 
-function serializeToolResultSidecarContent(message: ToolResultMessage): string {
+export function serializeToolResultSidecarContent(message: ToolResultMessage): string {
   if (message.content.length === 1 && message.content[0]?.type === "text") return message.content[0].text;
   return JSON.stringify({
     toolCallId: message.toolCallId,

@@ -7,6 +7,8 @@ import {
   applyToolResultBudget,
   createToolResultBudgetState,
   DEFAULT_MAX_TOOL_RESULT_GROUP_CHARS,
+  DEFAULT_TOOL_RESULT_PREVIEW_BYTES,
+  generateToolResultPreview,
   persistToolResultSidecars,
   toolResultSidecarDir,
   toolResultSidecarPath,
@@ -44,8 +46,35 @@ describe("applyToolResultBudget", () => {
 
     expect(projected.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("tool_result_group_budget_exceeded") });
     expect(projected.content[0]).toMatchObject({ text: expect.stringContaining("toolCallId: tc-big") });
+    expect(projected.content[0]).toMatchObject({ text: expect.stringContaining("Preview:") });
+    expect(projected.content[0]).toMatchObject({ text: expect.stringContaining("x".repeat(DEFAULT_TOOL_RESULT_PREVIEW_BYTES)) });
     expect(result.persistedResults).toEqual([{ toolCallId: "tc-big", toolName: "big_tool", path: "/tmp/tc-big.txt", content: "x".repeat(DEFAULT_MAX_TOOL_RESULT_GROUP_CHARS + 1) }]);
     expect(big.content[0]).toMatchObject({ text: "x".repeat(DEFAULT_MAX_TOOL_RESULT_GROUP_CHARS + 1) });
+  });
+
+  it("keeps the original result when persistence fails", () => {
+    const state = createToolResultBudgetState();
+    const original = toolResult("tc-fail", "big_tool", "x".repeat(120));
+
+    const result = applyToolResultBudget([original], state, {
+      maxToolResultGroupChars: 50,
+      referenceFor: () => "/unwritable/tc-fail.txt",
+      persistResult: () => false,
+    });
+
+    expect(result.messages[0]).toBe(original);
+    expect(result.persistedResults).toEqual([]);
+    expect(state.replacements.has("tc-fail")).toBe(false);
+    expect(state.seenIds.has("tc-fail")).toBe(true);
+  });
+
+  it("generates a bounded newline-aware UTF-8 preview", () => {
+    const content = `${"头".repeat(600)}\n${"尾".repeat(1_500)}`;
+    const preview = generateToolResultPreview(content, DEFAULT_TOOL_RESULT_PREVIEW_BYTES);
+
+    expect(preview.hasMore).toBe(true);
+    expect(Buffer.byteLength(preview.text, "utf8")).toBeLessThanOrEqual(DEFAULT_TOOL_RESULT_PREVIEW_BYTES);
+    expect(preview.text).not.toContain("尾");
   });
 
   it("uses consecutive tool result groups for aggregate size accounting", () => {
@@ -59,7 +88,7 @@ describe("applyToolResultBudget", () => {
     });
 
     expect((result.messages[0] as ToolResultMessage).content[0]).toMatchObject({ text: expect.stringContaining("toolCallId: tc-1") });
-    expect((result.messages[1] as ToolResultMessage).content[0]).toMatchObject({ text: "b".repeat(70) });
+    expect((result.messages[1] as ToolResultMessage).content[0]).toMatchObject({ text: expect.stringContaining("toolCallId: tc-2") });
   });
 
   it("keeps non-consecutive groups independent", () => {

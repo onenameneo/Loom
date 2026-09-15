@@ -1,5 +1,10 @@
 import type { Message, TextContent, ToolResultMessage } from "@earendil-works/pi-ai";
-import type { PersistedToolResultRequest } from "./toolResultBudget";
+import {
+  DEFAULT_TOOL_RESULT_PREVIEW_BYTES,
+  generateToolResultPreview,
+  serializeToolResultSidecarContent,
+  type PersistedToolResultRequest,
+} from "./toolResultBudget";
 
 export const DEFAULT_TOOL_RESULT_MICROCOMPACT_IDLE_GAP_MINUTES = 60;
 export const DEFAULT_TOOL_RESULT_MICROCOMPACT_KEEP_RECENT = 5;
@@ -16,6 +21,8 @@ export interface ToolResultMicroCompactOptions {
   keepRecentToolResults?: number;
   skipToolNames?: Iterable<string>;
   referenceFor?: (message: ToolResultMessage, originalChars: number) => string;
+  /** Persist before replacing. Return false to keep the original content. */
+  persistResult?: (request: PersistedToolResultRequest) => boolean;
 }
 
 export interface ToolResultMicroCompactDiagnostics {
@@ -81,20 +88,23 @@ export function applyToolResultMicroCompact(
 
   for (const candidate of candidates.slice(0, replaceUntil)) {
     const reference = options.referenceFor?.(candidate.message, candidate.originalChars) ?? `toolResult:${candidate.message.toolCallId}`;
+    const request: PersistedToolResultRequest = {
+      toolCallId: candidate.message.toolCallId,
+      toolName: candidate.message.toolName || "tool",
+      path: reference.startsWith("toolResult:") ? "" : reference,
+      content: serializeToolResultSidecarContent(candidate.message),
+    };
+    if (options.persistResult && !options.persistResult(request)) continue;
     const replacement = buildReplacementText(candidate.message, {
       originalChars: candidate.originalChars,
       reference,
+      content: request.content,
     });
     state.replacements.set(candidate.message.toolCallId, replacement);
     out[candidate.index] = replaceToolResultContent(candidate.message, replacement);
     originalChars += candidate.originalChars;
     replacementChars += replacement.length;
-    persistedResults.push({
-      toolCallId: candidate.message.toolCallId,
-      toolName: candidate.message.toolName || "tool",
-      path: reference.startsWith("toolResult:") ? "" : reference,
-      content: candidate.originalText,
-    });
+    persistedResults.push(request);
   }
 
   return {
@@ -134,7 +144,8 @@ function timestampOf(message: unknown): number | undefined {
   return undefined;
 }
 
-function buildReplacementText(message: ToolResultMessage, input: { originalChars: number; reference: string }): string {
+function buildReplacementText(message: ToolResultMessage, input: { originalChars: number; reference: string; content: string }): string {
+  const preview = generateToolResultPreview(input.content, DEFAULT_TOOL_RESULT_PREVIEW_BYTES);
   return [
     "<micro-compacted-tool-result>",
     "Old tool result content omitted from this model context because the node was idle and the result is stale.",
@@ -143,6 +154,9 @@ function buildReplacementText(message: ToolResultMessage, input: { originalChars
     `originalChars: ${input.originalChars}`,
     `reason: stale_tool_result_microcompact`,
     `fullResult: ${input.reference}`,
+    "Preview:",
+    preview.text,
+    ...(preview.hasMore ? ["..."] : []),
     "</micro-compacted-tool-result>",
   ].join("\n");
 }
