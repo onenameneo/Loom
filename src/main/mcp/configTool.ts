@@ -5,6 +5,7 @@ import { normalizeMcpServerConfig, type McpServerConfig } from "./config";
 
 export interface McpConfigToolOptions {
   targetPath: string;
+  scope?: "global" | "project";
   saveConfig: (input: unknown) => Promise<McpServerConfig>;
 }
 
@@ -28,7 +29,7 @@ export function createMcpConfigTool(options: McpConfigToolOptions): AgentTool<{ 
   return {
     name: "mcp_save_config",
     label: "Save MCP configuration",
-    description: "Add or update one MCP server through Loom's validated MCP configuration store. Use secret/environment references instead of plaintext credentials. This changes the global Loom MCP configuration and requires user approval.",
+    description: `Add or update one MCP server through Loom's validated ${options.scope === "project" ? "project" : "global"} MCP configuration store. Use secret/environment references instead of plaintext credentials. This changes the selected Loom MCP configuration and requires user approval.`,
     parameters: Type.Object({
       config: Type.Record(Type.String(), Type.Unknown(), { description: "One MCP server configuration. It must include id, name, and a valid stdio or streamable-http transport." }),
     }),

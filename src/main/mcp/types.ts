@@ -1,5 +1,6 @@
 import type { PermissionReason } from "../agent/core/permissions";
 import type { McpServerConfig, McpSecretReference } from "./config";
+import type { McpScope } from "./identity";
 
 export type McpConnectionState = "disabled" | "pending-consent" | "connecting" | "connected" | "degraded" | "failed" | "stopped";
 
@@ -65,6 +66,9 @@ export interface McpCatalog {
 
 export interface McpServerRuntimeStatus {
   serverId: string;
+  serverKey?: string;
+  scope?: McpScope;
+  projectId?: string;
   state: McpConnectionState;
   transport: McpServerConfig["transport"]["type"];
   catalogRevision: number;
@@ -84,6 +88,11 @@ export interface McpSecretStatusProjection {
 }
 
 export interface McpServerSafeProjection {
+  scope?: McpScope;
+  projectId?: string;
+  projectName?: string;
+  sourcePath?: string;
+  overridesGlobal?: boolean;
   config: Omit<McpServerConfig, "transport"> & {
     transport: Pick<McpServerConfig["transport"], "type"> & {
       displayTarget: string;
@@ -113,6 +122,9 @@ export interface McpConfigSnapshot {
 
 export interface McpConnectionConsent {
   serverId: string;
+  serverKey?: string;
+  scope?: McpScope;
+  projectId?: string;
   configRevision: number;
   command?: string;
   args?: string[];

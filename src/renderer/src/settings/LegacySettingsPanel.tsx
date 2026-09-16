@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Eye, FolderOpen, Pencil, Plus, Power, Radio, RefreshCw, RotateCcw, Trash2, X } from "lucide-react";
 import type { SkillCatalogDto } from "../env";
 import type { McpSafeServerDto, McpSettingsSnapshot } from "../../../common/mcp";
@@ -39,6 +39,7 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   const [pendingConsentMcp, setPendingConsentMcp] = useState<McpSafeServerDto | null>(null);
   const [mcpBusyId, setMcpBusyId] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
+  const mcpRequestId = useRef(0);
   const titlebarContext = useMemo(() => ({ title: t("nav.settings") }), [t]);
   const permissionDefaults = {
     profile: "auto-edit" as const,
@@ -81,18 +82,28 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
       setMcpSnapshot(null);
       return;
     }
+    const requestId = ++mcpRequestId.current;
+    const projectId = ctx.activeProjectId ?? undefined;
     try {
-      setMcpSnapshot(await window.api.mcp.list());
+      const snapshot = await window.api.mcp.list(projectId);
+      if (requestId !== mcpRequestId.current) return;
+      setMcpSnapshot(snapshot);
       setMcpError(null);
     } catch (cause) {
+      if (requestId !== mcpRequestId.current) return;
       setMcpError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, []);
+  }, [ctx.activeProjectId]);
 
   useEffect(() => {
     void reloadMcp();
     return window.api?.mcp?.onStatus(() => void reloadMcp());
   }, [reloadMcp]);
+
+  useEffect(() => {
+    setPendingRemoveMcp(null);
+    setPendingConsentMcp(null);
+  }, [ctx.activeProjectId]);
 
   if (!s) return <div className="surface-empty">{t("settings.loading")}</div>;
 
@@ -133,7 +144,12 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   }
 
   const mcpServers = mcpSnapshot?.servers ?? [];
-  const mcpFormBusy = mcpBusyId === (mcpForm.id || "new");
+  const mcpContext = (server: McpSafeServerDto) => ({
+    scope: server.scope,
+    projectId: server.scope === "project" ? (server.projectId ?? ctx.activeProjectId ?? undefined) : undefined,
+  });
+  const mcpKey = (server: Pick<McpSafeServerDto, "scope" | "config">) => `${server.scope}:${server.config.id}`;
+  const mcpFormBusy = mcpBusyId === `${mcpForm.scope}:${mcpForm.id || "new"}`;
 
   function openMcpForm(server?: McpSafeServerDto) {
     setEditingMcp(server ?? null);
@@ -148,10 +164,21 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
       setMcpError(t(`settings.mcpValidation.${validation}` as TranslationKey));
       return;
     }
-    const existing = mcpServers.find((server) => server.config.id === mcpFormToConfig(mcpForm).id);
-    setMcpBusyId(mcpForm.id || "new");
+    if (mcpForm.scope === "project" && !ctx.activeProjectId) {
+      setMcpError(t("settings.mcpProjectRequired"));
+      return;
+    }
+    const config = mcpFormToConfig(mcpForm);
+    const existing = mcpServers.find((server) => server.config.id === config.id && server.scope === mcpForm.scope);
+    setMcpBusyId(`${mcpForm.scope}:${mcpForm.id || "new"}`);
     try {
-      const result = await window.api.mcp.save(mcpFormToConfig(mcpForm, existing ? existing.config.revision + 1 : 1));
+      const result = await window.api.mcp.save(mcpFormToConfig(mcpForm, existing ? existing.config.revision + 1 : 1), {
+        scope: mcpForm.scope,
+        projectId: mcpForm.scope === "project" ? ctx.activeProjectId : undefined,
+        preserveSensitiveHeaders: mcpForm.apiKeyConfigured && !mcpForm.apiKey.trim() && !mcpForm.clearApiKey ? [mcpForm.apiKeyHeader] : [],
+        clearSensitiveHeaders: mcpForm.clearApiKey ? [mcpForm.apiKeyHeader] : [],
+        preserveEnvironmentNames: mcpForm.transport === "stdio" ? mcpForm.configuredEnvironmentNames.filter((name) => mcpForm.env.some((row) => row.key.trim().toUpperCase() === name && !row.value.trim())) : [],
+      });
       if (!result.ok) {
         setMcpError(result.issues?.map((issue) => `${issue.path}: ${issue.message}`).join(" · ") || t("settings.mcpConnectionFailed"));
         return;
@@ -166,9 +193,10 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   }
 
   async function toggleMcp(server: McpSafeServerDto) {
-    setMcpBusyId(server.config.id);
+    setMcpBusyId(mcpKey(server));
     try {
-      await window.api.mcp.setEnabled(server.config.id, !server.config.enabled);
+      if (server.scope === "project") await window.api.mcp.setEnabled(server.config.id, !server.config.enabled, mcpContext(server));
+      else await window.api.mcp.setEnabled(server.config.id, !server.config.enabled);
       await reloadMcp();
     } finally {
       setMcpBusyId(null);
@@ -176,12 +204,12 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   }
 
   async function connectMcp(server: McpSafeServerDto, reconnect = false) {
-    setMcpBusyId(server.config.id);
+    setMcpBusyId(mcpKey(server));
     setMcpError(null);
     try {
       const result = reconnect
-        ? await window.api.mcp.reconnect(server.config.id)
-        : await window.api.mcp.test(server.config.id);
+        ? server.scope === "project" ? await window.api.mcp.reconnect(server.config.id, undefined, mcpContext(server)) : await window.api.mcp.reconnect(server.config.id)
+        : server.scope === "project" ? await window.api.mcp.test(server.config.id, undefined, mcpContext(server)) : await window.api.mcp.test(server.config.id);
       const state = (result.status as { state?: string } | undefined)?.state;
       if (state === "pending-consent") setPendingConsentMcp(server);
       await reloadMcp();
@@ -193,10 +221,10 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
   }
 
   async function refreshMcp(server: McpSafeServerDto) {
-    setMcpBusyId(server.config.id);
+    setMcpBusyId(mcpKey(server));
     setMcpError(null);
     try {
-      const result = await window.api.mcp.refresh(server.config.id);
+      const result = server.scope === "project" ? await window.api.mcp.refresh(server.config.id, undefined, mcpContext(server)) : await window.api.mcp.refresh(server.config.id);
       const state = (result.status as { state?: string } | undefined)?.state;
       if (state === "pending-consent") setPendingConsentMcp(server);
       await reloadMcp();
@@ -209,9 +237,10 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
 
   async function consentMcp() {
     if (!pendingConsentMcp) return;
-    setMcpBusyId(pendingConsentMcp.config.id);
+    setMcpBusyId(mcpKey(pendingConsentMcp));
     try {
-      await window.api.mcp.consent(pendingConsentMcp.config.id, pendingConsentMcp.config.revision);
+      if (pendingConsentMcp.scope === "project") await window.api.mcp.consent(pendingConsentMcp.config.id, pendingConsentMcp.config.revision, mcpContext(pendingConsentMcp));
+      else await window.api.mcp.consent(pendingConsentMcp.config.id, pendingConsentMcp.config.revision);
       setPendingConsentMcp(null);
       await reloadMcp();
     } catch (cause) {
@@ -223,7 +252,8 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
 
   async function removeMcp() {
     if (!pendingRemoveMcp) return;
-    await window.api.mcp.remove(pendingRemoveMcp.config.id);
+    if (pendingRemoveMcp.scope === "project") await window.api.mcp.remove(pendingRemoveMcp.config.id, mcpContext(pendingRemoveMcp));
+    else await window.api.mcp.remove(pendingRemoveMcp.config.id);
     setPendingRemoveMcp(null);
     await reloadMcp();
   }
@@ -288,14 +318,18 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
         ) : (
           <div className="connection-list">
             {mcpServers.map((server) => {
-              const busy = mcpBusyId === server.config.id;
+              const busy = mcpBusyId === mcpKey(server);
               const statusClass = server.runtime.state === "connected" ? "available" : server.runtime.state === "failed" ? "unavailable" : "pending";
               return (
-                <div key={server.config.id} className="connection-row">
+                <div key={mcpKey(server)} className="connection-row">
                   <div className="connection-main">
                     <div className="connection-title-row">
                       <div>
-                        <div className="connection-name">{server.config.name}</div>
+                        <div className="source-name-line">
+                          <div className="connection-name">{server.config.name}</div>
+                          <span className={`source-tag ${server.scope}`}>{server.scope === "project" ? (server.projectName ?? t("settings.mcpProject")) : t("settings.mcpGlobal")}</span>
+                          {server.overridesGlobal && <span className="source-tag project">{t("settings.mcpOverride")}</span>}
+                        </div>
                         <div className="connection-meta">{server.config.transport.type === "stdio" ? "STDIO" : "流式 HTTP"} · {server.config.transport.displayTarget}</div>
                       </div>
                       <span className={`status-pill ${statusClass}`}>{server.runtime.state}</span>
@@ -334,6 +368,10 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
           <div className="mcp-form-body">
             <section className="mcp-form-card mcp-form-card--identity">
               <label className="field"><span>名称</span><input value={mcpForm.name} onChange={(event) => setMcpForm((current) => ({ ...current, name: event.target.value }))} placeholder="MCP server name" autoFocus /></label>
+              <label className="field"><span>{t("settings.mcpScope")}</span><select value={mcpForm.scope} onChange={(event) => setMcpForm((current) => ({ ...current, scope: event.target.value as McpFormState["scope"], projectId: event.target.value === "project" ? (ctx.activeProjectId ?? undefined) : undefined }))}>
+                <option value="global">{t("settings.mcpGlobal")}</option>
+                <option value="project" disabled={!ctx.activeProjectId}>{t("settings.mcpProject")}</option>
+              </select></label>
               <div className="mcp-type-row"><span>类型</span><McpTransportToggle value={mcpForm.transport} onChange={(transport) => setMcpForm((current) => ({ ...current, transport }))} /></div>
             </section>
             <section className="mcp-form-card mcp-form-card--details">
@@ -385,7 +423,7 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
         </div>
       </Modal>
 
-      <ConfirmDialog open={Boolean(pendingRemoveMcp)} onOpenChange={(open) => { if (!open) setPendingRemoveMcp(null); }} title={t("settings.mcpRemove")} description={pendingRemoveMcp ? t("settings.mcpRemoveDescription", { name: pendingRemoveMcp.config.name }) : undefined} onConfirm={() => void removeMcp()} />
+      <ConfirmDialog open={Boolean(pendingRemoveMcp)} onOpenChange={(open) => { if (!open) setPendingRemoveMcp(null); }} title={t("settings.mcpRemove")} description={pendingRemoveMcp ? <>{t("settings.mcpRemoveDescription", { name: pendingRemoveMcp.config.name })}<div className="connection-meta">{pendingRemoveMcp.scope === "project" ? `${t("settings.mcpProject")}: ${pendingRemoveMcp.projectName ?? pendingRemoveMcp.projectId ?? "—"}` : t("settings.mcpGlobal")}</div></> : undefined} onConfirm={() => void removeMcp()} />
       <ConfirmDialog
         open={Boolean(pendingConsentMcp)}
         onOpenChange={(open) => { if (!open) setPendingConsentMcp(null); }}
@@ -393,6 +431,7 @@ export function LegacySettingsPanel({ ctx }: { ctx: SurfaceCtx }) {
         description={pendingConsentMcp ? (
           <div className="grid gap-loom-2 whitespace-pre-wrap font-loom-mono text-[10.5px] text-loom-muted">
             <p>{t("settings.mcpConsentBody")}</p>
+            <div><strong>{t("settings.mcpScope")}:</strong> {pendingConsentMcp.scope === "project" ? `${t("settings.mcpProject")} · ${pendingConsentMcp.projectName ?? pendingConsentMcp.projectId ?? "—"}` : t("settings.mcpGlobal")}</div>
             <div><strong>{t("settings.mcpCommand")}:</strong> {pendingConsentMcp.config.transport.command ?? pendingConsentMcp.config.transport.url}</div>
             {pendingConsentMcp.config.transport.args && <div><strong>{t("settings.mcpArgs")}:</strong> {pendingConsentMcp.config.transport.args.join(" ")}</div>}
             {pendingConsentMcp.config.transport.cwd && <div><strong>{t("settings.mcpCwd")}:</strong> {pendingConsentMcp.config.transport.cwd}</div>}

@@ -3,6 +3,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { redactMcpText, createMcpSecretStore, type McpSecretStore } from "./secrets";
 import type { McpServerConfig, McpSecretReference } from "./config";
 import type { McpConnectionConsent, McpConnectionState, McpDiagnostic, McpServerRuntimeStatus } from "./types";
+import type { McpScope } from "./identity";
 
 export type McpTransportKind = "stdio" | "streamable-http" | "sse";
 
@@ -44,6 +45,7 @@ export type McpClientFactory = (context: McpClientFactoryContext) => Promise<Mcp
 
 export interface McpConnectionHandle {
   readonly serverId: string;
+  readonly serverKey?: string;
   readonly client: McpClientLike;
   readonly transport: McpTransportLike;
   readonly transportKind: McpTransportKind;
@@ -56,10 +58,10 @@ export interface McpConnectionHandle {
 export interface McpConnectionManagerOptions {
   create?: McpClientFactory;
   requestConsent?: (consent: McpConnectionConsent) => boolean | Promise<boolean>;
-  isConsentPersisted?: (serverId: string, configRevision: number) => boolean;
-  persistConsent?: (serverId: string, configRevision: number) => void;
+  isConsentPersisted?: (serverId: string, configRevision: number, serverKey?: string) => boolean;
+  persistConsent?: (serverId: string, configRevision: number, serverKey?: string) => void;
   onStatus?: (status: McpServerRuntimeStatus) => void;
-  onToolsChanged?: (serverId: string, error?: Error) => void;
+  onToolsChanged?: (serverKey: string, error?: Error) => void;
   timeoutMs?: number;
   reconnectBaseMs?: number;
   maxReconnectAttempts?: number;
@@ -67,15 +69,19 @@ export interface McpConnectionManagerOptions {
 }
 
 export interface McpConnectionManager {
-  connect(server: McpServerConfig, options?: { force?: boolean; signal?: AbortSignal }): Promise<McpConnectionHandle | undefined>;
-  approveConsent(serverId: string, configRevision: number): void;
-  status(serverId: string): McpServerRuntimeStatus;
-  close(serverId: string): Promise<void>;
+  connect(server: McpServerConfig, options?: { force?: boolean; signal?: AbortSignal; serverKey?: string; scope?: McpScope; projectId?: string; sourcePath?: string }): Promise<McpConnectionHandle | undefined>;
+  approveConsent(serverId: string, configRevision: number, serverKey?: string): void;
+  status(serverId: string, serverKey?: string): McpServerRuntimeStatus;
+  close(serverId: string, serverKey?: string): Promise<void>;
   closeAll(): Promise<void>;
 }
 
 interface ConnectionRecord {
   server: McpServerConfig;
+  serverKey: string;
+  scope?: McpScope;
+  projectId?: string;
+  sourcePath?: string;
   state: McpConnectionState;
   client?: McpClientLike;
   transport?: McpTransportLike;
@@ -134,6 +140,9 @@ function configuredSecretReferences(transport: McpServerConfig["transport"]): Mc
 function createStatus(record: ConnectionRecord): McpServerRuntimeStatus {
   return {
     serverId: record.server.id,
+    serverKey: record.serverKey,
+    scope: record.scope,
+    projectId: record.projectId,
     state: record.state,
     transport: record.server.transport.type,
     catalogRevision: 0,
@@ -145,10 +154,13 @@ function createStatus(record: ConnectionRecord): McpServerRuntimeStatus {
   };
 }
 
-function consentFor(server: McpServerConfig): McpConnectionConsent {
+function consentFor(server: McpServerConfig, record: Pick<ConnectionRecord, "serverKey" | "scope" | "projectId">): McpConnectionConsent {
   if (server.transport.type !== "stdio") {
     return {
       serverId: server.id,
+      serverKey: record.serverKey,
+      scope: record.scope,
+      projectId: record.projectId,
       configRevision: server.revision,
       environmentNames: [],
       privilegeWarning: "This MCP server can access data and services available to Loom.",
@@ -156,6 +168,9 @@ function consentFor(server: McpServerConfig): McpConnectionConsent {
   }
   return {
     serverId: server.id,
+    serverKey: record.serverKey,
+    scope: record.scope,
+    projectId: record.projectId,
     configRevision: server.revision,
     command: server.transport.command,
     args: [...server.transport.args],
@@ -195,7 +210,7 @@ export function createMcpConnectionManager(options: McpConnectionManagerOptions 
     record.reconnectAttempts += 1;
     record.reconnectTimer = setTimeout(() => {
       record.reconnectTimer = undefined;
-      void manager.connect(record.server, { force: true }).catch(() => undefined);
+      void manager.connect(record.server, { force: true, serverKey: record.serverKey, scope: record.scope, projectId: record.projectId, sourcePath: record.sourcePath }).catch(() => undefined);
     }, delay);
   };
 
@@ -227,16 +242,16 @@ export function createMcpConnectionManager(options: McpConnectionManagerOptions 
     }
 
     if (record.server.transport.type === "stdio") {
-      const consentKey = `${record.server.id}:${record.server.revision}`;
-      const persistedConsent = options.isConsentPersisted?.(record.server.id, record.server.revision) === true;
+      const consentKey = `${record.serverKey}:${record.server.revision}`;
+      const persistedConsent = options.isConsentPersisted?.(record.server.id, record.server.revision, record.serverKey) === true;
       if (persistedConsent) record.consentRevision = record.server.revision;
       if (!consented.has(consentKey) && !persistedConsent) {
         setState(record, "pending-consent", diagnostic("consent-required", "Connection consent is required before starting this local MCP server.", false, Date.now()));
-        const approved = await options.requestConsent?.(consentFor(record.server));
+        const approved = await options.requestConsent?.(consentFor(record.server, record));
         if (!approved) return undefined;
         consented.add(consentKey);
         record.consentRevision = record.server.revision;
-        options.persistConsent?.(record.server.id, record.server.revision);
+        options.persistConsent?.(record.server.id, record.server.revision, record.serverKey);
       }
     }
 
@@ -244,7 +259,7 @@ export function createMcpConnectionManager(options: McpConnectionManagerOptions 
     let created: McpClientFactoryResult | undefined;
     try {
       const transportKind: McpTransportKind = record.server.transport.type === "stdio" ? "stdio" : "streamable-http";
-      created = await withTimeout((options.create ?? createMcpSdkClientFactory())({ server: record.server, transportKind, onToolsChanged: (error) => options.onToolsChanged?.(record.server.id, error) }), timeoutMs, signal);
+      created = await withTimeout((options.create ?? createMcpSdkClientFactory())({ server: record.server, transportKind, onToolsChanged: (error) => options.onToolsChanged?.(record.serverKey, error) }), timeoutMs, signal);
       attachTransport(record, created);
       await withTimeout(created.client.connect(created.transport), timeoutMs, signal);
     } catch (firstError) {
@@ -260,6 +275,7 @@ export function createMcpConnectionManager(options: McpConnectionManagerOptions 
     setState(record, "connected");
     const handle: McpConnectionHandle = {
       serverId: record.server.id,
+      serverKey: record.serverKey,
       client: created.client,
       transport: created.transport,
       transportKind: created.transportKind,
@@ -268,41 +284,47 @@ export function createMcpConnectionManager(options: McpConnectionManagerOptions 
       },
       listTools: (callOptions) => withTimeout(created!.client.listTools(undefined, callOptions), timeoutMs, callOptions?.signal),
       callTool: (name, args, callOptions) => withTimeout(created!.client.callTool({ name, arguments: args }, callOptions), timeoutMs, callOptions?.signal),
-      close: () => manager.close(record.server.id),
+      close: () => manager.close(record.server.id, record.serverKey),
     };
     record.handle = handle;
     return handle;
   };
 
   const manager: McpConnectionManager = {
-    approveConsent(serverId, configRevision) {
-      consented.add(`${serverId}:${configRevision}`);
-      options.persistConsent?.(serverId, configRevision);
+    approveConsent(serverId, configRevision, serverKey = serverId) {
+      consented.add(`${serverKey}:${configRevision}`);
+      options.persistConsent?.(serverId, configRevision, serverKey);
     },
     async connect(server, connectOptions = {}) {
-      let record = connections.get(server.id);
+      const serverKey = connectOptions.serverKey ?? server.id;
+      let record = connections.get(serverKey);
       if (record && record.state === "connected" && !connectOptions.force) {
         return record.handle;
       }
       if (record?.connectPromise && !connectOptions.force) return record.connectPromise;
-      if (record) await manager.close(server.id);
+      if (record) await manager.close(server.id, serverKey);
       record = {
         server,
+        serverKey,
+        scope: connectOptions.scope,
+        projectId: connectOptions.projectId,
+        sourcePath: connectOptions.sourcePath,
         state: server.enabled ? "stopped" : "disabled",
         reconnectAttempts: 0,
         closed: false,
         diagnostics: [],
         updatedAt: Date.now(),
       };
-      connections.set(server.id, record);
+      connections.set(serverKey, record);
       record.connectPromise = connectRecord(record, connectOptions.signal);
       return record.connectPromise;
     },
-    status(serverId) {
-      const record = connections.get(serverId);
+    status(serverId, serverKey = serverId) {
+      const record = connections.get(serverKey);
       if (record) return createStatus(record);
       return {
         serverId,
+        serverKey,
         state: "stopped",
         transport: "stdio",
         catalogRevision: 0,
@@ -312,8 +334,8 @@ export function createMcpConnectionManager(options: McpConnectionManagerOptions 
         updatedAt: Date.now(),
       };
     },
-    async close(serverId) {
-      const record = connections.get(serverId);
+    async close(serverId, serverKey = serverId) {
+      const record = connections.get(serverKey);
       if (!record) return;
       record.closed = true;
       if (record.reconnectTimer) clearTimeout(record.reconnectTimer);
@@ -325,7 +347,7 @@ export function createMcpConnectionManager(options: McpConnectionManagerOptions 
       record.handle = undefined;
     },
     async closeAll() {
-      await Promise.all([...connections.values()].map((record) => manager.close(record.server.id)));
+      await Promise.all([...connections.values()].map((record) => manager.close(record.server.id, record.serverKey)));
     },
   };
 

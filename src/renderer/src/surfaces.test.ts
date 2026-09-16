@@ -11,6 +11,7 @@ const originalPlatform = Object.getOwnPropertyDescriptor(navigator, "platform");
 
 function mcpTestServer(): McpSafeServerDto {
   return {
+    scope: "global",
     config: {
       version: 1,
       id: "notes",
@@ -271,6 +272,47 @@ describe("SettingsPanel model registry", () => {
     await user.click(screen.getAllByRole("button", { name: "添加 MCP 服务器" })[0]);
 
     expect(document.activeElement).toBe(screen.getByLabelText("名称"));
+  });
+
+  it("defaults MCP scope to global and disables project scope without an active project", async () => {
+    installMcpApi(null);
+    const user = userEvent.setup();
+
+    render(
+      React.createElement(TitlebarProvider, {
+        defaultDescriptor: { title: "fallback" },
+        children: React.createElement(SettingsPanel, { ctx: settingsTestContext() }),
+      }),
+    );
+
+    await user.click(screen.getAllByRole("button", { name: "添加 MCP 服务器" })[0]);
+    const scope = screen.getByLabelText("配置范围") as HTMLSelectElement;
+    expect(scope.value).toBe("global");
+    expect(within(scope).getByRole("option", { name: "当前项目" })).toHaveProperty("disabled", true);
+  });
+
+  it("saves project MCP configuration against the active project id", async () => {
+    const save = vi.fn(async () => ({ ok: true, config: {} }));
+    const list = vi.fn(async (projectId?: string) => ({ servers: [], diagnostics: [], revision: 1, projectId }));
+    installMcpApi(null, { list, save });
+    const user = userEvent.setup();
+    const ctx = { ...settingsTestContext(), activeProjectId: "project-a" };
+
+    render(
+      React.createElement(TitlebarProvider, {
+        defaultDescriptor: { title: "fallback" },
+        children: React.createElement(SettingsPanel, { ctx }),
+      }),
+    );
+
+    expect(list).toHaveBeenCalledWith("project-a");
+    await user.click(screen.getAllByRole("button", { name: "添加 MCP 服务器" })[0]);
+    await user.selectOptions(screen.getByLabelText("配置范围"), "project");
+    await user.type(screen.getByLabelText("名称"), "Notes");
+    await user.type(screen.getByPlaceholderText("npx"), "node");
+    await user.click(screen.getByRole("button", { name: "保存 MCP 服务器" }));
+
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ id: "notes" }), expect.objectContaining({ scope: "project", projectId: "project-a" }));
   });
 
   it("renders model configuration with connected providers and configured default models only", async () => {

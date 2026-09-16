@@ -3,7 +3,7 @@ import type { ComposerBudgetPreviewInput } from "../../../common/composerBudget"
 import type { SelectionContextNote } from "../../../common/selectionContext";
 import type { FileListResult, FilePreviewResult, FileSearchRequest, FileSearchResult, FileWorkspaceRequest } from "../../../common/filePreview";
 import type { FileArtifactActionRequest, FileArtifactActionResult, FileArtifactRef } from "../../../common/fileArtifacts";
-import type { McpConfigInput, McpSafeServerDto, McpSettingsSnapshot, McpSaveRequest } from "../../../common/mcp";
+import type { McpConfigInput, McpSafeServerDto, McpSettingsSnapshot, McpSaveRequest, McpScopeContext } from "../../../common/mcp";
 import type { LiveTurnContentPart, LiveTurnEvent, LiveTurnPatch, LiveTurnSnapshot } from "../../../common/liveTurns";
 
 export {};
@@ -627,15 +627,15 @@ declare global {
         openSkillSource: (path: string) => Promise<{ ok: boolean; path: string; error?: string }>;
       };
       mcp: {
-        list: () => Promise<McpSettingsSnapshot>;
-        get: (id: string) => Promise<McpSafeServerDto | undefined>;
+        list: (projectId?: string) => Promise<McpSettingsSnapshot>;
+        get: (id: string, context?: McpScopeContext) => Promise<McpSafeServerDto | undefined>;
         save: (config: McpConfigInput, options?: Omit<McpSaveRequest, "config">) => Promise<{ ok: boolean; config?: McpConfigInput; issues?: Array<{ code: string; path: string; message: string }> }>;
-        remove: (id: string) => Promise<{ ok: boolean }>;
-        setEnabled: (id: string, enabled: boolean) => Promise<{ ok: boolean; config?: McpConfigInput }>;
-        consent: (id: string, revision: number) => Promise<{ ok: boolean; status: unknown }>;
-        test: (id: string, consented?: boolean) => Promise<{ ok: boolean; status: unknown; catalog?: { revision: number; toolCount: number } }>;
-        reconnect: (id: string, consented?: boolean) => Promise<{ ok: boolean; status: unknown; catalog?: { revision: number; toolCount: number } }>;
-        refresh: (id: string, consented?: boolean) => Promise<{ ok: boolean; status: unknown; catalog?: { revision: number; toolCount: number } }>;
+        remove: (id: string, context?: McpScopeContext) => Promise<{ ok: boolean }>;
+        setEnabled: (id: string, enabled: boolean, context?: McpScopeContext) => Promise<{ ok: boolean; config?: McpConfigInput }>;
+        consent: (id: string, revision: number, context?: McpScopeContext) => Promise<{ ok: boolean; status: unknown }>;
+        test: (id: string, consented?: boolean, context?: McpScopeContext) => Promise<{ ok: boolean; status: unknown; catalog?: { revision: number; toolCount: number } }>;
+        reconnect: (id: string, consented?: boolean, context?: McpScopeContext) => Promise<{ ok: boolean; status: unknown; catalog?: { revision: number; toolCount: number } }>;
+        refresh: (id: string, consented?: boolean, context?: McpScopeContext) => Promise<{ ok: boolean; status: unknown; catalog?: { revision: number; toolCount: number } }>;
         onStatus: (listener: (status: unknown) => void) => () => void;
       };
       monitor: {

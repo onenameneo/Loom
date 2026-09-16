@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import { emptyMcpForm, formFromMcpServer, mcpFormToConfig, validateMcpForm } from "./mcpForm";
 
 describe("MCP settings form", () => {
-  it("uses a global screenshot-shaped form without project fields", () => {
+  it("defaults new servers to the global scope", () => {
     const form = emptyMcpForm();
     expect(form).toMatchObject({
       name: "",
+      scope: "global",
+      projectId: undefined,
       transport: "stdio",
       args: [""],
       env: [{ key: "", value: "" }],
@@ -20,7 +22,6 @@ describe("MCP settings form", () => {
     });
     expect(form).not.toHaveProperty("bearerToken");
     expect(form).not.toHaveProperty("bearerCredentialSource");
-    expect(form).not.toHaveProperty("scope");
     expect(form).not.toHaveProperty("displayName");
     expect(form).not.toHaveProperty("credentialName");
   });
@@ -92,10 +93,11 @@ describe("MCP settings form", () => {
           credentialReferences: [],
         },
       },
+      scope: "project",
+      projectId: "project-a",
       runtime: { serverId: "remote", state: "stopped", transport: "streamable-http", catalogRevision: 0, toolCount: 0, diagnostics: [], updatedAt: 1 },
       secrets: [],
     } as never;
-    expect(formFromMcpServer(server).apiKey).toBe("");
-    expect(formFromMcpServer(server).apiKeyConfigured).toBe(true);
+    expect(formFromMcpServer(server)).toMatchObject({ scope: "project", projectId: "project-a", apiKey: "", apiKeyConfigured: true });
   });
 });

@@ -30,6 +30,18 @@ describe("McpConnectionManager", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps same-id project connections isolated by server key", async () => {
+    const create = vi.fn(async () => ({ client: fakeClient(), transport: fakeTransport(), transportKind: "streamable-http" as const }));
+    const remote = server({ transport: { type: "streamable-http", url: "https://mcp.example.com/mcp" } });
+    const manager = createMcpConnectionManager({ create });
+    const a = await manager.connect(remote, { serverKey: "project:aaa:local-tools", scope: "project", projectId: "a" });
+    const b = await manager.connect(remote, { serverKey: "project:bbb:local-tools", scope: "project", projectId: "b" });
+    expect(a).not.toBe(b);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(manager.status("local-tools", "project:aaa:local-tools").projectId).toBe("a");
+    expect(manager.status("local-tools", "project:bbb:local-tools").projectId).toBe("b");
+  });
+
   it("reuses persisted consent for the same local configuration revision", async () => {
     const create = vi.fn(async () => ({ client: fakeClient(), transport: fakeTransport(), transportKind: "stdio" as const }));
     const manager = createMcpConnectionManager({ create, isConsentPersisted: () => true });

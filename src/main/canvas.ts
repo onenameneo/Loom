@@ -25,6 +25,7 @@ import { createMcpConnectionManager } from "./mcp/connection";
 import { createMcpToolProvider } from "./mcp/provider";
 import { loadMcpConfiguration, loadMcpConsent, saveMcpConsent } from "./mcp/store";
 import { connectEnabledMcpServers } from "./mcp/startup";
+import type { McpProjectContext } from "./mcp/provider";
 import type { FileArtifactRegistry } from "./fileArtifacts";
 
 // ---------------------------------------------------------------------------
@@ -74,15 +75,29 @@ export function registerCanvas(opts: { getWin: () => BrowserWindow | null; store
     loadRegistry: () => ModelRegistry.load(),
   });
   let mcpProvider: ReturnType<typeof createMcpToolProvider>;
+  const resolveMcpProjectContext = (nodeId: string): McpProjectContext | undefined => {
+    const node = store.getNode(nodeId);
+    if (!node) return undefined;
+    const project = store.listProjects().find((item) => item.id === node.projectId);
+    const projectRoot = project?.sourceRoots[0];
+    return project && projectRoot ? { projectId: project.id, projectName: project.name, projectRoot } : undefined;
+  };
   const mcpManager = createMcpConnectionManager({
-    isConsentPersisted: (serverId, configRevision) => loadMcpConsent({ homeDir: opts.homeDir })[serverId] === configRevision,
-    persistConsent: (serverId, configRevision) => saveMcpConsent({ homeDir: opts.homeDir, serverId, configRevision }),
+    isConsentPersisted: (serverId, configRevision, serverKey) => {
+      const consent = loadMcpConsent({ homeDir: opts.homeDir });
+      return consent[serverKey ?? serverId] === configRevision || consent[serverId] === configRevision;
+    },
+    persistConsent: (serverId, configRevision, serverKey) => saveMcpConsent({ homeDir: opts.homeDir, serverId, serverKey, configRevision }),
     onStatus: (status) => sendToWindow(getWin, "mcp:status", status),
     onToolsChanged: (serverId) => mcpProvider?.markToolsChanged(serverId),
   });
   mcpProvider = createMcpToolProvider({
     manager: mcpManager,
-    resolveServers: () => loadMcpConfiguration({ homeDir: opts.homeDir }).servers,
+    resolveProjectContext: resolveMcpProjectContext,
+    resolveServers: (nodeId) => {
+      const project = nodeId ? resolveMcpProjectContext(nodeId) : undefined;
+      return loadMcpConfiguration({ homeDir: opts.homeDir, projectRoot: project?.projectRoot, projectId: project?.projectId, projectName: project?.projectName }).servers;
+    },
     homeDir: opts.homeDir,
   });
   void connectEnabledMcpServers({

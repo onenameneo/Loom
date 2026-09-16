@@ -9,12 +9,12 @@ import { McpTransportToggle } from "../McpTransportToggle";
 import { SettingsToolbar } from "../components/SettingsSection";
 import { useMcpSettings } from "../hooks/useMcpSettings";
 
-export function McpSettings(_props: { ctx: SurfaceCtx }) {
+export function McpSettings({ ctx }: { ctx: SurfaceCtx }) {
   const { t } = useI18n();
-  const state = useMcpSettings();
+  const state = useMcpSettings(ctx.activeProjectId ?? undefined);
   const stdioCommandPlaceholder = window.api?.platform === "win32" ? "npx.cmd" : "npx";
   const servers: McpSafeServerDto[] = state.snapshot?.servers ?? [];
-  const formBusy = state.busyId === (state.form.id || "new");
+  const formBusy = state.busyId === `${state.form.scope}:${state.form.id || "new"}`;
 
   return (
     <>
@@ -32,14 +32,18 @@ export function McpSettings(_props: { ctx: SurfaceCtx }) {
       ) : (
         <div className="connection-list settings-resource-list">
           {servers.map((server) => {
-            const busy = state.busyId === server.config.id;
+            const busy = state.busyId === `${server.scope}:${server.config.id}`;
             const statusClass = server.runtime.state === "connected" ? "available" : server.runtime.state === "failed" ? "unavailable" : "pending";
             return (
-              <div key={server.config.id} className="connection-row settings-resource-row">
+              <div key={`${server.scope}:${server.config.id}`} className="connection-row settings-resource-row">
                 <div className="connection-main">
                   <div className="connection-title-row">
                     <div>
-                      <div className="connection-name">{server.config.name}</div>
+                      <div className="source-name-line">
+                        <div className="connection-name">{server.config.name}</div>
+                        <span className={`source-tag ${server.scope}`}>{server.scope === "project" ? (server.projectName ?? t("settings.mcpProject")) : t("settings.mcpGlobal")}</span>
+                        {server.overridesGlobal && <span className="source-tag project">{t("settings.mcpOverride")}</span>}
+                      </div>
                       <div className="connection-meta">{server.config.transport.type === "stdio" ? "STDIO" : "流式 HTTP"} · {server.config.transport.displayTarget}</div>
                     </div>
                     <span className={`status-pill ${statusClass}`}>{server.runtime.state}</span>
@@ -77,6 +81,10 @@ export function McpSettings(_props: { ctx: SurfaceCtx }) {
             <div className="mcp-form-body">
               <section className="mcp-form-card mcp-form-card--identity">
                 <label className="field"><span>名称</span><input value={state.form.name} onChange={(event) => state.setForm((current) => ({ ...current, name: event.target.value }))} placeholder="MCP server name" autoFocus /></label>
+                <label className="field"><span>{t("settings.mcpScope")}</span><select value={state.form.scope} onChange={(event) => state.setForm((current) => ({ ...current, scope: event.target.value as typeof current.scope, projectId: event.target.value === "project" ? (ctx.activeProjectId ?? undefined) : undefined }))}>
+                  <option value="global">{t("settings.mcpGlobal")}</option>
+                  <option value="project" disabled={!ctx.activeProjectId}>{t("settings.mcpProject")}</option>
+                </select></label>
                 <div className="mcp-type-row"><span>类型</span><McpTransportToggle value={state.form.transport} onChange={(transport) => state.setForm((current) => ({ ...current, transport }))} /></div>
               </section>
               <section className="mcp-form-card mcp-form-card--details">
@@ -110,8 +118,8 @@ export function McpSettings(_props: { ctx: SurfaceCtx }) {
           </form>
         </div>
       </Modal>
-      <ConfirmDialog open={Boolean(state.pendingRemove)} onOpenChange={(open) => { if (!open) state.setPendingRemove(null); }} title={t("settings.mcpRemove")} description={state.pendingRemove ? t("settings.mcpRemoveDescription", { name: state.pendingRemove.config.name }) : undefined} onConfirm={() => void state.remove()} />
-      <ConfirmDialog open={Boolean(state.pendingConsent)} onOpenChange={(open) => { if (!open) state.setPendingConsent(null); }} title={t("settings.mcpConsentTitle")} description={state.pendingConsent ? <div className="grid gap-loom-2 whitespace-pre-wrap font-loom-mono text-[10.5px] text-loom-muted"><p>{t("settings.mcpConsentBody")}</p><div><strong>{t("settings.mcpCommand")}:</strong> {state.pendingConsent.config.transport.command ?? state.pendingConsent.config.transport.url}</div>{state.pendingConsent.config.transport.args && <div><strong>{t("settings.mcpArgs")}:</strong> {state.pendingConsent.config.transport.args.join(" ")}</div>}{state.pendingConsent.config.transport.cwd && <div><strong>{t("settings.mcpCwd")}:</strong> {state.pendingConsent.config.transport.cwd}</div>}{state.pendingConsent.config.transport.environmentNames && <div><strong>{t("settings.mcpEnv")}:</strong> {state.pendingConsent.config.transport.environmentNames.join(", ") || "—"}</div>}{state.pendingConsent.config.transport.privilegeWarning && <div className="text-loom-warn"><strong>{state.pendingConsent.config.transport.privilegeWarning}</strong></div>}</div> : undefined} confirmLabel={t("settings.mcpConsent")} onConfirm={() => void state.consent()} />
+      <ConfirmDialog open={Boolean(state.pendingRemove)} onOpenChange={(open) => { if (!open) state.setPendingRemove(null); }} title={t("settings.mcpRemove")} description={state.pendingRemove ? <>{t("settings.mcpRemoveDescription", { name: state.pendingRemove.config.name })}<div className="connection-meta">{state.pendingRemove.scope === "project" ? `${t("settings.mcpProject")}: ${state.pendingRemove.projectName ?? state.pendingRemove.projectId ?? "—"}` : t("settings.mcpGlobal")}</div></> : undefined} onConfirm={() => void state.remove()} />
+      <ConfirmDialog open={Boolean(state.pendingConsent)} onOpenChange={(open) => { if (!open) state.setPendingConsent(null); }} title={t("settings.mcpConsentTitle")} description={state.pendingConsent ? <div className="grid gap-loom-2 whitespace-pre-wrap font-loom-mono text-[10.5px] text-loom-muted"><p>{t("settings.mcpConsentBody")}</p><div><strong>{t("settings.mcpScope")}:</strong> {state.pendingConsent.scope === "project" ? `${t("settings.mcpProject")} · ${state.pendingConsent.projectName ?? state.pendingConsent.projectId ?? "—"}` : t("settings.mcpGlobal")}</div><div><strong>{t("settings.mcpCommand")}:</strong> {state.pendingConsent.config.transport.command ?? state.pendingConsent.config.transport.url}</div>{state.pendingConsent.config.transport.args && <div><strong>{t("settings.mcpArgs")}:</strong> {state.pendingConsent.config.transport.args.join(" ")}</div>}{state.pendingConsent.config.transport.cwd && <div><strong>{t("settings.mcpCwd")}:</strong> {state.pendingConsent.config.transport.cwd}</div>}{state.pendingConsent.config.transport.environmentNames && <div><strong>{t("settings.mcpEnv")}:</strong> {state.pendingConsent.config.transport.environmentNames.join(", ") || "—"}</div>}{state.pendingConsent.config.transport.privilegeWarning && <div className="text-loom-warn"><strong>{state.pendingConsent.config.transport.privilegeWarning}</strong></div>}</div> : undefined} confirmLabel={t("settings.mcpConsent")} onConfirm={() => void state.consent()} />
     </>
   );
 }

@@ -1,7 +1,14 @@
 export type McpTransportType = "stdio" | "streamable-http";
+export type McpScope = "global" | "project";
+export interface McpScopeContext { scope?: McpScope; projectId?: string; }
 export type McpConnectionState = "disabled" | "pending-consent" | "connecting" | "connected" | "degraded" | "failed" | "stopped";
 
 export interface McpSafeServerDto {
+  scope: McpScope;
+  projectId?: string;
+  projectName?: string;
+  sourcePath?: string;
+  overridesGlobal?: boolean;
   config: {
     version: 1;
     id: string;
@@ -42,11 +49,14 @@ export interface McpSettingsSnapshot {
   servers: McpSafeServerDto[];
   diagnostics: Array<{ code: string; path: string; message: string }>;
   revision: number;
+  projectId?: string;
 }
 
 export type McpConfigInput = Record<string, unknown>;
 export interface McpSaveRequest {
   config: McpConfigInput;
+  scope?: McpScope;
+  projectId?: string;
   preserveSensitiveHeaders?: string[];
   clearSensitiveHeaders?: string[];
   preserveEnvironmentNames?: string[];

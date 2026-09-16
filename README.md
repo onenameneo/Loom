@@ -46,6 +46,16 @@ Loom treats “what enters the next request” as a first-class capability inste
 - Connect MCP Servers
 - Keep tool calls behind permission and approval controls
 
+### MCP Configuration Scope
+
+Loom supports both global and project-scoped MCP configuration:
+
+- Global configuration lives at `~/.loom/mcp.json` and is available across projects.
+- The active project configuration lives at `<project-root>/.loom/mcp.json` and is loaded only for a registered project context.
+- A project file is created only on the first valid project-scoped save; project entries do not inherit global transports, environment values, or credential references.
+- A same-id project entry shadows the global server for that project, while global deny rules, stricter approval policies, and a global disabled state remain effective.
+- Local stdio servers require consent per scope; consent stays in user-local state and is never written to the project file. Use environment, Loom Secret, or OAuth references instead of raw tokens in configuration files.
+
 ### Agent Design Highlights
 
 - Invoke tools on demand through a unified runtime for files, commands, calculations, network access, and MCP

@@ -277,6 +277,11 @@ function registerIpc() {
         manager: canvas.mcp.manager,
         provider: canvas.mcp.provider,
         homeDir: app.getPath("home"),
+        resolveProject: (projectId) => {
+          const project = store.listProjects().find((item) => item.id === projectId);
+          const sourceRoot = project?.sourceRoots[0];
+          return project && sourceRoot ? { id: project.id, name: project.name, sourceRoot } : undefined;
+        },
       })
     : undefined;
 

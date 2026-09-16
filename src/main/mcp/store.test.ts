@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { isMcpToolExposed, loadMcpConfiguration, loadMcpConsent, removeMcpConsent, saveMcpConsent, saveMcpServerConfig } from "./store";
+import { isMcpToolExposed, loadMcpConfiguration, loadMcpConsent, projectMcpPath, removeMcpConsent, saveMcpConsent, saveMcpServerConfig } from "./store";
 
 function writeJson(path: string, value: unknown) { mkdirSync(join(path, ".."), { recursive: true }); writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8"); }
 const tempRoots: string[] = [];
@@ -28,6 +28,44 @@ describe("MCP global configuration store", () => {
     saveMcpServerConfig({ homeDir: home, config: { id: "notes", name: "Notes", enabled: false, transport: { type: "stdio", command: "node", args: ["server.js"] } } });
     expect(existsSync(join(home, ".loom", "mcp.json"))).toBe(true);
     expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({ defaults: { model: { providerId: "test", modelId: "model" } } });
+  });
+
+  it("loads the active project's MCP file and shadows global ids without inheriting transport secrets", () => {
+    const root = tempRoot("loom-mcp-project");
+    const home = join(root, "home");
+    const project = join(root, "project");
+    writeJson(join(home, ".loom", "mcp.json"), {
+      version: 1,
+      servers: {
+        notes: { id: "notes", name: "Global notes", enabled: true, transport: { type: "streamable-http", url: "https://global.example/mcp", headers: { Authorization: { source: "environment", name: "GLOBAL_TOKEN" } } }, exposure: { mode: "all", allow: [], deny: ["delete"] }, approval: { mode: "always", defaultScope: "once" } },
+        global: { id: "global", name: "Global", enabled: true, transport: { type: "stdio", command: "node", args: ["global.js"] } },
+      },
+    });
+    writeJson(projectMcpPath(project), {
+      version: 1,
+      servers: {
+        notes: { id: "notes", name: "Project notes", enabled: true, transport: { type: "stdio", command: "node", args: ["project.js"] }, exposure: { mode: "allowlist", allow: ["read"], deny: [] }, approval: { mode: "never", defaultScope: "persistent" } },
+        local: { id: "local", name: "Local", enabled: true, transport: { type: "stdio", command: "node", args: ["local.js"] } },
+      },
+    });
+    const loaded = loadMcpConfiguration({ homeDir: home, projectRoot: project, projectId: "project-a", projectName: "Project A" });
+    expect(loaded.servers.map((server) => server.config.id).sort()).toEqual(["global", "local", "notes"]);
+    const notes = loaded.servers.find((server) => server.config.id === "notes");
+    expect(notes).toMatchObject({ scope: "project", projectId: "project-a", projectName: "Project A", overridesGlobal: true });
+    expect(notes?.config.transport).toMatchObject({ type: "stdio", args: ["project.js"] });
+    expect(notes?.config.transport).not.toHaveProperty("headers");
+    expect(notes?.config.exposure).toMatchObject({ mode: "allowlist", allow: ["read"], deny: ["delete"] });
+    expect(notes?.config.approval).toMatchObject({ mode: "always", defaultScope: "once" });
+  });
+
+  it("writes project MCP configuration only beneath the selected project root", () => {
+    const root = tempRoot("loom-mcp-project-save");
+    const home = join(root, "home");
+    const project = join(root, "project");
+    saveMcpServerConfig({ homeDir: home, scope: "project", projectRoot: project, config: { id: "local", name: "Local", enabled: true, transport: { type: "stdio", command: "node", args: ["server.js"] } } });
+    expect(existsSync(join(project, ".loom", "mcp.json"))).toBe(true);
+    expect(existsSync(join(home, ".loom", "mcp.json"))).toBe(false);
+    expect(() => saveMcpServerConfig({ homeDir: home, scope: "project", config: { id: "bad", name: "Bad", enabled: true, transport: { type: "stdio", command: "node", args: [] } } })).toThrow(/project root/i);
   });
 
   it("preserves an existing direct API key when the edit form leaves it blank", () => {
@@ -66,5 +104,23 @@ describe("MCP global configuration store", () => {
     expect(loadMcpConsent({ homeDir })).toEqual({ "local-tools": 3 });
     removeMcpConsent({ homeDir, serverId: "local-tools" });
     expect(loadMcpConsent({ homeDir })).toEqual({});
+  });
+
+  it("isolates project consent keys by canonical project root", () => {
+    const root = tempRoot("loom-mcp-project-consent");
+    const homeDir = join(root, "home");
+    saveMcpConsent({ homeDir, scope: "project", projectRoot: join(root, "project-a"), serverId: "local-tools", configRevision: 3 });
+    const saved = loadMcpConsent({ homeDir });
+    expect(Object.keys(saved)).toHaveLength(1);
+    expect(Object.keys(saved)[0]).toMatch(/^project:[a-f0-9]{32}:local-tools$/);
+    expect(saved[Object.keys(saved)[0]!]).toBe(3);
+    expect(saved).not.toHaveProperty("local-tools");
+  });
+
+  it("maps legacy global consent records to the global scope key", () => {
+    const root = tempRoot("loom-mcp-consent-migration");
+    const homeDir = join(root, "home");
+    writeJson(join(homeDir, ".loom", "mcp-consent.json"), { version: 1, servers: { "local-tools": 4 } });
+    expect(loadMcpConsent({ homeDir })).toEqual({ "global:local-tools": 4 });
   });
 });

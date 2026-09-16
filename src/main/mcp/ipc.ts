@@ -7,12 +7,14 @@ import type { McpConnectionManager } from "./connection";
 import { createMcpSecretStore } from "./secrets";
 import type { McpServerSafeProjection } from "./types";
 import type { McpToolProvider } from "./provider";
+import { resolvedMcpServerKey, type McpScope } from "./identity";
 
 export interface McpIpcOptions {
   getWin: () => BrowserWindow | null;
   manager: McpConnectionManager;
   provider?: McpToolProvider;
   homeDir: string;
+  resolveProject?: (projectId: string) => { id: string; name: string; sourceRoot: string } | undefined;
 }
 
 function safeCredentialReference(reference: McpSecretReference): { source: "environment" | "secret" | "oauth"; identifier: string } {
@@ -28,9 +30,15 @@ export function safeProjection(server: McpResolvedServer, manager: McpConnection
   const secretStore = createMcpSecretStore();
   const displayTarget = transport.type === "stdio" ? [transport.command, ...transport.args].join(" ").slice(0, 1_024) : transport.url;
   const { transport: _transport, ...config } = server.config;
-  const runtime = manager.status(server.config.id);
-  const catalog = provider?.catalogFor(server.config.id);
+  const serverKey = resolvedMcpServerKey(server);
+  const runtime = manager.status(server.config.id, serverKey);
+  const catalog = provider?.catalogFor(server.config.id, serverKey);
   return {
+    scope: server.scope ?? "global",
+    projectId: server.projectId,
+    projectName: server.projectName,
+    sourcePath: server.sourcePath,
+    overridesGlobal: server.overridesGlobal,
     config: {
       ...config,
       transport: transport.type === "stdio"
@@ -64,66 +72,95 @@ export function safeProjection(server: McpResolvedServer, manager: McpConnection
 export function registerMcpIpc(options: McpIpcOptions): () => void {
   const channels = ["mcp:list", "mcp:get", "mcp:save", "mcp:remove", "mcp:setEnabled", "mcp:consent", "mcp:test", "mcp:reconnect", "mcp:refresh"] as const;
   const removeHandlers = () => channels.forEach((channel) => ipcMain.removeHandler(channel));
-  const load = () => loadMcpConfiguration({ homeDir: options.homeDir });
-  const find = (id: string) => load().servers.find((server) => server.config.id === id);
+  const projectFor = (projectId: unknown) => typeof projectId === "string" && projectId.trim() ? options.resolveProject?.(projectId) : undefined;
+  const requireProject = (projectId: unknown) => {
+    const project = projectFor(projectId);
+    if (!project) throw new Error("Project MCP configuration requires a registered active Project.");
+    return project;
+  };
+  const load = (projectId?: string) => {
+    const project = projectId ? requireProject(projectId) : undefined;
+    return loadMcpConfiguration({ homeDir: options.homeDir, projectRoot: project?.sourceRoot, projectId: project?.id, projectName: project?.name });
+  };
+  const find = (id: string, scope: McpScope = "global", projectId?: string) => {
+    if (scope === "project") {
+      const project = requireProject(projectId);
+      return load(project.id).servers.find((server) => server.config.id === id && server.scope === "project");
+    }
+    return load().servers.find((server) => server.config.id === id && (server.scope ?? "global") === "global");
+  };
 
-  ipcMain.handle("mcp:list", (event) => {
+  ipcMain.handle("mcp:list", (event, arg: { projectId?: unknown } = {}) => {
     assertRendererSender(event, options.getWin());
-    const loaded = load();
-    return { servers: loaded.servers.map((server) => safeProjection(server, options.manager, options.provider)), diagnostics: loaded.diagnostics, revision: Math.max(...loaded.servers.map((server) => server.config.revision), 0) };
+    const project = arg.projectId ? requireProject(arg.projectId) : undefined;
+    const loaded = load(project?.id);
+    return { servers: loaded.servers.map((server) => safeProjection(server, options.manager, options.provider)), diagnostics: loaded.diagnostics, revision: Math.max(...loaded.servers.map((server) => server.config.revision), 0), projectId: project?.id };
   });
-  ipcMain.handle("mcp:get", (event, arg: { id: string }) => {
+  ipcMain.handle("mcp:get", (event, arg: { id: string; scope?: McpScope; projectId?: string }) => {
     assertRendererSender(event, options.getWin());
     if (!/^[a-z][a-z0-9-]{0,63}$/.test(arg?.id ?? "")) throw new Error("Invalid MCP server id.");
-    const server = find(arg.id);
+    const server = find(arg.id, arg.scope, arg.projectId);
     return server ? safeProjection(server, options.manager, options.provider) : undefined;
   });
-  ipcMain.handle("mcp:save", (event, arg: { config: unknown; preserveSensitiveHeaders?: unknown; clearSensitiveHeaders?: unknown; preserveEnvironmentNames?: unknown }) => {
+  ipcMain.handle("mcp:save", (event, arg: { config: unknown; scope?: McpScope; projectId?: string; preserveSensitiveHeaders?: unknown; clearSensitiveHeaders?: unknown; preserveEnvironmentNames?: unknown }) => {
     assertRendererSender(event, options.getWin());
     const normalized = normalizeMcpServerConfig(arg?.config);
     if (!normalized.config) return { ok: false, issues: normalized.issues };
     const headerNames = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && /^[A-Za-z0-9-]{1,128}$/.test(item)) : [];
     const environmentNames = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && /^[A-Z_][A-Z0-9_]*$/.test(item.toUpperCase())).map((item) => item.toUpperCase()) : [];
-    try { return { ok: true, config: saveMcpServerConfig({ homeDir: options.homeDir, config: normalized.config, preserveSensitiveHeaders: headerNames(arg?.preserveSensitiveHeaders), clearSensitiveHeaders: headerNames(arg?.clearSensitiveHeaders), preserveEnvironmentNames: environmentNames(arg?.preserveEnvironmentNames) }) }; }
+    try {
+      const scope = arg.scope ?? "global";
+      const project = scope === "project" ? requireProject(arg.projectId) : undefined;
+      return { ok: true, config: saveMcpServerConfig({ homeDir: options.homeDir, scope, projectRoot: project?.sourceRoot, config: normalized.config, preserveSensitiveHeaders: headerNames(arg?.preserveSensitiveHeaders), clearSensitiveHeaders: headerNames(arg?.clearSensitiveHeaders), preserveEnvironmentNames: environmentNames(arg?.preserveEnvironmentNames) }) };
+    }
     catch (error) { return { ok: false, issues: [{ code: "persistence", path: "", message: error instanceof Error ? error.message : String(error) }] }; }
   });
-  ipcMain.handle("mcp:remove", async (event, arg: { id: string }) => {
+  ipcMain.handle("mcp:remove", async (event, arg: { id: string; scope?: McpScope; projectId?: string }) => {
     assertRendererSender(event, options.getWin());
     if (!/^[a-z][a-z0-9-]{0,63}$/.test(arg?.id ?? "")) throw new Error("Invalid MCP registration request.");
-    await options.manager.close(arg.id);
-    removeMcpServerConfig({ homeDir: options.homeDir, id: arg.id });
-    removeMcpConsent({ homeDir: options.homeDir, serverId: arg.id });
+    const scope = arg.scope ?? "global";
+    const source = find(arg.id, scope, arg.projectId);
+    if (!source) throw new Error("MCP server registration not found.");
+    const project = scope === "project" ? requireProject(arg.projectId) : undefined;
+    const key = resolvedMcpServerKey(source);
+    await options.manager.close(arg.id, key);
+    removeMcpServerConfig({ homeDir: options.homeDir, scope, projectRoot: project?.sourceRoot, id: arg.id });
+    removeMcpConsent({ homeDir: options.homeDir, serverId: arg.id, serverKey: key });
     return { ok: true };
   });
-  ipcMain.handle("mcp:setEnabled", async (event, arg: { id: string; enabled: boolean }) => {
+  ipcMain.handle("mcp:setEnabled", async (event, arg: { id: string; enabled: boolean; scope?: McpScope; projectId?: string }) => {
     assertRendererSender(event, options.getWin());
     if (!/^[a-z][a-z0-9-]{0,63}$/.test(arg?.id ?? "") || typeof arg?.enabled !== "boolean") throw new Error("Invalid MCP enablement request.");
-    const source = find(arg.id);
+    const scope = arg.scope ?? "global";
+    const source = find(arg.id, scope, arg.projectId);
     if (!source) throw new Error("MCP server registration not found.");
-    const saved = saveMcpServerConfig({ homeDir: options.homeDir, config: { ...source.config, enabled: arg.enabled } });
-    if (!arg.enabled) await options.manager.close(arg.id);
+    const project = scope === "project" ? requireProject(arg.projectId) : undefined;
+    const saved = saveMcpServerConfig({ homeDir: options.homeDir, scope, projectRoot: project?.sourceRoot, config: { ...source.config, enabled: arg.enabled } });
+    if (!arg.enabled) await options.manager.close(arg.id, resolvedMcpServerKey(source));
     return { ok: true, config: saved };
   });
 
-  async function connectAction(event: Electron.IpcMainInvokeEvent, arg: { id: string; consented?: boolean }) {
+  async function connectAction(event: Electron.IpcMainInvokeEvent, arg: { id: string; consented?: boolean; scope?: McpScope; projectId?: string }) {
     assertRendererSender(event, options.getWin());
     if (!/^[a-z][a-z0-9-]{0,63}$/.test(arg?.id ?? "") || (arg.consented !== undefined && typeof arg.consented !== "boolean")) throw new Error("Invalid MCP connection request.");
-    const source = find(arg.id);
+    const source = find(arg.id, arg.scope, arg.projectId);
     if (!source) throw new Error("MCP server registration not found.");
-    if (arg.consented && source.config.transport.type === "stdio") options.manager.approveConsent(source.config.id, source.config.revision);
-    const handle = await options.manager.connect(source.config, { force: true });
+    const key = resolvedMcpServerKey(source);
+    if (arg.consented && source.config.transport.type === "stdio") options.manager.approveConsent(source.config.id, source.config.revision, key);
+    const handle = await options.manager.connect(source.config, { force: true, serverKey: key, scope: source.scope, projectId: source.projectId, sourcePath: source.sourcePath });
     const catalog = handle && options.provider ? await options.provider.refresh(source) : undefined;
-    return { ok: Boolean(handle), status: options.manager.status(source.config.id), catalog: catalog ? { revision: catalog.revision, toolCount: catalog.tools.length } : undefined };
+    return { ok: Boolean(handle), status: options.manager.status(source.config.id, key), catalog: catalog ? { revision: catalog.revision, toolCount: catalog.tools.length } : undefined };
   }
-  ipcMain.handle("mcp:consent", async (event, arg: { id: string; revision: number }) => {
+  ipcMain.handle("mcp:consent", async (event, arg: { id: string; revision: number; scope?: McpScope; projectId?: string }) => {
     assertRendererSender(event, options.getWin());
     if (!Number.isInteger(arg?.revision) || (arg?.revision ?? -1) < 0) throw new Error("Invalid MCP consent request.");
-    const source = find(arg.id);
+    const source = find(arg.id, arg.scope, arg.projectId);
     if (!source || source.config.revision !== arg.revision) throw new Error("MCP configuration changed; review consent again.");
-    options.manager.approveConsent(source.config.id, source.config.revision);
-    const handle = await options.manager.connect(source.config, { force: true });
+    const key = resolvedMcpServerKey(source);
+    options.manager.approveConsent(source.config.id, source.config.revision, key);
+    const handle = await options.manager.connect(source.config, { force: true, serverKey: key, scope: source.scope, projectId: source.projectId, sourcePath: source.sourcePath });
     const catalog = handle && options.provider ? await options.provider.refresh(source) : undefined;
-    return { ok: Boolean(handle), status: options.manager.status(source.config.id), catalog: catalog ? { revision: catalog.revision, toolCount: catalog.tools.length } : undefined };
+    return { ok: Boolean(handle), status: options.manager.status(source.config.id, key), catalog: catalog ? { revision: catalog.revision, toolCount: catalog.tools.length } : undefined };
   });
   ipcMain.handle("mcp:test", connectAction);
   ipcMain.handle("mcp:reconnect", connectAction);

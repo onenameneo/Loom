@@ -1,10 +1,12 @@
-import type { McpConfigInput, McpSafeServerDto } from "../../../common/mcp";
+import type { McpConfigInput, McpSafeServerDto, McpScope } from "../../../common/mcp";
 
 export type McpKeyValueRow = { key: string; value: string };
 export type McpFormState = {
   /** Internal identity; it is intentionally not rendered as a user-editable field. */
   id: string;
   name: string;
+  scope: McpScope;
+  projectId?: string;
   transport: "stdio" | "streamable-http";
   command: string;
   args: string[];
@@ -28,6 +30,8 @@ export function emptyMcpForm(): McpFormState {
   return {
     id: "",
     name: "",
+    scope: "global",
+    projectId: undefined,
     transport: "stdio",
     command: "",
     args: [""],
@@ -63,6 +67,8 @@ export function formFromMcpServer(server: McpSafeServerDto): McpFormState {
       ...form,
       id: server.config.id,
       name: server.config.name,
+      scope: server.scope,
+      projectId: server.projectId,
       transport: "stdio",
       command: transport.command ?? "",
       args: transport.args?.length ? [...transport.args] : [""],
@@ -84,6 +90,8 @@ export function formFromMcpServer(server: McpSafeServerDto): McpFormState {
     ...form,
     id: server.config.id,
     name: server.config.name,
+    scope: server.scope,
+    projectId: server.projectId,
     transport: "streamable-http",
     url: transport.url ?? "",
     bearerTokenEnv: bearer?.identifier ?? "",

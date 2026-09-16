@@ -3,7 +3,7 @@ import type { FileMentionRef } from "../common/fileMentions";
 import type { ComposerBudgetPreviewInput } from "../common/composerBudget";
 import type { SelectionContextNote } from "../common/selectionContext";
 import type { AgentMetricTotals } from "../common/telemetry";
-import type { McpConfigInput, McpSafeServerDto, McpSettingsSnapshot, McpSaveRequest } from "../common/mcp";
+import type { McpConfigInput, McpSafeServerDto, McpSettingsSnapshot, McpSaveRequest, McpScopeContext } from "../common/mcp";
 import type { LiveTurnEvent, LiveTurnSnapshot } from "../common/liveTurns";
 import type { FileArtifactActionRequest, FileArtifactActionResult } from "../common/fileArtifacts";
 import {
@@ -239,15 +239,15 @@ const api = {
     openSkillSource: (path: string): Promise<any> => ipcRenderer.invoke("settings:openSkillSource", path),
   },
   mcp: {
-    list: (): Promise<McpSettingsSnapshot> => ipcRenderer.invoke("mcp:list"),
-    get: (id: string): Promise<McpSafeServerDto | undefined> => ipcRenderer.invoke("mcp:get", { id }),
+    list: (projectId?: string): Promise<McpSettingsSnapshot> => ipcRenderer.invoke("mcp:list", { projectId }),
+    get: (id: string, context?: McpScopeContext): Promise<McpSafeServerDto | undefined> => ipcRenderer.invoke("mcp:get", { id, ...context }),
     save: (config: McpConfigInput, options?: Omit<McpSaveRequest, "config">): Promise<{ ok: boolean; config?: McpConfigInput; issues?: Array<{ code: string; path: string; message: string }> }> => ipcRenderer.invoke("mcp:save", { config, ...options }),
-    remove: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke("mcp:remove", { id }),
-    setEnabled: (id: string, enabled: boolean): Promise<{ ok: boolean; config?: McpConfigInput }> => ipcRenderer.invoke("mcp:setEnabled", { id, enabled }),
-    consent: (id: string, revision: number): Promise<{ ok: boolean; status: unknown }> => ipcRenderer.invoke("mcp:consent", { id, revision }),
-    test: (id: string, consented?: boolean): Promise<{ ok: boolean; status: unknown; catalog?: { revision: number; toolCount: number } }> => ipcRenderer.invoke("mcp:test", { id, consented }),
-    reconnect: (id: string, consented?: boolean): Promise<{ ok: boolean; status: unknown; catalog?: { revision: number; toolCount: number } }> => ipcRenderer.invoke("mcp:reconnect", { id, consented }),
-    refresh: (id: string, consented?: boolean): Promise<{ ok: boolean; status: unknown; catalog?: { revision: number; toolCount: number } }> => ipcRenderer.invoke("mcp:refresh", { id, consented }),
+    remove: (id: string, context?: McpScopeContext): Promise<{ ok: boolean }> => ipcRenderer.invoke("mcp:remove", { id, ...context }),
+    setEnabled: (id: string, enabled: boolean, context?: McpScopeContext): Promise<{ ok: boolean; config?: McpConfigInput }> => ipcRenderer.invoke("mcp:setEnabled", { id, enabled, ...context }),
+    consent: (id: string, revision: number, context?: McpScopeContext): Promise<{ ok: boolean; status: unknown }> => ipcRenderer.invoke("mcp:consent", { id, revision, ...context }),
+    test: (id: string, consented?: boolean, context?: McpScopeContext): Promise<{ ok: boolean; status: unknown; catalog?: { revision: number; toolCount: number } }> => ipcRenderer.invoke("mcp:test", { id, consented, ...context }),
+    reconnect: (id: string, consented?: boolean, context?: McpScopeContext): Promise<{ ok: boolean; status: unknown; catalog?: { revision: number; toolCount: number } }> => ipcRenderer.invoke("mcp:reconnect", { id, consented, ...context }),
+    refresh: (id: string, consented?: boolean, context?: McpScopeContext): Promise<{ ok: boolean; status: unknown; catalog?: { revision: number; toolCount: number } }> => ipcRenderer.invoke("mcp:refresh", { id, consented, ...context }),
     onStatus: (listener: (status: unknown) => void): (() => void) => {
       const handler = (_event: Electron.IpcRendererEvent, status: unknown) => listener(status);
       ipcRenderer.on("mcp:status", handler);
