@@ -155,6 +155,49 @@ describe("ChatView turn and approval controls", () => {
     await waitFor(() => expect(screen.getAllByText("background tail")).toHaveLength(1));
   });
 
+  it("keeps an API error visible when the same node transcript refreshes", async () => {
+    const props = {
+      nodeId: "n1",
+      hasFrozenContext: false,
+      onBranch: vi.fn(),
+      onExpandCanvas: vi.fn(),
+      noKey: false,
+      goSettings: vi.fn(),
+    };
+    const view = render(<ChatView {...props} initialMessages={[]} />);
+    await waitFor(() => expect(eventHandler).toBeTruthy());
+
+    act(() => {
+      eventHandler?.({ nodeId: "n1", type: "error", payload: "API request failed" });
+    });
+    expect(screen.getByText("API request failed")).toBeTruthy();
+
+    view.rerender(<ChatView {...props} initialMessages={[{ role: "user", text: "Question", seq: 0 }]} />);
+
+    expect(screen.getByText("Question")).toBeTruthy();
+    expect(screen.getByText("API request failed")).toBeTruthy();
+  });
+
+  it("does not carry an API error into another node", async () => {
+    const props = {
+      initialMessages: [],
+      hasFrozenContext: false,
+      onBranch: vi.fn(),
+      onExpandCanvas: vi.fn(),
+      noKey: false,
+      goSettings: vi.fn(),
+    };
+    const view = render(<ChatView nodeId="n1" {...props} />);
+    await waitFor(() => expect(eventHandler).toBeTruthy());
+
+    act(() => {
+      eventHandler?.({ nodeId: "n1", type: "error", payload: "API request failed" });
+    });
+    view.rerender(<ChatView nodeId="n2" {...props} />);
+
+    expect(screen.queryByText("API request failed")).toBeNull();
+  });
+
   it("keeps parent context included and offers selected text notes", async () => {
     const onBranch = vi.fn();
     render(

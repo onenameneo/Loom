@@ -1295,9 +1295,16 @@ export function createCanvasRuntime(deps: CanvasRuntimeDeps) {
         frozenContext,
       }),
     );
-    if (arg.includeParentContext && parent?.systemPrompt) {
-      node.systemPrompt = parent.systemPrompt;
-      store.updateNode(node.id, { systemPrompt: parent.systemPrompt });
+    if (parent) {
+      const inherited = {
+        model: parent.model,
+        thinkingLevel: parent.thinkingLevel,
+        ...(arg.includeParentContext && parent.systemPrompt ? { systemPrompt: parent.systemPrompt } : {}),
+      };
+      node.model = inherited.model;
+      node.thinkingLevel = inherited.thinkingLevel;
+      if (inherited.systemPrompt) node.systemPrompt = inherited.systemPrompt;
+      store.updateNode(node.id, inherited);
     }
     ensureRecord(node.id, node);
     return dto(node);

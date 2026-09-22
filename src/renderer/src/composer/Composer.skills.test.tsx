@@ -256,6 +256,45 @@ describe("Composer thinking level control", () => {
     expect(screen.getByRole("menu")).toBeTruthy();
   });
 
+  it("keeps model-list wheel input inside the canvas node", async () => {
+    (window as any).api = {
+      canvas: {
+        models: vi.fn(async () => [
+          {
+            id: "openai/gpt-5.5",
+            name: "GPT 5.5",
+            providerId: "openai",
+            modelId: "gpt-5.5",
+            capabilities: { reasoning: true, thinkingLevels: ["off", "low"] },
+          },
+        ]),
+      },
+    };
+
+    render(
+      <Composer
+        nodeId="node-1"
+        value=""
+        onChange={vi.fn()}
+        busy={false}
+        placeholder="Ask"
+        canRegenerate={false}
+        model="openai/gpt-5.5"
+        onSubmit={vi.fn()}
+        onStop={vi.fn()}
+        onOpenPersona={vi.fn()}
+        onClearNode={vi.fn()}
+        onRegenerate={vi.fn()}
+        onSetModel={vi.fn()}
+        onCompact={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /openai\/gpt-5.5 · low/ }));
+
+    expect(screen.getByRole("group", { name: "Models" }).classList.contains("nowheel")).toBe(true);
+  });
+
   it("keeps thinking disabled for a model without reasoning support", async () => {
     (window as any).api = {
       canvas: {

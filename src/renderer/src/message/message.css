@@ -539,7 +539,6 @@
 }
 .m__retry {
   margin-top: 6px;
-  color: var(--err);
 }
 .m__images {
   display: flex;

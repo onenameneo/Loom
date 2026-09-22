@@ -14,7 +14,7 @@ import type { MessageBranchMode } from "../ui/dialogs";
 import { BranchContext } from "./branch";
 import { ToolCallTimeline } from "./ToolCallTimeline";
 import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
-import { appendLiveTurnMessage, hasLiveTurnOutput } from "./liveTurnMessages";
+import { appendLiveTurnMessage, hasLiveTurnOutput, restoreMessagesPreservingErrors } from "./liveTurnMessages";
 import { useComposerHeightVar } from "./useComposerHeightVar";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { type NodeUpdate } from "./nodeUpdates";
@@ -168,7 +168,8 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   }, [data.resizeControlEpoch]);
 
   useEffect(() => {
-    setMsgs(toMsgs(data.messages ?? []));
+    const restored = toMsgs(data.messages ?? []);
+    setMsgs((current) => restoreMessagesPreservingErrors(current, restored));
   }, [data.messages, toMsgs]);
 
   useEffect(() => {
@@ -206,9 +207,10 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     if (next) {
       const restored: Msg[] = toMsgs(next.messages);
       const live = useWorkspaceStore.getState().turnsByNodeId[id];
-      setMsgs(live
-        ? appendLiveTurnMessage(restored, live, (text, thinking) => ({ id: idRef.current++, role: "assistant", text, thinking }))
-        : restored);
+      const refreshed = live
+        ? appendLiveTurnMessage(restored, live, (text, thinking) => ({ id: idRef.current++, role: "assistant" as const, text, thinking }))
+        : restored;
+      setMsgs((current) => restoreMessagesPreservingErrors(current, refreshed));
       setTitle(next.title);
       setPersona(next.systemPrompt ?? "");
       setNodeModel(formatModelSelection(next.model));

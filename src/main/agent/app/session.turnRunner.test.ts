@@ -890,6 +890,27 @@ describe("createAgentSession turn runner integration", () => {
     expect(getNodeInit!(child.id)?.systemPrompt).toContain("File tool path contract");
   });
 
+  it("inherits the parent's selected model and thinking level for a child node", () => {
+    const store = new MemoryStore();
+    const parent = store.nodes.get("n1")!;
+    parent.model = { providerId: "openai-codex", modelId: "gpt-5.6-sol" };
+    parent.thinkingLevel = "high";
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: () => createEngine(createHandle([], vi.fn())),
+    });
+
+    const child = session.create({ sessionId: "sess", parentId: "n1", title: "child" });
+
+    expect(child.model).toEqual(parent.model);
+    expect(child.thinkingLevel).toBe("high");
+    expect(store.getNode(child.id)).toMatchObject({ model: parent.model, thinkingLevel: "high" });
+  });
+
   it("does not let later parent checkpoints change an existing mounted child", async () => {
     const store = new MemoryStore([user("parent question"), assistant("parent answer")]);
     let buildContext: ((nodeId: string, own: AgentMessage[]) => any) | undefined;

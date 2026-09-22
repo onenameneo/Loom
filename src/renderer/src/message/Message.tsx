@@ -489,7 +489,10 @@ export const Message = memo(function Message({
         </div>
       )}
       {role === "error" && onRetry && (
-        <button className="m__retry nodrag" onClick={onRetry}>{t("message.retry")}</button>
+        <button className={buttonClassName("default", "m__retry nodrag")} type="button" onClick={onRetry}>
+          <RefreshCcw aria-hidden="true" />
+          {t("message.retry")}
+        </button>
       )}
       {role !== "user" && branchOpen && typeof sourceSeq === "number" && onBranch && (
         <MessageBranchDialog

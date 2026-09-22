@@ -648,7 +648,7 @@ export function Composer({
                   }
                 }}
               >
-                <div className="model-switcher-list" role="group" aria-label="Models">
+                <div className="model-switcher-list nowheel" role="group" aria-label="Models">
                   {modelOptions.length === 0 && <div className="cmd-empty">{t("composer.noModels")}</div>}
                   {modelOptions.map((item, index) => (
                     <button

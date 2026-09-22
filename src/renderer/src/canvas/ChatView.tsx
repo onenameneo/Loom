@@ -13,7 +13,7 @@ import { SelectionNoteCapture, addSelectionContextNote } from "../composer/Selec
 import { useTitlebarActions } from "../titlebar/Titlebar";
 import { ToolCallTimeline } from "./ToolCallTimeline";
 import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
-import { appendLiveTurnMessage, hasLiveTurnOutput } from "./liveTurnMessages";
+import { appendLiveTurnMessage, hasLiveTurnOutput, restoreMessagesPreservingErrors } from "./liveTurnMessages";
 import { useComposerHeightVar } from "./useComposerHeightVar";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { selectNodeApproval, selectNodeLiveTurn, selectNodeTodoPlan, useWorkspaceStore } from "../workspace/store";
@@ -181,15 +181,16 @@ export default function ChatView({
   );
   useTitlebarActions(titlebarActions);
 
-  const reloadFromInitial = useCallback((items: NodeMsg[], targetNodeId: string) => {
+  const reloadFromInitial = useCallback((items: NodeMsg[], targetNodeId: string, preserveLocalErrors = true) => {
     const restored: Msg[] = items.map((m) => ({ id: idRef.current++, role: m.role as Role, text: m.text, thinking: m.thinking, images: m.images, fileMentions: m.fileMentions, selectionNotes: m.selectionNotes, artifacts: m.artifacts, seq: m.seq, usage: m.usage, meta: m.meta, checkpoint: m.checkpoint, toolCall: m.toolCall, skillEvent: m.skillEvent }));
     // A tree refresh can race an in-flight Node. Merge the authoritative live
     // snapshot into the refreshed transcript instead of briefly replacing it
     // with an older persisted copy.
     const live = useWorkspaceStore.getState().turnsByNodeId[targetNodeId];
-    setMsgs(live
-      ? appendLiveTurnMessage(restored, live, (text, thinking) => ({ id: idRef.current++, role: "assistant", text, thinking }))
-      : restored);
+    const refreshed = live
+      ? appendLiveTurnMessage(restored, live, (text, thinking) => ({ id: idRef.current++, role: "assistant" as const, text, thinking }))
+      : restored;
+    setMsgs((current) => preserveLocalErrors ? restoreMessagesPreservingErrors(current, refreshed) : refreshed);
   }, []);
 
   const upsertToolMessage = useCallback((payload: Parameters<typeof upsertToolTimelineMessage<Msg>>[1]) => {
@@ -205,7 +206,7 @@ export default function ChatView({
     const previous = initialMessagesRef.current;
     if (previous.nodeId === nodeId && previous.messages === initialMessages) return;
     initialMessagesRef.current = { nodeId, messages: initialMessages };
-    reloadFromInitial(initialMessages ?? [], nodeId);
+    reloadFromInitial(initialMessages ?? [], nodeId, previous.nodeId === nodeId);
   }, [initialMessages, nodeId, reloadFromInitial]);
 
   // The App-owned bridge is the only live-turn IPC consumer. A returning view

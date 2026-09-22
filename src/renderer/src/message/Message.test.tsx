@@ -81,6 +81,23 @@ describe("Message thinking", () => {
   });
 });
 
+describe("Message error", () => {
+  it("uses the shared Loom button style for retry", () => {
+    const onRetry = vi.fn();
+    render(<Message role="error" text="API request failed" onRetry={onRetry} />);
+
+    const retry = screen.getByRole("button", { name: "重试" });
+    expect(retry.className).toContain("rounded-loom-md");
+    expect(retry.className).toContain("border-loom-border-strong");
+    expect(retry.className).toContain("bg-loom-surface");
+    expect(retry.className).toContain("text-loom-text");
+    expect(retry.querySelector("svg")).toBeTruthy();
+
+    fireEvent.click(retry);
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+});
+
 describe("Message checkpoint timeline item", () => {
   it("renders checkpoint metadata as a default-collapsed timeline item", () => {
     const { container } = render(

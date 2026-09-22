@@ -15,6 +15,35 @@ export interface LiveTurnMessageLike {
   contentParts?: LiveTurnContentPart[];
 }
 
+/**
+ * Persisted node snapshots intentionally contain only model transcript roles.
+ * Keep renderer-owned error cards when such a snapshot refreshes the same node.
+ */
+export function restoreMessagesPreservingErrors<T extends { role: string }>(current: T[], restored: T[]): T[] {
+  const errorsByAnchor = new Map<number, T[]>();
+  let persistedCount = 0;
+  for (const message of current) {
+    if (message.role === "error") {
+      const errors = errorsByAnchor.get(persistedCount) ?? [];
+      errors.push(message);
+      errorsByAnchor.set(persistedCount, errors);
+    } else {
+      persistedCount += 1;
+    }
+  }
+  if (errorsByAnchor.size === 0) return restored;
+
+  const next: T[] = [];
+  for (let index = 0; index <= restored.length; index += 1) {
+    next.push(...(errorsByAnchor.get(Math.min(index, restored.length)) ?? []));
+    if (index < restored.length) next.push(restored[index]);
+  }
+  for (const [anchor, errors] of errorsByAnchor) {
+    if (anchor > restored.length) next.push(...errors);
+  }
+  return next;
+}
+
 function cumulativeSuffix(next: string, rendered: string): string {
   if (!next) return "";
   // A live snapshot is cumulative. If it does not extend what is already

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LiveTurnContentPart, LiveTurnSnapshot } from "../env";
-import { appendLiveTurnMessage, hasLiveTurnOutput } from "./liveTurnMessages";
+import { appendLiveTurnMessage, hasLiveTurnOutput, restoreMessagesPreservingErrors } from "./liveTurnMessages";
 
 type TestMessage = { role: string; text: string; thinking?: string; id: number };
 
@@ -86,5 +86,37 @@ describe("hasLiveTurnOutput", () => {
   it("keeps the agent loading state visible until the live turn has output", () => {
     expect(hasLiveTurnOutput(snapshot(""))).toBe(false);
     expect(hasLiveTurnOutput(snapshot("answer"))).toBe(true);
+  });
+});
+
+describe("restoreMessagesPreservingErrors", () => {
+  it("keeps local API errors after a persisted transcript refresh", () => {
+    const current: TestMessage[] = [
+      { id: 1, role: "user", text: "Investigate" },
+      { id: 2, role: "error", text: "API request failed" },
+    ];
+    const restored: TestMessage[] = [{ id: 3, role: "user", text: "Investigate" }];
+
+    expect(restoreMessagesPreservingErrors(current, restored)).toEqual([
+      restored[0],
+      current[1],
+    ]);
+  });
+
+  it("keeps an earlier API error beside the turn that failed", () => {
+    const current: TestMessage[] = [
+      { id: 1, role: "user", text: "First question" },
+      { id: 2, role: "error", text: "API request failed" },
+      { id: 3, role: "user", text: "Second question" },
+      { id: 4, role: "assistant", text: "Second answer" },
+    ];
+    const restored = current.filter((message) => message.role !== "error");
+
+    expect(restoreMessagesPreservingErrors(current, restored).map((message) => message.role)).toEqual([
+      "user",
+      "error",
+      "user",
+      "assistant",
+    ]);
   });
 });
