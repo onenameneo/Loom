@@ -1,4 +1,4 @@
-import type { ToolCanvasEventPayload } from "../env";
+import type { LiveTurnContentPart, ToolCanvasEventPayload } from "../env";
 
 export type ToolCallState = "start" | "update" | "end";
 
@@ -52,42 +52,92 @@ export interface ToolTimelineMessage {
   role: string;
   text: string;
   thinking?: string;
+  contentParts?: LiveTurnContentPart[];
   images?: unknown[];
+  artifacts?: unknown[];
+  seq?: number;
   toolCall?: ToolCallView;
 }
 
-export type ToolTimelineRenderItem<T extends ToolTimelineMessage> =
-  | { kind: "tools"; key: string; calls: ToolCallView[] }
+export type TurnTimelineRenderItem<T extends ToolTimelineMessage> =
+  | { kind: "process"; key: string; messages: T[]; current: boolean }
   | { kind: "message"; message: T };
 
-export function groupToolTimelineMessages<T extends ToolTimelineMessage & { id: string | number }>(
+export function groupTurnTimelineMessages<T extends ToolTimelineMessage & { id: string | number }>(
   messages: T[],
-): ToolTimelineRenderItem<T>[] {
-  const items: ToolTimelineRenderItem<T>[] = [];
-  let pending: ToolCallView[] = [];
-  let pendingKey: string | undefined;
+): TurnTimelineRenderItem<T>[] {
+  const items: TurnTimelineRenderItem<T>[] = [];
+  let turn: T[] = [];
+  let turnKey = messages[0]?.id;
 
-  const flushTools = () => {
-    if (pending.length === 0 || !pendingKey) return;
-    items.push({ kind: "tools", key: pendingKey, calls: pending });
-    pending = [];
-    pendingKey = undefined;
+  const flushTurn = (current: boolean) => {
+    let lastTool = -1;
+    turn.forEach((message, index) => {
+      if (message.role === "tool" && message.toolCall) lastTool = index;
+    });
+    const process: Extract<TurnTimelineRenderItem<T>, { kind: "process" }> = {
+      kind: "process", key: `process-${turnKey}`, messages: [], current,
+    };
+    const addProcess = (message: T) => {
+      if (process.messages.length === 0) items.push(process);
+      process.messages.push(message);
+    };
+
+    turn.forEach((message, index) => {
+      if ((message.role === "tool" && message.toolCall) || message.role === "skill") {
+        addProcess(message);
+        return;
+      }
+      if (message.role !== "assistant") {
+        items.push({ kind: "message", message });
+        return;
+      }
+
+      const thinkingParts = message.contentParts?.filter((part) => part.kind === "thinking");
+      const thinking = thinkingParts?.length
+        ? thinkingParts.map((part) => part.text).join("")
+        : message.thinking;
+      const hasOutput = Boolean(message.text.trim() || message.contentParts?.some((part) => part.kind === "text" && part.text.trim()) || message.images?.length || message.artifacts?.length);
+      if (!hasOutput && !thinking?.trim()) return;
+
+      // The transcript has no final-answer flag. Text preceding a later tool
+      // call is progress; text after the last tool stays readable, including questions.
+      if (index < lastTool && !message.images?.length && !message.artifacts?.length) {
+        addProcess(message);
+        return;
+      }
+      if (thinking?.trim()) {
+        addProcess({ ...message, text: "", thinking, contentParts: thinkingParts, images: undefined, artifacts: undefined, seq: hasOutput ? undefined : message.seq });
+      }
+      if (hasOutput) {
+        items.push({ kind: "message", message: thinking?.trim()
+          ? { ...message, thinking: undefined, contentParts: message.contentParts?.filter((part) => part.kind === "text") }
+          : message });
+      }
+    });
+    turn = [];
   };
 
   for (const message of messages) {
-    if (message.role === "assistant" && message.text.trim() === "" && !message.thinking?.trim() && !message.images?.length) {
-      continue;
+    if (message.role === "user") {
+      flushTurn(false);
+      items.push({ kind: "message", message });
+      turnKey = message.id;
+    } else {
+      turn.push(message);
     }
-    if (message.role === "tool" && message.toolCall) {
-      pendingKey ??= `tools-${message.id}`;
-      pending.push(message.toolCall);
-      continue;
-    }
-    flushTools();
-    items.push({ kind: "message", message });
   }
-  flushTools();
+  flushTurn(true);
   return items;
+}
+
+export function toolCallSubject(call: ToolCallView): string | undefined {
+  if (!call.args || typeof call.args !== "object") return undefined;
+  const args = call.args as Record<string, unknown>;
+  for (const key of ["command", "pattern", "query", "path", "url"]) {
+    if (typeof args[key] === "string" && args[key]) return args[key] as string;
+  }
+  return undefined;
 }
 
 export function upsertToolTimelineMessage<T extends ToolTimelineMessage>(

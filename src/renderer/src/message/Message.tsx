@@ -233,6 +233,7 @@ type MessageProps = {
   selectionNotes?: SelectionContextNote[];
   density?: Density;
   streaming?: boolean;
+  showActions?: boolean;
   meta?: string;
   checkpoint?: CheckpointInfo;
   canRegenerate?: boolean;
@@ -257,6 +258,7 @@ function equalMessageProps(previous: MessageProps, next: MessageProps) {
     previous.selectionNotes === next.selectionNotes &&
     previous.density === next.density &&
     previous.streaming === next.streaming &&
+    previous.showActions === next.showActions &&
     previous.meta === next.meta &&
     previous.checkpoint === next.checkpoint &&
     previous.canRegenerate === next.canRegenerate &&
@@ -282,6 +284,7 @@ export const Message = memo(function Message({
   selectionNotes,
   density = "comfortable",
   streaming = false,
+  showActions = true,
   meta,
   checkpoint,
   canRegenerate = false,
@@ -308,7 +311,7 @@ export const Message = memo(function Message({
   // Internal reasoning is a timeline state, not a user-facing answer. Keeping
   // its action bar hidden prevents controls from landing between Thinking and
   // the tool call that follows it.
-  const showActionBar = role !== "assistant" || Boolean(text.trim());
+  const showActionBar = showActions && (role !== "assistant" || Boolean(text.trim()));
 
   async function copy() {
     try {

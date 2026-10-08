@@ -75,6 +75,36 @@ beforeEach(() => {
 });
 
 describe("ChatView turn and approval controls", () => {
+  it("renders one collapsed process for interleaved tools and leaves the final answer readable", () => {
+    const call = { id: "read-1", name: "read", state: "end" as const, isError: false, startedAt: 0, updatedAt: 1, args: { path: "Message.tsx" } };
+    render(
+      <ChatView
+        nodeId="n1"
+        initialMessages={[
+          { role: "user", text: "question", seq: 0 },
+          { role: "assistant", text: "Inspecting the files", seq: 1 },
+          { role: "tool", text: "", toolCall: call, seq: 2 },
+          { role: "assistant", text: "Checking the next component", seq: 3 },
+          { role: "tool", text: "", toolCall: { ...call, id: "read-2" }, seq: 4 },
+          { role: "assistant", text: "The final answer", seq: 5 },
+        ]}
+        hasFrozenContext={false}
+        onBranch={vi.fn()}
+        onExpandCanvas={vi.fn()}
+        noKey={false}
+        goSettings={vi.fn()}
+      />,
+    );
+    const process = screen.getByRole("button", { name: /已完成.*2 次读取/ });
+    expect(document.querySelectorAll(".turn-process")).toHaveLength(1);
+    expect(screen.getByText("The final answer").closest(".process-content")).toBeNull();
+    expect(screen.getByText("Inspecting the files").closest("[aria-hidden='true']")).toBeTruthy();
+    fireEvent.click(process);
+    expect(process.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Checking the next component").closest("[aria-hidden='true']")).toBeNull();
+    expect(document.querySelector(".turn-process .m__bar")).toBeNull();
+  });
+
   it("shows agent loading before the live turn has its first output", async () => {
     useWorkspaceStore.getState().applyLiveTurn({
       type: "upsert",

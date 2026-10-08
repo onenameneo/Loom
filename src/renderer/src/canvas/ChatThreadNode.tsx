@@ -1,4 +1,4 @@
-import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Fragment, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Handle, NodeResizeControl, Position, type ResizeParams } from "@xyflow/react";
 import { Check, ChevronDown, MessageSquareText, Pencil, Trash2 } from "lucide-react";
 import type { ApprovalRequestPayload, LiveTurnContentPart, ModelSelection, NodeMsg, SkillEffectiveDto, ThinkingLevel, TurnCanvasEventPayload } from "../env";
@@ -12,8 +12,8 @@ import { IconArrowUpRight, IconChevronRight, IconSplit } from "../icons";
 import { Message } from "../message/Message";
 import type { MessageBranchMode } from "../ui/dialogs";
 import { BranchContext } from "./branch";
-import { ToolCallTimeline } from "./ToolCallTimeline";
-import { groupToolTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
+import { TurnProcess } from "./TurnProcess";
+import { groupTurnTimelineMessages, isToolCanvasEventPayload, upsertToolTimelineMessage, type ToolCallView } from "./toolTimeline";
 import { appendLiveTurnMessage, hasLiveTurnOutput, restoreMessagesPreservingErrors } from "./liveTurnMessages";
 import { useComposerHeightVar } from "./useComposerHeightVar";
 import { ApprovalPrompt } from "./ApprovalPrompt";
@@ -564,7 +564,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
   }
 
-  const renderItems = useMemo(() => groupToolTimelineMessages(msgs), [msgs]);
+  const renderItems = useMemo(() => groupTurnTimelineMessages(msgs), [msgs]);
 
   const seedText = String(data.seed?.text ?? "");
   const seedPreview = seedText.length > 42 ? `${seedText.slice(0, 42)}…` : seedText;
@@ -603,6 +603,32 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
       });
     }
   }, [autoScroll, isResizing]);
+
+  const renderMessage = (message: Msg, process = false) => (
+    <Message
+      role={message.role}
+      text={message.text}
+      thinking={message.thinking}
+      contentParts={message.contentParts}
+      images={message.images}
+      fileMentions={message.fileMentions}
+      artifacts={message.artifacts}
+      selectionNotes={message.selectionNotes}
+      showActions={!process}
+      density="compact"
+      streaming={!process && message.role === "assistant" && streaming && message.id === msgs[msgs.length - 1]?.id}
+      meta={message.role === "assistant" ? metaFor(message) : undefined}
+      checkpoint={message.checkpoint}
+      canRegenerate={message.role === "assistant" && message.id === msgs[msgs.length - 1]?.id && !isBusy}
+      canEdit={message.role === "user" && !isBusy}
+      sourceSeq={message.seq}
+      messageSeq={message.seq}
+      onBranch={handleMessageBranch}
+      onRegenerate={regenerate}
+      onEditResendWithSeq={editResend}
+      onRetry={message.role === "error" ? regenerate : undefined}
+    />
+  );
 
   return (
     <div className={`card ${data.fresh ? "card--fresh" : ""}`} ref={cardRef}>
@@ -804,37 +830,20 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
             <div className="empty">{data.seed ? t("node.seedPrompt") : t("node.startThinking")}</div>
           )}
 
-          {renderItems.map((item) => (
-            item.kind === "tools" ? (
-              <ToolCallTimeline key={item.key} calls={item.calls} density="compact" onOpenChild={data.onOpenChild} />
-            ) : (
-              <Message
-                key={item.message.id}
-                role={item.message.role}
-                text={item.message.text}
-                thinking={item.message.thinking}
-                contentParts={item.message.contentParts}
-                images={item.message.images}
-                fileMentions={item.message.fileMentions}
-                artifacts={item.message.artifacts}
-                selectionNotes={item.message.selectionNotes}
-                density="compact"
-                streaming={item.message.role === "assistant" && streaming && item.message.id === msgs[msgs.length - 1]?.id}
-                meta={item.message.role === "assistant" ? metaFor(item.message) : undefined}
-                checkpoint={item.message.checkpoint}
-                canRegenerate={item.message.role === "assistant" && item.message.id === msgs[msgs.length - 1]?.id && !isBusy}
-                canEdit={item.message.role === "user" && !isBusy}
-                sourceSeq={item.message.seq}
-                messageSeq={item.message.seq}
-                onBranch={handleMessageBranch}
-                onRegenerate={regenerate}
-                onEditResendWithSeq={editResend}
-                onRetry={item.message.role === "error" ? regenerate : undefined}
-              />
-            )
-          ))}
+          {renderItems.map((item) => item.kind === "process" ? (
+            <TurnProcess
+              key={item.key}
+              messages={item.messages}
+              running={item.current && isBusy}
+              awaitingApproval={item.current && Boolean(approval)}
+              outcome={item.current ? turn?.state : undefined}
+              density="compact"
+              renderMessage={(message) => renderMessage(message, true)}
+              onOpenChild={data.onOpenChild}
+            />
+          ) : <Fragment key={item.message.id}>{renderMessage(item.message)}</Fragment>)}
 
-          {agentLoading && <div className="thinking" role="status" aria-live="polite"><span className="dot">·</span> {t("chat.thinking")}</div>}
+          {agentLoading && !renderItems.some((item) => item.kind === "process" && item.current) && <div className="thinking" role="status" aria-live="polite"><span className="dot">·</span> {t("chat.thinking")}</div>}
 
           {tb && (
             <div

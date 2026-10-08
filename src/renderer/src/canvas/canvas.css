@@ -75,40 +75,154 @@
   color: var(--accent);
 }
 
+.turn-process {
+  align-self: stretch;
+  min-width: 0;
+  color: var(--muted);
+}
+.turn-process--comfortable {
+  margin-bottom: -18px;
+}
+.turn-process--compact {
+  margin-bottom: -12px;
+}
+.turn-process__trigger {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  min-height: 28px;
+  padding: var(--s1) 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: 12px var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+.turn-process__trigger:hover {
+  color: var(--text);
+}
+.turn-process__trigger > svg,
+.turn-process__trigger > span:not(.turn-process__activity):not(.turn-process__counts) {
+  flex-shrink: 0;
+}
+.turn-process__counts {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font: 10.5px var(--font-mono);
+}
+.turn-process__activity {
+  flex: 1 1 120px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+}
+.turn-process__error-count {
+  color: var(--err);
+}
+.turn-process__chevron,
+.tool-row__chev {
+  transition: transform 240ms var(--panel-motion-curve);
+}
+.turn-process__trigger[data-state="open"] .turn-process__chevron,
+.tool-row__main[data-state="open"] .tool-row__chev {
+  transform: rotate(90deg);
+}
+/* Radix disables transitions on Content while measuring; animate a child so
+   those measurements cannot cancel the opening or closing transition. */
+.process-content {
+  --process-motion-duration: 240ms;
+}
+.process-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition:
+    grid-template-rows var(--process-motion-duration) var(--panel-motion-curve),
+    visibility 0s var(--process-motion-duration);
+}
+.process-collapse[data-state="open"] {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition-delay: 0s;
+}
+.process-collapse__inner {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    opacity 160ms var(--panel-motion-curve),
+    transform var(--process-motion-duration) var(--panel-motion-curve);
+}
+.process-collapse[data-state="open"] > .process-collapse__inner {
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: 20ms;
+}
+.turn-process__timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  margin: var(--s2) 0 var(--s1) 6px;
+  padding-left: var(--s3);
+  border-left: 1px solid var(--border);
+}
+.turn-process__note .m {
+  --m-fs: 12.5px;
+  color: var(--muted);
+}
+.turn-process__note .m__thinking {
+  background: transparent;
+  border: 0;
+  padding: var(--s1) 0;
+  margin: 0;
+}
+.turn-process__errors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  margin: var(--s1) 0 0 22px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--err);
+}
+.turn-process__errors > div {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+}
+.turn-process__errors svg {
+  flex-shrink: 0;
+}
+.turn-process__errors span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .tool-timeline {
   align-self: stretch;
   display: flex;
   flex-direction: column;
-  gap: 1px;
-}
-.tool-timeline--comfortable {
-  margin: -12px 0 -20px;
-}
-.tool-timeline--compact {
-  margin: -8px 0 -18px;
+  gap: var(--s1);
 }
 .tool-row {
-  border-left: 1px solid var(--border-strong);
+  min-width: 0;
   color: var(--muted);
-}
-.tool-row--running {
-  border-left-color: var(--accent);
-}
-.tool-row--done {
-  border-left-color: var(--ok);
-}
-.tool-row--error {
-  border-left-color: var(--err);
 }
 .tool-row__main {
   width: 100%;
-  min-height: 24px;
+  min-height: 28px;
   display: grid;
-  grid-template-columns: 18px max-content minmax(0, 1fr) max-content 16px;
+  grid-template-columns: 16px max-content minmax(0, 1fr) 14px;
   align-items: center;
-  gap: 6px;
-  padding: 2px 0 2px 9px;
+  gap: var(--s2);
+  padding: var(--s1) 0;
   border: 0;
+  border-radius: var(--r-sm);
   background: transparent;
   color: inherit;
   text-align: left;
@@ -126,68 +240,89 @@
 .tool-row--running .tool-row__state {
   color: var(--accent);
 }
-.tool-row--done .tool-row__state {
-  color: var(--ok);
-}
 .tool-row--error .tool-row__state {
   color: var(--err);
 }
-.tool-row__name,
-.tool-row__id {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  white-space: nowrap;
-}
 .tool-row__name {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--text);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font: 11px var(--font-ui);
+  white-space: nowrap;
 }
 .tool-row__summary {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11.5px;
-}
-.tool-row__id {
-  color: var(--faint);
+  font: 11px var(--font-mono);
 }
 .tool-row__chev {
   color: var(--faint);
-  transition: transform 0.14s cubic-bezier(0.2, 0, 0, 1);
-}
-.tool-row__main[aria-expanded="true"] .tool-row__chev {
-  transform: rotate(180deg);
 }
 .tool-row__details {
-  margin: 1px 0 6px 27px;
-  padding: 6px 8px;
-  max-height: 180px;
+  margin: var(--s1) 0 var(--s2) 24px;
+  padding: var(--s2);
+  max-height: 240px;
   overflow: auto;
   background: var(--code-bg);
   border: 1px solid var(--code-border);
   border-radius: var(--r-sm);
   color: var(--code-text);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  line-height: 1.5;
+  font: 10.5px/1.6 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.tool-row__details pre {
+  margin: var(--s1) 0 var(--s2);
   white-space: pre-wrap;
+  font: inherit;
+}
+.tool-row__details strong,
+.tool-row__meta {
+  font-weight: 400;
+  color: var(--muted);
+}
+.tool-row__meta {
+  margin-bottom: var(--s2);
 }
 .tool-row__open-child {
-  margin: 1px 0 6px 27px;
-  padding: 3px 6px;
+  margin: var(--s1) 0 var(--s2) 24px;
+  padding: var(--s1) var(--s2);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--surface);
   color: var(--accent);
-  font: 500 10.5px var(--font-mono);
+  font: 500 10.5px var(--font-ui);
   cursor: pointer;
 }
 .tool-row__open-child:hover {
   background: var(--surface-2);
   border-color: var(--border-strong);
+}
+.turn-process__trigger:focus-visible,
+.tool-row__main:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+@container (max-width: 380px) {
+  .turn-process__trigger {
+    flex-wrap: wrap;
+    gap: var(--s1) var(--s2);
+  }
+  .turn-process__activity {
+    flex-basis: 100%;
+    padding-left: 22px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .process-collapse,
+  .process-collapse__inner,
+  .turn-process__chevron,
+  .tool-row__chev {
+    transition: none;
+  }
 }
 /* 悬浮输入框共用底座：绝对定位盖在滚动正文之上，透明渐隐区不吃点击，
    只有输入框本体接管交互。ChatView 与画布节点卡片（.card__foot）共用。 */

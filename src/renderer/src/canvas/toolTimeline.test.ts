@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyToolEvent,
   clearToolTimeline,
-  groupToolTimelineMessages,
+  groupTurnTimelineMessages,
+  toolCallSubject,
   isToolCanvasEventPayload,
   upsertToolTimelineMessage,
   type ToolTimelineMessage,
@@ -46,6 +47,13 @@ describe("tool timeline state", () => {
 
   it("clears timeline", () => {
     expect(clearToolTimeline()).toEqual([]);
+  });
+
+  it("shows a search query rather than its directory and tolerates unknown tool argument formats", () => {
+    const call = { id: "call-1", name: "project_grep", state: "end" as const, isError: false, startedAt: 0, updatedAt: 0 };
+    expect(toolCallSubject({ ...call, args: { path: "src", pattern: "Message" } })).toBe("Message");
+    expect(toolCallSubject({ ...call, args: { path: "Message.tsx" } })).toBe("Message.tsx");
+    expect(toolCallSubject({ ...call, args: "opaque" })).toBeUndefined();
   });
 
   it("inserts a tool message in place of an empty assistant placeholder", () => {
@@ -106,9 +114,9 @@ describe("tool timeline state", () => {
       { id: 4, role: "assistant", text: "a" },
     ];
 
-    const grouped = groupToolTimelineMessages(messages);
+    const grouped = groupTurnTimelineMessages(messages);
     expect(grouped).toHaveLength(3);
-    expect(grouped[1]).toMatchObject({ kind: "tools", calls: [{ id: "call-1" }, { id: "call-2" }] });
+    expect(grouped[1]).toMatchObject({ kind: "process", messages: [{ toolCall: { id: "call-1" } }, { toolCall: { id: "call-2" } }] });
   });
 
   it("ignores empty assistant placeholders between tool messages", () => {
@@ -119,19 +127,80 @@ describe("tool timeline state", () => {
       { id: 4, role: "assistant", text: "done" },
     ];
 
-    const grouped = groupToolTimelineMessages(messages);
+    const grouped = groupTurnTimelineMessages(messages);
     expect(grouped).toHaveLength(2);
-    expect(grouped[0]).toMatchObject({ kind: "tools", calls: [{ id: "call-1" }, { id: "call-2" }] });
+    expect(grouped[0]).toMatchObject({ kind: "process", messages: [{ toolCall: { id: "call-1" } }, { toolCall: { id: "call-2" } }] });
     expect(grouped[1]).toMatchObject({ kind: "message", message: { text: "done" } });
   });
 
-  it("groups thinking-only assistant messages as renderable messages", () => {
+  it("keeps thinking-only messages in the process", () => {
     const messages: Array<ToolTimelineMessage & { id: number }> = [
       { id: 1, role: "assistant", text: "", thinking: "Reasoning notes" },
     ];
 
-    expect(groupToolTimelineMessages(messages)).toEqual([
-      { kind: "message", message: messages[0] },
+    expect(groupTurnTimelineMessages(messages)).toEqual([
+      { kind: "process", key: "process-1", current: true, messages: [{ ...messages[0], contentParts: undefined, images: undefined, artifacts: undefined }] },
     ]);
+  });
+
+  it("collects interleaved progress and tools once per user turn", () => {
+    const call = { id: "call-1", name: "read", state: "end" as const, isError: false, startedAt: 0, updatedAt: 0 };
+    const messages = [
+      { id: 1, role: "user", text: "q" },
+      { id: 2, role: "assistant", text: "Checking the files", seq: 2 },
+      { id: 3, role: "tool", text: "", toolCall: call },
+      { id: 4, role: "assistant", text: "Found the relevant component" },
+      { id: 5, role: "skill", text: "Using the design skill" },
+      { id: 6, role: "tool", text: "", toolCall: { ...call, id: "call-2" } },
+      { id: 7, role: "assistant", text: "The final answer" },
+      { id: 8, role: "user", text: "follow-up" },
+      { id: 9, role: "tool", text: "", toolCall: { ...call, id: "call-3" } },
+    ];
+    const grouped = groupTurnTimelineMessages(messages);
+    expect(grouped.map((item) => item.kind)).toEqual(["message", "process", "message", "message", "process"]);
+    expect(grouped[1]).toMatchObject({ key: "process-1", current: false, messages: messages.slice(1, 6) });
+    expect(grouped[2]).toEqual({ kind: "message", message: messages[6] });
+    expect(grouped[4]).toMatchObject({ key: "process-8", current: true });
+    expect(messages[1]).toMatchObject({ text: "Checking the files", seq: 2 });
+  });
+
+  it("keeps errors, checkpoints, images and generated files outside the process", () => {
+    const messages = [
+      { id: 1, role: "assistant", text: "Generated a file", artifacts: [{}] },
+      { id: 2, role: "assistant", text: "Preview", images: [{}] },
+      { id: 3, role: "error", text: "Permission denied" },
+      { id: 4, role: "checkpoint", text: "Summary" },
+      { id: 5, role: "tool", text: "", toolCall: { id: "call-1", name: "read", state: "end" as const, isError: false, startedAt: 0, updatedAt: 0 } },
+      { id: 6, role: "assistant", text: "Which approach should I use?" },
+    ];
+    const grouped = groupTurnTimelineMessages(messages);
+    expect(grouped.filter((item) => item.kind === "message").map((item) => item.message)).toEqual([
+      ...messages.slice(0, 4), messages[5],
+    ]);
+  });
+
+  it("moves structured reasoning into the process without losing answer parts or duplicating message anchors", () => {
+    const messages = [{
+      id: 1, role: "assistant", text: "Answer", seq: 12,
+      contentParts: [
+        { partId: "p1", kind: "thinking" as const, text: "Reasoning", sequence: 1 },
+        { partId: "p2", kind: "text" as const, text: "Answer", sequence: 2 },
+      ],
+    }];
+    const grouped = groupTurnTimelineMessages(messages);
+    expect(grouped[0]).toMatchObject({ kind: "process", messages: [{ text: "", thinking: "Reasoning", seq: undefined, contentParts: [messages[0].contentParts[0]] }] });
+    expect(grouped[1]).toMatchObject({ kind: "message", message: { text: "Answer", thinking: undefined, seq: 12, contentParts: [messages[0].contentParts[1]] } });
+    expect(messages[0].contentParts).toHaveLength(2);
+  });
+
+  it("keeps a stable process key as tools and progress arrive", () => {
+    const messages = [
+      { id: 1, role: "user", text: "q" },
+      { id: 2, role: "assistant", text: "", thinking: "Planning" },
+    ];
+    const before = groupTurnTimelineMessages(messages)[1];
+    const after = groupTurnTimelineMessages(upsertToolTimelineMessage(messages, { state: "start", toolCallId: "call-1", toolName: "read" }, (toolCall) => ({ id: 3, role: "tool", text: "", toolCall })))[1];
+    expect(before).toMatchObject({ kind: "process", key: "process-1" });
+    expect(after).toMatchObject({ kind: "process", key: "process-1" });
   });
 });
