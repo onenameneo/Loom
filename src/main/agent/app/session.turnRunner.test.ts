@@ -9,7 +9,7 @@ import { createAgentSession } from "./session";
 import type { EngineFactory, EngineHandle, EventSinkPort, LlmEnginePort, NodeInit } from "../ports";
 import type { AgentTool } from "../core/tool";
 import { createLoomContextCheckpoint } from "../core/messages";
-import type { BranchSource, NodeBranchPoint, NodeLayout, NodeRecord, PersistedMessage, SessionRecord, Settings, Store, Project } from "../../store/store";
+import type { BranchSource, DelegationMetadata, NodeBranchPoint, NodeLayout, NodeRecord, PersistedMessage, SessionRecord, Settings, Store, Project } from "../../store/store";
 import { DEFAULT_SETTINGS } from "../../store/store";
 import { FileArtifactRegistry } from "../../fileArtifacts";
 
@@ -94,7 +94,7 @@ class MemoryStore implements Store {
   }
   listNodes(sessionId: string) { return [...this.nodes.values()].filter((n) => n.sessionId === sessionId); }
   getNode(id: string) { return this.nodes.get(id); }
-  createNode(input: { sessionId?: string; projectId?: string; parentId?: string; title: string; seed?: unknown; frozenContext?: FrozenNodeContext; branchPoint?: NodeBranchPoint }): NodeRecord {
+  createNode(input: { sessionId?: string; projectId?: string; parentId?: string; title: string; seed?: unknown; frozenContext?: FrozenNodeContext; branchPoint?: NodeBranchPoint; delegation?: DelegationMetadata }): NodeRecord {
     const session = (input.sessionId ? this.getSession(input.sessionId) : this.ensureDefaultSession(input.projectId ?? "ws")) ?? this.sessions[0];
     const node: NodeRecord = {
       id: `n${this.nodes.size + 1}`,
@@ -105,18 +105,20 @@ class MemoryStore implements Store {
       seed: input.seed,
       frozenContext: input.frozenContext,
       branchPoint: input.branchPoint,
+      delegation: input.delegation,
       messages: [],
     };
     this.nodes.set(node.id, node);
     return node;
   }
-  updateNode(id: string, patch: Partial<{ title: string; titleState: "default" | "manual"; systemPrompt: string; model: any; thinkingLevel: any }>) {
+  updateNode(id: string, patch: Partial<{ title: string; titleState: "default" | "manual"; systemPrompt: string; model: any; thinkingLevel: any; delegation: DelegationMetadata }>) {
     const node = this.nodes.get(id);
     if (node && Object.prototype.hasOwnProperty.call(patch, "title")) node.title = patch.title!;
     if (node && Object.prototype.hasOwnProperty.call(patch, "titleState")) node.titleState = patch.titleState;
     if (node && Object.prototype.hasOwnProperty.call(patch, "systemPrompt")) node.systemPrompt = patch.systemPrompt;
     if (node && Object.prototype.hasOwnProperty.call(patch, "model")) node.model = patch.model;
     if (node && Object.prototype.hasOwnProperty.call(patch, "thinkingLevel")) node.thinkingLevel = patch.thinkingLevel;
+    if (node && Object.prototype.hasOwnProperty.call(patch, "delegation")) node.delegation = patch.delegation;
   }
   updateNodeLayout(_id: string, _layout: NodeLayout) { return true; }
   updateNodeLayouts(items: Array<{ id: string; layout: NodeLayout }>) { return items.map((i) => i.id); }
@@ -518,6 +520,90 @@ describe("createAgentSession turn runner integration", () => {
       ]));
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("creates an isolated, persistent research branch and returns only its final report", async () => {
+    const store = new MemoryStore();
+    let getTools: ((nodeId: string) => AgentTool[]) | undefined;
+    let delegatedResult: any;
+    const eventLog = events();
+    const parentMessages: AgentMessage[] = [];
+    const childMessages: AgentMessage[] = [];
+    const childHandle = createHandle(childMessages, async (message) => {
+      childMessages.push(message, assistant("Verified research finding."));
+    });
+    const parentHandle = createHandle(parentMessages, async () => {
+      const task = getTools?.("n1").find((tool) => tool.name === "task");
+      delegatedResult = await task?.execute({
+        toolCallId: "task-1",
+        args: { title: "Inspect branch", prompt: "Inspect the branch implementation." },
+      });
+    });
+    const session = createAgentSession({
+      store,
+      events: eventLog.sink,
+      ids: { message: () => `m-${Math.random()}` },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: (hooks) => {
+        getTools = hooks.getTools;
+        return {
+          configStamp: () => "test",
+          listModels: async () => [],
+          build: async (nodeId: string) => ({ agent: undefined, handle: nodeId === "n1" ? parentHandle : childHandle, configStamp: "test" }),
+        };
+      },
+    });
+
+    await expect(session.send({ nodeId: "n1", text: "delegate this research" })).resolves.toEqual({ ok: true });
+    expect(delegatedResult).toMatchObject({ isError: false, details: { outcome: "success" } });
+    expect(delegatedResult.content[0].text).toBe("Verified research finding.");
+    const childId = delegatedResult.details.childNodeId as string;
+    const child = store.getNode(childId)!;
+    expect(child.delegation).toMatchObject({ source: { nodeId: "n1", toolCallId: "task-1" }, task: { prompt: "Inspect the branch implementation." } });
+    expect(child.messages.map((message) => (message.content as any).role)).toEqual(["user", "assistant"]);
+    expect(getTools?.(childId).map((tool) => tool.name)).toEqual(expect.arrayContaining(["now", "calc"]));
+    expect(getTools?.(childId).map((tool) => tool.name)).not.toEqual(expect.arrayContaining(["task", "write", "edit", "run_command"]));
+    expect(eventLog.items.filter((event) => event.type === "delegation").map((event) => (event.payload as any).state)).toEqual(["queued", "running", "settled"]);
+  });
+
+  it("keeps delegated file tools inside Project roots even when the parent setting has Full Access", async () => {
+    const root = mkdtempSync(join(tmpdir(), "loom-delegated-root-"));
+    const external = mkdtempSync(join(tmpdir(), "loom-delegated-external-"));
+    writeFileSync(join(root, "inside.txt"), "inside", "utf-8");
+    writeFileSync(join(external, "outside.txt"), "outside", "utf-8");
+    const store = new MemoryStore();
+    store.projects[0].sourceRoots = [root];
+    store.settings.permissions.sandboxMode = "danger-full-access";
+    store.settings.permissions.networkAccess = false;
+    store.nodes.get("n1")!.delegation = {
+      source: { nodeId: "parent", turnId: "turn-1", toolCallId: "task-1" },
+      task: { title: "Research", prompt: "Inspect files" },
+      initial: { executionPromptSnapshot: "snapshot", capabilities: ["read"], projectRoots: [root] },
+    };
+    let getTools: ((nodeId: string) => AgentTool[]) | undefined;
+    const session = createAgentSession({
+      store,
+      events: events().sink,
+      ids: { message: () => "id" },
+      clock: { now: () => 1 },
+      getApiKey: () => "key",
+      createEngine: (hooks) => {
+        getTools = hooks.getTools;
+        return createEngine(createHandle([], vi.fn()));
+      },
+    });
+    try {
+      const childTools = getTools?.("n1") ?? [];
+      expect(childTools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["read", "project_list_files"]));
+      expect(childTools.map((tool) => tool.name)).not.toEqual(expect.arrayContaining(["web_fetch", "task", "write", "edit"]));
+      const read = childTools.find((tool) => tool.name === "read")!;
+      await expect(read.execute({ toolCallId: "read-1", args: { path: join(external, "outside.txt") } })).rejects.toThrow("outside this Project");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(external, { recursive: true, force: true });
+      void session;
     }
   });
 
@@ -1398,7 +1484,8 @@ describe("createAgentSession turn runner integration", () => {
     await expect((session as any).compact("n1")).resolves.toMatchObject({ ok: true, node: { id: "n1" } });
     // The projected checkpoint includes the system/tool envelope in addition
     // to the short summary and retained tail.
-    expect((await session.budget("n1")).withoutAncestors).toBeLessThan(1_200);
+    // The normal-node task delegation schema is part of the fixed tool envelope.
+    expect((await session.budget("n1")).withoutAncestors).toBeLessThan(3_200);
   });
 
   it("includes system prompt and skill index in the visible send budget", async () => {

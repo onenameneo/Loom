@@ -12,6 +12,7 @@ import {
   type NodeLayout,
   type NodeRecord,
   type NodeBranchPoint,
+  type DelegationMetadata,
   type PersistedMessage,
   type BranchSource,
   type SessionRecord,
@@ -415,6 +416,7 @@ export class SqliteStore implements Store {
     seed?: unknown;
     frozenContext?: FrozenNodeContext;
     branchPoint?: NodeBranchPoint;
+    delegation?: DelegationMetadata;
   }): NodeRecord {
     const sessionId = input.sessionId ?? (input.projectId ? this.ensureDefaultSession(input.projectId).id : undefined);
     if (!sessionId) throw new Error("Session not found.");
@@ -435,6 +437,7 @@ export class SqliteStore implements Store {
       seed: input.seed,
       frozenContext: input.frozenContext,
       branchPoint: input.branchPoint,
+      delegation: input.delegation,
       messages: [],
     };
     this.db
@@ -456,6 +459,7 @@ export class SqliteStore implements Store {
           ...(node.titleState ? { titleState: node.titleState } : {}),
           ...(node.frozenContext ? { frozenContext: node.frozenContext } : {}),
           ...(node.branchPoint ? { branchPoint: node.branchPoint } : {}),
+          ...(node.delegation ? { delegation: node.delegation } : {}),
         }),
       );
     return node;
@@ -463,7 +467,7 @@ export class SqliteStore implements Store {
 
   updateNode(
     id: string,
-    patch: Partial<{ title: string; titleState: DefaultTitleState; seed: unknown; frozenContext: FrozenNodeContext; systemPrompt: string; model: StoredModelSelection; thinkingLevel: ThinkingLevel; color: string }>,
+    patch: Partial<{ title: string; titleState: DefaultTitleState; seed: unknown; frozenContext: FrozenNodeContext; systemPrompt: string; model: StoredModelSelection; thinkingLevel: ThinkingLevel; color: string; delegation: DelegationMetadata }>,
   ): void {
     const current = this.getNode(id);
     if (!current) return;
@@ -473,6 +477,9 @@ export class SqliteStore implements Store {
     const meta = decode<Record<string, unknown>>(row?.meta, {});
     if (Object.prototype.hasOwnProperty.call(patch, "frozenContext")) {
       meta.frozenContext = patch.frozenContext;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "delegation")) {
+      meta.delegation = patch.delegation;
     }
     if (Object.prototype.hasOwnProperty.call(patch, "systemPrompt")) {
       const text = patch.systemPrompt?.trim() ?? "";
@@ -711,6 +718,7 @@ export class SqliteStore implements Store {
     const titleState = meta.titleState === "default" || meta.titleState === "manual" ? meta.titleState : undefined;
     const frozenContext = meta.frozenContext && typeof meta.frozenContext === "object" ? meta.frozenContext as FrozenNodeContext : undefined;
     const branchPoint = meta.branchPoint && typeof meta.branchPoint === "object" ? meta.branchPoint as NodeBranchPoint : undefined;
+    const delegation = meta.delegation && typeof meta.delegation === "object" ? meta.delegation as DelegationMetadata : undefined;
     return {
       id: row.id,
       sessionId: row.session_id,
@@ -726,6 +734,7 @@ export class SqliteStore implements Store {
       layout: toLayout(row),
       frozenContext,
       branchPoint,
+      delegation,
       messages: this.listMessages(row.id),
     };
   }

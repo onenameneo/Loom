@@ -13,6 +13,37 @@ afterEach(() => {
 });
 
 describe("SqliteStore node layouts", () => {
+  it("persists delegated research provenance and audit metadata across reopen", () => {
+    const dir = mkdtempSync(join(tmpdir(), "loom-delegation-meta-"));
+    dirs.push(dir);
+    const file = join(dir, "loom.db");
+    const store = new SqliteStore(file);
+    const project = store.createProject({ name: "Project", sourceRoots: [dir] });
+    const session = store.ensureDefaultSession(project.id);
+    const parent = store.createNode({ sessionId: session.id, title: "Parent" });
+    const child = store.createNode({
+      sessionId: session.id,
+      parentId: parent.id,
+      title: "Research",
+      delegation: {
+        source: { nodeId: parent.id, turnId: "turn-1", toolCallId: "task-1" },
+        task: { title: "Research", prompt: "Inspect evidence" },
+        initial: {
+          executionPromptSnapshot: "research prompt",
+          capabilities: ["read"],
+          projectRoots: [dir],
+        },
+      },
+    });
+    (store as any).db.close();
+
+    expect(new SqliteStore(file).getNode(child.id)?.delegation).toEqual({
+      source: { nodeId: parent.id, turnId: "turn-1", toolCallId: "task-1" },
+      task: { title: "Research", prompt: "Inspect evidence" },
+      initial: { executionPromptSnapshot: "research prompt", capabilities: ["read"], projectRoots: [dir] },
+    });
+  });
+
   it("persists chat branch origins and node branch points across reopen", () => {
     const dir = mkdtempSync(join(tmpdir(), "loom-message-branch-origin-"));
     dirs.push(dir);

@@ -71,6 +71,12 @@ export interface CanvasNodeDto {
   sessionId: string;
   projectId: string;
   parentId?: string;
+  delegation?: {
+    source: { nodeId: string; turnId: string; toolCallId: string };
+    task: { title: string; prompt: string; workingInstructions?: string };
+    initial: { capabilities: string[]; projectRoots: string[]; executionPromptSnapshot: string };
+  };
+  delegationStatus?: "running" | "delivered" | "undelivered";
   title: string;
   titleState?: "default" | "manual";
   seed?: NodeSeed;

@@ -28,6 +28,8 @@ export interface NodeRuntime {
   toolResultMicroCompact?: ToolResultMicroCompactState;
   todoPlan?: TodoPlanSnapshot;
   todoRevision?: number;
+  /** Per-active-parent-turn idempotency/admission accounting for delegated tasks. */
+  delegationAdmissions?: { turnId: string; toolCallIds: Set<string> };
   /** tombstone：dispose/删除后拒绝后续 transition，等 in-flight turn settle 后清理。 */
   disposed?: boolean;
 }

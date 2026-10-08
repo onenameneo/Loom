@@ -21,13 +21,22 @@ function stateLabel(call: ToolCallView) {
   return call.isError ? "error" : "done";
 }
 
+function delegatedChildId(details: unknown): string | undefined {
+  const raw = details && typeof details === "object" && typeof (details as { json?: unknown }).json === "string"
+    ? (() => { try { return JSON.parse((details as { json: string }).json); } catch { return undefined; } })()
+    : details;
+  return raw && typeof raw === "object" && typeof (raw as { childNodeId?: unknown }).childNodeId === "string"
+    ? (raw as { childNodeId: string }).childNodeId
+    : undefined;
+}
+
 function StateIcon({ call }: { call: ToolCallView }) {
   if (call.state !== "end") return <CircleDashed size={13} />;
   if (call.isError) return <CircleX size={13} />;
   return <CircleCheck size={13} />;
 }
 
-export function ToolCallTimeline({ calls, density = "comfortable" }: { calls: ToolCallView[]; density?: "compact" | "comfortable" }) {
+export function ToolCallTimeline({ calls, density = "comfortable", onOpenChild }: { calls: ToolCallView[]; density?: "compact" | "comfortable"; onOpenChild?: (nodeId: string) => void }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   if (calls.length === 0) return null;
 
@@ -35,6 +44,7 @@ export function ToolCallTimeline({ calls, density = "comfortable" }: { calls: To
     <div className={`tool-timeline tool-timeline--${density}`}>
       {calls.map((call) => {
         const details = formatDetails(call.details ?? call.args);
+        const childNodeId = call.name === "task" ? delegatedChildId(call.details) : undefined;
         const expanded = open.has(call.id);
         return (
           <div className={`tool-row tool-row--${stateLabel(call)}`} key={call.id}>
@@ -60,6 +70,11 @@ export function ToolCallTimeline({ calls, density = "comfortable" }: { calls: To
               <ChevronDown className="tool-row__chev" size={13} />
             </button>
             {expanded && details && <pre className="tool-row__details">{details}</pre>}
+            {childNodeId && (
+              <button className="tool-row__open-child nodrag" type="button" onClick={() => onOpenChild?.(childNodeId)}>
+                Open research branch
+              </button>
+            )}
           </div>
         );
       })}

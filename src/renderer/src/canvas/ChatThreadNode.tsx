@@ -725,6 +725,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           )}
           <div className="head-meta">
             {nodeModel && <span className="model" title={nodeModel}>{nodeModel}</span>}
+            {data.delegation && <span className="tokens" title="Persistent delegated research branch">research branch{data.delegationStatus === "undelivered" ? " · undelivered" : ""}</span>}
             {skillCount > 0 && <span className="tokens" title={t("node.activeSkills")}>skills {skillCount}</span>}
           </div>
         </div>
@@ -805,7 +806,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
 
           {renderItems.map((item) => (
             item.kind === "tools" ? (
-              <ToolCallTimeline key={item.key} calls={item.calls} density="compact" />
+              <ToolCallTimeline key={item.key} calls={item.calls} density="compact" onOpenChild={data.onOpenChild} />
             ) : (
               <Message
                 key={item.message.id}

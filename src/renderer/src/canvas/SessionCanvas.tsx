@@ -46,6 +46,7 @@ export default function SessionCanvas({
   const { t } = useI18n();
   const [nodeList, setNodeList] = useState<CanvasNodeDto[]>([]);
   const [nodeCount, setNodeCount] = useState(1);
+  const [preserveChatOnDelegation, setPreserveChatOnDelegation] = useState(false);
 
   const reload = useCallback(async () => {
     let dtos: CanvasNodeDto[];
@@ -59,12 +60,27 @@ export default function SessionCanvas({
     reload();
   }, [sessionId, reload]);
 
+  useEffect(() => {
+    const canvas = window.api?.canvas;
+    if (!canvas?.onEvent) return;
+    return canvas.onEvent((event) => {
+      if (event.type !== "delegation") return;
+      const payload = event.payload as { sessionId?: unknown } | undefined;
+      if (payload?.sessionId === sessionId) {
+        // A background research branch is observable, but it must not take
+        // over a chat-only surface until the user explicitly opens it.
+        if (initialMode !== "canvas") setPreserveChatOnDelegation(true);
+        void reload();
+      }
+    });
+  }, [initialMode, reload, sessionId]);
+
   const refreshChat = useCallback(() => {
     void reload();
     onTreeChange?.();
   }, [reload, onTreeChange]);
 
-  const isCanvas = initialMode === "canvas" || (initialMode == null && nodeCount > 1);
+  const isCanvas = initialMode === "canvas" || (initialMode == null && nodeCount > 1 && !preserveChatOnDelegation);
   const root = nodeList.find((d) => !d.parentId) ?? nodeList[0] ?? null;
   const chatNode = nodeList.find((d) => d.id === activeNodeId) ?? root;
 
@@ -86,6 +102,11 @@ export default function SessionCanvas({
   const expandCanvas = useCallback(() => {
     onModeChange?.("canvas");
   }, [onModeChange]);
+
+  const openDelegatedChild = useCallback((nodeId: string) => {
+    onNodeChange?.(nodeId);
+    onModeChange?.("canvas");
+  }, [onModeChange, onNodeChange]);
 
   const returnChat = useCallback(async (nodeId?: string) => {
     onNodeChange?.(nodeId ?? null);
@@ -144,6 +165,7 @@ export default function SessionCanvas({
             onReturnChat={returnChat}
             onTreeChange={onTreeChange}
             onCreateChatBranch={onCreateChatBranch}
+            onOpenChild={openDelegatedChild}
           />
         </div>
       ) : (
@@ -160,6 +182,7 @@ export default function SessionCanvas({
           onReturnToBranch={branchSource ? () => onReturnToBranch?.(branchSource) : undefined}
           focusMessageSeq={focusMessageSeq}
           onExpandCanvas={expandCanvas}
+          onOpenChild={openDelegatedChild}
           onTreeChange={refreshChat}
           noKey={noKey}
           goSettings={goSettings}

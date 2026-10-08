@@ -8,6 +8,7 @@ import {
   type NodeLayout,
   type NodeRecord,
   type NodeBranchPoint,
+  type DelegationMetadata,
   type PersistedMessage,
   type BranchSource,
   type SessionRecord,
@@ -241,12 +242,13 @@ export class JsonStore implements Store {
     seed?: unknown;
     frozenContext?: FrozenNodeContext;
     branchPoint?: NodeBranchPoint;
+    delegation?: DelegationMetadata;
   }): NodeRecord {
     throw new Error("JsonStore does not implement canvas node persistence.");
   }
   updateNode(
     _id: string,
-    _patch: Partial<{ title: string; titleState: DefaultTitleState; seed: unknown; frozenContext: FrozenNodeContext; systemPrompt: string; model: StoredModelSelection; thinkingLevel: ThinkingLevel; color: string }>,
+    _patch: Partial<{ title: string; titleState: DefaultTitleState; seed: unknown; frozenContext: FrozenNodeContext; systemPrompt: string; model: StoredModelSelection; thinkingLevel: ThinkingLevel; color: string; delegation: DelegationMetadata }>,
   ): void {}
   updateNodeLayout(_id: string, _layout: NodeLayout): boolean {
     return false;

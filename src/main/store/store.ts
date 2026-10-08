@@ -221,7 +221,21 @@ export interface NodeRecord {
   /** Versioned child-owned context captured at branch creation. */
   frozenContext?: FrozenNodeContext;
   branchPoint?: NodeBranchPoint;
+  /** Immutable provenance and initial audit snapshot for a delegated research branch. */
+  delegation?: DelegationMetadata;
   messages: PersistedMessage[];
+}
+
+export interface DelegationMetadata {
+  source: { nodeId: string; turnId: string; toolCallId: string };
+  task: { title: string; prompt: string; workingInstructions?: string };
+  initial: {
+    modelSelection?: StoredModelSelection;
+    thinkingLevel?: ThinkingLevel;
+    executionPromptSnapshot: string;
+    capabilities: string[];
+    projectRoots: string[];
+  };
 }
 
 export interface Store {
@@ -256,10 +270,11 @@ export interface Store {
     seed?: unknown;
     frozenContext?: FrozenNodeContext;
     branchPoint?: NodeBranchPoint;
+    delegation?: DelegationMetadata;
   }): NodeRecord;
   updateNode(
     id: string,
-    patch: Partial<{ title: string; titleState: DefaultTitleState; seed: unknown; frozenContext: FrozenNodeContext; systemPrompt: string; model: StoredModelSelection; thinkingLevel: ThinkingLevel; color: string }>,
+    patch: Partial<{ title: string; titleState: DefaultTitleState; seed: unknown; frozenContext: FrozenNodeContext; systemPrompt: string; model: StoredModelSelection; thinkingLevel: ThinkingLevel; color: string; delegation: DelegationMetadata }>,
   ): void;
   updateNodeLayout(id: string, layout: NodeLayout): boolean;
   updateNodeLayouts(items: Array<{ id: string; layout: NodeLayout }>): string[];

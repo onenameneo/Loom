@@ -51,6 +51,7 @@ export default function ChatView({
   onReturnToBranch,
   focusMessageSeq,
   onExpandCanvas,
+  onOpenChild,
   onTreeChange,
   noKey,
   goSettings,
@@ -67,6 +68,7 @@ export default function ChatView({
   onReturnToBranch?: () => void | Promise<void>;
   focusMessageSeq?: number;
   onExpandCanvas: () => void;
+  onOpenChild?: (nodeId: string) => void;
   onTreeChange?: () => void;
   noKey: boolean;
   goSettings: () => void;
@@ -566,7 +568,7 @@ export default function ChatView({
           {renderItems.map((item) => (
             <Fragment key={item.kind === "tools" ? item.key : item.message.id}>
               {item.kind === "tools" ? (
-                <ToolCallTimeline calls={item.calls} density="comfortable" />
+                <ToolCallTimeline calls={item.calls} density="comfortable" onOpenChild={onOpenChild} />
               ) : (
                 <Message
                   role={item.message.role}

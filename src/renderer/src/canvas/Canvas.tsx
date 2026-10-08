@@ -115,6 +115,8 @@ function toNode(
       sessionId: dto.sessionId,
       projectId: dto.projectId,
       parentId: dto.parentId,
+      delegation: dto.delegation,
+      delegationStatus: dto.delegationStatus,
       title: translate ? localizedNodeTitle(dto.title, translate, dto.titleState) : dto.title,
       titleState: dto.titleState,
       seed: dto.seed,
@@ -157,6 +159,7 @@ type CanvasProps = {
   onReturnChat?: (nodeId: string) => void;
   onTreeChange?: () => void;
   onCreateChatBranch?: (sourceNodeId: string, sourceSeq: number) => void | Promise<void>;
+  onOpenChild?: (nodeId: string) => void;
 };
 
 export default function Canvas(props: CanvasProps) {
@@ -175,6 +178,7 @@ function CanvasContent({
   onReturnChat,
   onTreeChange,
   onCreateChatBranch,
+  onOpenChild,
 }: CanvasProps) {
   const { t } = useI18n();
   const [nodes, setNodes, applyNodesChange] = useNodesState<Node>([]);
@@ -563,6 +567,10 @@ function CanvasContent({
       onTreeChange: () => treeChangeRef.current?.(),
       onMessageBranch: (sourceNodeId: string, sourceSeq: number, mode: MessageBranchMode) =>
         messageBranchRef.current(sourceNodeId, sourceSeq, mode),
+      onOpenChild: (nodeId: string) => {
+        setNodes((nodes) => nodes.map((node) => ({ ...node, selected: node.id === nodeId })));
+        onOpenChild?.(nodeId);
+      },
       onSelect: (id: string) => {
         setNodes((nds) => nds.map((node) => ({ ...node, selected: node.id === id })));
       },
@@ -640,7 +648,7 @@ function CanvasContent({
       },
       onReturnChat: (id: string) => onReturnChat?.(id),
     }),
-    [applyResizeLayout, layoutStore, onReturnChat, setNodes, sessionId],
+    [applyResizeLayout, layoutStore, onOpenChild, onReturnChat, setNodes, sessionId],
   );
 
   useEffect(() => subscribeNodeUpdates((update) => {
