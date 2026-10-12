@@ -48,6 +48,83 @@
   /* 略宽的行距：给消息呼吸感，也给底部悬停工具条留出落点 */
   gap: 30px;
 }
+.chatview .thread > .m--user:not(:first-child),
+.card__thread > .m--user:not(:first-child) { margin-top: var(--s3); }
+.question-navigation {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: var(--s1) var(--s4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.question-navigation__controls { display: flex; align-items: center; flex-shrink: 0; gap: var(--s1); }
+.question-navigation button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  min-width: 28px;
+  gap: var(--s2);
+  padding: var(--s1);
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.question-navigation button:hover { background: var(--surface-2); color: var(--text); }
+.question-navigation button:focus-visible,
+.question-directory button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.question-navigation button:disabled { opacity: .35; cursor: default; }
+.question-navigation__directory span { font: 11px var(--font-mono); }
+.question-navigation .question-navigation__preview {
+  display: block;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 12px/1.5 var(--font-ui);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 140ms var(--panel-motion-curve);
+}
+.question-navigation__preview[data-visible="true"] { opacity: 1; visibility: visible; }
+.question-directory {
+  z-index: 80;
+  width: min(360px, calc(100vw - 32px));
+  padding: var(--s2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-float);
+}
+.question-directory__title { padding: var(--s2); font-size: 12px; color: var(--muted); }
+.question-directory ol { max-height: min(400px, 60vh); overflow-y: auto; list-style: none; margin: 0; padding: 0; }
+.question-directory button {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  width: 100%;
+  min-height: 36px;
+  padding: var(--s2);
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: 13px/1.7 var(--font-ui);
+  cursor: pointer;
+}
+.question-directory button:hover { background: var(--surface-2); }
+.question-directory button[aria-current="location"] { background: var(--accent-soft); }
+.question-directory button span:first-child { flex-shrink: 0; color: var(--muted); font: 11px var(--font-mono); }
+.question-directory button span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .question-navigation__preview { transition: none; } }
 /* 用户提问与其下方的助手回复之间再拉开一些，视觉上区分一问一答 */
 .chatview .thread .m--user + .m--assistant {
   margin-top: 12px;
@@ -919,6 +996,18 @@
 }
 .card__body .m--user + .m--assistant {
   margin-top: 12px;
+}
+.card__thread {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 30px;
+  min-width: 0;
+}
+.card > .question-navigation {
+  min-width: 0;
+  padding-inline: var(--s3);
+  background: var(--surface);
 }
 .to-latest {
   position: sticky;

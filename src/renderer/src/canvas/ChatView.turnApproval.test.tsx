@@ -75,6 +75,32 @@ beforeEach(() => {
 });
 
 describe("ChatView turn and approval controls", () => {
+  it("applies an external message focus once so new output does not interrupt later navigation", () => {
+    const scrollIntoView = vi.spyOn(HTMLElement.prototype, "scrollIntoView");
+    const props = { nodeId: "n1", hasFrozenContext: false, onBranch: vi.fn(), onExpandCanvas: vi.fn(), noKey: false, goSettings: vi.fn() };
+    const messages = [{ role: "user" as const, text: "First question", seq: 0 }, { role: "assistant" as const, text: "Answer", seq: 1 }];
+    const { rerender } = render(<ChatView {...props} focusMessageSeq={0} initialMessages={messages} />);
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    const updated = [...messages, { role: "user" as const, text: "Next question", seq: 2 }];
+    rerender(<ChatView {...props} focusMessageSeq={0} initialMessages={updated} />);
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    rerender(<ChatView {...props} focusMessageSeq={2} initialMessages={updated} />);
+    expect(scrollIntoView).toHaveBeenCalledTimes(2);
+  });
+  it("retains question DOM and expansion when the same transcript refreshes", () => {
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(600);
+    const text = Array(20).fill("Long question line").join("\n");
+    const props = { nodeId: "n1", hasFrozenContext: false, onBranch: vi.fn(), onExpandCanvas: vi.fn(), noKey: false, goSettings: vi.fn() };
+    const { container, rerender } = render(<ChatView {...props} initialMessages={[{ role: "user", text, seq: 0 }, { role: "assistant", text: "Answer", seq: 1 }]} />);
+    const question = container.querySelector('[data-question-number="1"]');
+    fireEvent.click(screen.getByRole("button", { name: "展开全文" }));
+    rerender(<ChatView {...props} initialMessages={[{ role: "user", text, seq: 0 }, { role: "assistant", text: "Answer with new output", seq: 1 }]} />);
+    expect(container.querySelector('[data-question-number="1"]')).toBe(question);
+    expect(screen.getByRole("button", { name: "收起全文" })).toBeTruthy();
+    rerender(<ChatView {...props} nodeId="n2" initialMessages={[{ role: "user", text, seq: 0 }]} />);
+    expect(container.querySelector('[data-question-number="1"]')).not.toBe(question);
+    expect(screen.getByRole("button", { name: "展开全文" })).toBeTruthy();
+  });
   it("renders one collapsed process for interleaved tools and leaves the final answer readable", () => {
     const call = { id: "read-1", name: "read", state: "end" as const, isError: false, startedAt: 0, updatedAt: 1, args: { path: "Message.tsx" } };
     render(

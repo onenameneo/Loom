@@ -64,18 +64,26 @@ export function Modal({
   onOpenChange,
   ariaLabel,
   children,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
+  className,
+  overlayClassName,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   ariaLabel: string;
   children: ReactNode;
+  onOpenAutoFocus?: (event: Event) => void;
+  onCloseAutoFocus?: (event: Event) => void;
+  className?: string;
+  overlayClassName?: string;
 }) {
   const { t } = useI18n();
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay forceMount className="dlg-overlay" aria-hidden={!open} />
-        <Dialog.Content forceMount className="settings-dialog-content" aria-label={ariaLabel} aria-hidden={!open}>
+        <Dialog.Overlay forceMount className={cn("dlg-overlay", overlayClassName)} aria-hidden={!open} />
+        <Dialog.Content forceMount className={cn("settings-dialog-content", className)} aria-label={ariaLabel} aria-hidden={!open} onOpenAutoFocus={onOpenAutoFocus} onCloseAutoFocus={onCloseAutoFocus}>
           {children}
         </Dialog.Content>
       </Dialog.Portal>

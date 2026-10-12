@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ClipboardEvent } from "react";
-import { BookOpen, Brain, ChevronDown, FileText, Folder, FolderOpen, Square, X } from "lucide-react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ClipboardEvent } from "react";
+import { BookOpen, Brain, ChevronDown, FileText, Folder, FolderOpen, Maximize2, Square, X } from "lucide-react";
 import { Popover, Slider } from "radix-ui";
 import type { FileCandidate, FileMentionRef } from "../../../common/fileMentions";
 import type { SelectionContextNote } from "../../../common/selectionContext";
@@ -13,6 +13,11 @@ import { ContextBudgetIndicator } from "./ContextBudgetIndicator";
 import { useComposerBudget } from "./useComposerBudget";
 import { useI18n } from "../i18n/I18nProvider";
 import { SelectionNotesPopover } from "./SelectionContextNotes";
+import { PastedTextCards } from "./PastedTextCards";
+import { isLargePaste } from "./pastedDraft";
+import { usePastedDraft } from "./usePastedDraft";
+import { TextEditorDialog } from "../ui/TextEditorDialog";
+import "./pastedText.css";
 import { dismissSlashHint, isSlashHintDismissed, subscribeSlashHint } from "./slashHint";
 
 export type ComposerImage = { data: string; mimeType: string };
@@ -81,6 +86,28 @@ export function Composer({
 }) {
   const { t } = useI18n();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const pastedDraft = usePastedDraft(nodeId, value, onChange);
+  const visibleValue = pastedDraft.draft.text;
+  const [inputOverflows, setInputOverflows] = useState(false);
+  useLayoutEffect(() => {
+    const input = textareaRef.current;
+    if (!input) return;
+    const measure = () => setInputOverflows(input.scrollHeight > input.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(input);
+    return () => observer.disconnect();
+  }, [nodeId, visibleValue]);
+  const [editor, setEditor] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const editorSelection = useRef({ start: 0, end: 0 });
+  const editingFragment = pastedDraft.draft.fragments.find((fragment) => fragment.id === editor);
+  function openEditor(id: string) {
+    editorSelection.current = { start: textareaRef.current?.selectionStart ?? 0, end: textareaRef.current?.selectionEnd ?? 0 };
+    setEditor(id);
+    setEditorOpen(true);
+  }
+  useEffect(() => { setEditorOpen(false); }, [nodeId]);
   const fileRef = useRef<HTMLInputElement>(null);
   const slashRef = useRef<SlashPaletteHandle>(null);
   const [slashOpen, setSlashOpen] = useState(false);
@@ -103,7 +130,7 @@ export function Composer({
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const fileMentionListId = useId();
   const [isComposing, setIsComposing] = useState(false);
-  const fileMentionTrigger = useMemo(() => findFileMentionTrigger(value, cursorPosition), [cursorPosition, value]);
+  const fileMentionTrigger = useMemo(() => findFileMentionTrigger(visibleValue, cursorPosition), [cursorPosition, visibleValue]);
   const fileMentionOpen = Boolean(fileMentionTrigger && !fileMentionDismissed && !busy && !slashOpen && !isComposing);
   const fileCandidateGroups = useMemo(() => {
     const roots = new Map<string, { root: string; rootName: string; directories: Map<string, FileCandidate[]> }>();
@@ -167,7 +194,7 @@ export function Composer({
   );
 
   useEffect(() => {
-    if (!slashOpen || !value.startsWith("/model")) return;
+    if (!slashOpen || !visibleValue.startsWith("/model")) return;
     let alive = true;
     window.api?.canvas.models().then((items) => {
       if (alive) setModelOptions(items);
@@ -175,7 +202,7 @@ export function Composer({
     return () => {
       alive = false;
     };
-  }, [slashOpen, value]);
+  }, [slashOpen, visibleValue]);
 
   // slash 提示只在空输入时展示；用户触发过一次命令面板即视为已学会，永久隐藏。
   useEffect(() => subscribeSlashHint(() => setSlashHintDismissed(true)), []);
@@ -228,8 +255,7 @@ export function Composer({
 
   const handlePaste = useCallback(
     (event: ClipboardEvent<HTMLTextAreaElement>) => {
-      const items = event.clipboardData?.items;
-      if (!items) return;
+      const items = event.clipboardData?.items ?? [];
       const files: File[] = [];
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
@@ -238,7 +264,17 @@ export function Composer({
           if (file) files.push(file);
         }
       }
-      if (files.length === 0) return;
+      if (files.length === 0) {
+        const text = event.clipboardData.getData("text/plain");
+        if (!isLargePaste(text)) return;
+        event.preventDefault();
+        const start = event.currentTarget.selectionStart;
+        pastedDraft.paste(start, event.currentTarget.selectionEnd, text);
+        setCursorPosition(start);
+        setSlashOpen(false);
+        requestAnimationFrame(() => textareaRef.current?.setSelectionRange(start, start));
+        return;
+      }
       event.preventDefault();
       try {
         const dt = new DataTransfer();
@@ -248,7 +284,7 @@ export function Composer({
         onFiles(files as unknown as FileList);
       }
     },
-    [onFiles],
+    [onFiles, pastedDraft],
   );
 
   function selectModel(model: ModelListItem) {
@@ -304,6 +340,7 @@ export function Composer({
     const submittedImages = images;
     const submittedMentions = mentions;
     const submittedSelectionNotes = selectionNotes;
+    const submittedDraft = pastedDraft.draft;
     const result = submittedSelectionNotes.length > 0
       ? onSubmit(text, submittedImages, (activeSkills ?? []).map((skill) => skill.id), submittedMentions, submittedSelectionNotes)
       : onSubmit(text, submittedImages, (activeSkills ?? []).map((skill) => skill.id), submittedMentions);
@@ -312,13 +349,17 @@ export function Composer({
     onSelectionNotesChange([]);
     setSlashOpen(false);
     if (result && typeof (result as Promise<ComposerSubmitResult>).then === "function") {
+      const restoreSubmission = () => {
+        setImages(submittedImages);
+        setMentions(submittedMentions);
+        onSelectionNotesChange(submittedSelectionNotes);
+        pastedDraft.restoreAfterFailure(submittedDraft);
+      };
       void (result as Promise<ComposerSubmitResult>).then((response) => {
         if (response && !response.ok) {
-          setImages(submittedImages);
-          setMentions(submittedMentions);
-          onSelectionNotesChange(submittedSelectionNotes);
+          restoreSubmission();
         }
-      });
+      }, restoreSubmission);
     }
   }
 
@@ -326,11 +367,11 @@ export function Composer({
 
   function selectFileCandidate(candidate: FileCandidate) {
     if (!fileMentionTrigger) return;
-    const next = `${value.slice(0, fileMentionTrigger.start)}${value.slice(fileMentionTrigger.end)}`;
+    const next = `${visibleValue.slice(0, fileMentionTrigger.start)}${visibleValue.slice(fileMentionTrigger.end)}`;
     const mention: FileMentionRef = { root: candidate.root, path: candidate.path };
     setFileMentionDismissed(false);
     setMentions((current) => current.some((item) => item.root === mention.root && item.path === mention.path) ? current : [...current, mention]);
-    onChange(next);
+    pastedDraft.changeText(next);
     setCursorPosition(fileMentionTrigger.start);
     requestAnimationFrame(() => {
       const target = textareaRef.current;
@@ -382,9 +423,9 @@ export function Composer({
       <div className="composer-box relative flex w-full flex-col gap-loom-1 box-border rounded-loom-lg border border-loom-border bg-loom-surface px-3 py-loom-1 shadow-loom-composer focus-within:border-loom-accent focus-within:shadow-[0_0_0_1px_var(--accent-soft),var(--shadow-composer)]">
         <SlashPalette
           ref={slashRef}
-          value={slashOpen ? value : ""}
+          value={slashOpen ? visibleValue : ""}
           setValue={(next) => {
-            onChange(next);
+            pastedDraft.changeText(next);
             setCommandError(null);
           }}
           ctx={ctx}
@@ -420,6 +461,7 @@ export function Composer({
             ))}
           </div>
         )}
+        <PastedTextCards fragments={pastedDraft.draft.fragments} disabled={busy} onEdit={openEditor} onRemove={pastedDraft.removeFragment} />
         {images.length > 0 && (
           <div className="composer-images">
             {images.map((image, index) => (
@@ -469,7 +511,7 @@ export function Composer({
                 className="ask"
                 rows={1}
                 placeholder={placeholder}
-                value={value}
+                value={visibleValue}
                 disabled={busy}
                 role="combobox"
                 aria-autocomplete="list"
@@ -478,7 +520,7 @@ export function Composer({
                 aria-haspopup="listbox"
                 onChange={(event) => {
                   const next = event.target.value;
-                  onChange(next);
+                  pastedDraft.changeText(next);
                   setCursorPosition(event.target.selectionStart);
                   setFileMentionDismissed(false);
                   setCommandError(null);
@@ -486,9 +528,9 @@ export function Composer({
                 }}
                 onSelect={(event) => setCursorPosition(event.currentTarget.selectionStart)}
                 onFocus={() => {
-                  setCursorPosition(textareaRef.current?.selectionStart ?? value.length);
+                  setCursorPosition(textareaRef.current?.selectionStart ?? visibleValue.length);
                   setFileMentionDismissed(false);
-                  setSlashOpen(value.startsWith("/"));
+                  setSlashOpen(visibleValue.startsWith("/"));
                 }}
                 onPaste={handlePaste}
                 onBlur={() => window.setTimeout(() => setSlashOpen(false), 120)}
@@ -504,6 +546,7 @@ export function Composer({
                   const nativeEvent = event.nativeEvent as KeyboardEvent & { keyCode?: number };
                   const isComposing = composingRef.current || event.nativeEvent.isComposing || nativeEvent.keyCode === 229;
                   if (isComposing) return;
+                  if (pastedDraft.handleHistory(event)) return;
                   if (handleFileMentionKeyDown(event)) return;
                   if (slashOpen && ["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) {
                     slashRef.current?.handleKeyDown(event);
@@ -588,6 +631,27 @@ export function Composer({
         </Popover.Root>
         {showSlashHint && <div className="composer-hint mt-[-2px] select-none font-loom-mono text-[10px] text-loom-faint">{t("composer.openCommand")}</div>}
         {commandError && <div className="composer-command-error text-[11px] leading-[1.35] text-loom-err" role="alert">{commandError}</div>}
+        {(inputOverflows || visibleValue.includes("\n") || pastedDraft.draft.fragments.length > 0) && (
+          <div className="composer-draft-tools">
+            <span>{t("composer.characterCount", { count: value.length.toLocaleString() })}</span>
+            <button type="button" disabled={busy} onClick={() => openEditor("draft")}><Maximize2 size={13} aria-hidden="true" />{t("composer.expandEditor")}</button>
+          </div>
+        )}
+        <TextEditorDialog
+          open={editorOpen && !busy}
+          onOpenChange={setEditorOpen}
+          title={editingFragment ? t("composer.editFragment", { number: pastedDraft.draft.fragments.indexOf(editingFragment) + 1 }) : t("composer.expandEditor")}
+          value={editingFragment ? editingFragment.text : visibleValue}
+          onChange={(next) => editingFragment ? pastedDraft.changeFragment(editingFragment.id, next) : pastedDraft.changeText(next)}
+          onKeyDown={pastedDraft.handleHistory}
+          selection={editor === "draft" ? editorSelection.current : undefined}
+          onSelectionChange={editor === "draft" ? (selection) => { editorSelection.current = selection; } : undefined}
+          onReturnFocus={editor === "draft" ? () => {
+            textareaRef.current?.focus({ preventScroll: true });
+            textareaRef.current?.setSelectionRange(editorSelection.current.start, editorSelection.current.end);
+          } : undefined}
+          accessory={!editingFragment ? <PastedTextCards fragments={pastedDraft.draft.fragments} disabled={busy} onEdit={openEditor} onRemove={pastedDraft.removeFragment} /> : undefined}
+        />
         <div className="composer-bar flex min-w-0 items-center gap-loom-2">
           <input
             ref={fileRef}

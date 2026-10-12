@@ -21,6 +21,7 @@ import { TodoProgressPanel } from "../composer/TodoProgressPanel";
 import { ComposerTelemetryLine } from "../composer/ComposerTelemetryLine";
 import { useNodeMetrics } from "../composer/useNodeMetrics";
 import { useI18n } from "../i18n/I18nProvider";
+import { QuestionNavigation } from "./QuestionNavigation";
 
 type Role = "user" | "assistant" | "error" | "tool" | "skill" | "checkpoint";
 type Msg = { id: number; role: Role; text: string; thinking?: string; contentParts?: LiveTurnContentPart[]; images?: ComposerImage[]; fileMentions?: FileMentionRef[]; selectionNotes?: SelectionContextNote[]; artifacts?: FileArtifactRef[]; seq?: number; usage?: NodeMsg["usage"]; meta?: unknown; checkpoint?: NodeMsg["checkpoint"]; toolCall?: ToolCallView; skillEvent?: NodeMsg["skillEvent"] };
@@ -111,6 +112,9 @@ export default function ChatView({
   const [thinkingLevel, setThinkingLevelState] = useState<ThinkingLevel | undefined>(initialThinkingLevel);
   const { metrics, refresh: refreshMetrics } = useNodeMetrics(nodeId);
   const [autoScroll, setAutoScroll] = useState(true);
+  const historyReadingRef = useRef(false);
+  const focusedMessageRef = useRef<string | null>(null);
+  useEffect(() => { historyReadingRef.current = false; setAutoScroll(true); }, [nodeId]);
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -240,10 +244,16 @@ export default function ChatView({
   }, [initialThinkingLevel, model, nodeId, systemPrompt]);
 
   useEffect(() => {
-    if (typeof focusMessageSeq !== "number") return;
+    if (typeof focusMessageSeq !== "number") { focusedMessageRef.current = null; return; }
+    const focusKey = `${nodeId}:${focusMessageSeq}`;
+    if (focusedMessageRef.current === focusKey) return;
     const target = threadRef.current?.querySelector(`[data-message-seq="${focusMessageSeq}"]`);
+    if (!target) return;
+    focusedMessageRef.current = focusKey;
+    historyReadingRef.current = true;
+    setAutoScroll(false);
     target?.scrollIntoView?.({ block: "center", behavior: "smooth" });
-  }, [focusMessageSeq, nodeId, msgs.length]);
+  }, [focusMessageSeq, nodeId, msgs]);
 
   useEffect(() => {
     localStorage.setItem(`loom:draft:${nodeId}`, input);
@@ -367,6 +377,8 @@ export default function ChatView({
 
   async function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = [], mentions: FileMentionRef[] = [], submittedSelectionNotes: SelectionContextNote[] = []) {
     if (isBusy || (!text && images.length === 0 && mentions.length === 0 && submittedSelectionNotes.length === 0)) return { ok: false };
+    historyReadingRef.current = false;
+    setAutoScroll(true);
     const optimisticId = idRef.current++;
     setMsgs((m) => [...m, { id: optimisticId, role: "user", text, images, fileMentions: mentions, selectionNotes: submittedSelectionNotes }]);
     setInput("");
@@ -534,10 +546,12 @@ export default function ChatView({
     const el = scrollRef.current;
     if (!el) return;
     setTb(null);
-    setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
+    setAutoScroll(!historyReadingRef.current && el.scrollHeight - el.scrollTop - el.clientHeight < 24);
   }
 
   const renderItems = useMemo(() => groupTurnTimelineMessages(msgs), [msgs]);
+  const questions = useMemo(() => msgs.filter((message) => message.role === "user"), [msgs]);
+  const questionNumbers = useMemo(() => new Map(questions.map((message, index) => [message.id, index + 1])), [questions]);
 
   const renderMessage = (message: Msg, process = false) => (
     <Message
@@ -558,6 +572,7 @@ export default function ChatView({
       canEdit={message.role === "user" && !isBusy}
       sourceSeq={message.seq}
       messageSeq={message.seq}
+      questionNumber={questionNumbers.get(message.id)}
       onBranch={onMessageBranch ? handleMessageBranch : undefined}
       onRegenerate={regenerate}
       onEditResendWithSeq={editResend}
@@ -567,6 +582,7 @@ export default function ChatView({
 
   return (
     <div className="chatview" ref={rootRef}>
+      <QuestionNavigation questions={questions} scrollRef={scrollRef} threadRef={threadRef} resetKey={nodeId} onNavigate={() => { historyReadingRef.current = true; setAutoScroll(false); }} />
       <div className="scroll" ref={scrollRef} onScroll={onScroll}>
         <div className="thread" ref={threadRef} onMouseUp={onMouseUp}>
           {(personaOpen || nodeModel) && (
@@ -592,7 +608,7 @@ export default function ChatView({
             </div>
           )}
           {renderItems.map((item) => (
-            <Fragment key={item.kind === "process" ? item.key : item.message.id}>
+            <Fragment key={item.kind === "process" ? `${nodeId}:process:${item.key}` : `${nodeId}:message:${item.message.seq ?? `local-${item.message.id}`}`}>
               {item.kind === "process" ? (
                 <TurnProcess
                   messages={item.messages}
@@ -641,6 +657,7 @@ export default function ChatView({
       </div>
       {!autoScroll && (
         <button className="to-latest" type="button" aria-label={t("chat.backToLatest")} title={t("chat.backToLatest")} onClick={() => {
+          historyReadingRef.current = false;
           setAutoScroll(true);
           requestAnimationFrame(() => {
             const el = scrollRef.current;

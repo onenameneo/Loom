@@ -1,4 +1,4 @@
-import { memo, useId, useState } from "react";
+import { memo, useId, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BookOpen, Brain, Check, ChevronDown, ChevronUp, Copy, FileText, FolderOpen, Pencil, RefreshCcw } from "lucide-react";
@@ -245,11 +245,13 @@ type MessageProps = {
   sourceSeq?: number;
   onBranch?: (mode: MessageBranchMode, sourceSeq: number) => void | Promise<void>;
   messageSeq?: number;
+  questionNumber?: number;
 };
 
 function equalMessageProps(previous: MessageProps, next: MessageProps) {
   return previous.role === next.role &&
     previous.text === next.text &&
+    previous.questionNumber === next.questionNumber &&
     previous.thinking === next.thinking &&
     previous.contentParts === next.contentParts &&
     previous.images === next.images &&
@@ -296,6 +298,7 @@ export const Message = memo(function Message({
   sourceSeq,
   onBranch,
   messageSeq,
+  questionNumber,
 }: MessageProps) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
@@ -360,7 +363,8 @@ export const Message = memo(function Message({
   }
 
   return (
-    <div className={`m m--${role} m--${density} ${editing ? "m--editing" : ""}`} data-message-seq={typeof messageSeq === "number" ? messageSeq : undefined}>
+    <div className={`m m--${role} m--${density} ${editing ? "m--editing" : ""}`} data-message-seq={typeof messageSeq === "number" ? messageSeq : undefined} data-question-number={role === "user" ? questionNumber : undefined}>
+      {role === "user" && <div className="m__question-label">{t("message.you")}{questionNumber !== undefined && <span> · {String(questionNumber).padStart(2, "0")}</span>}</div>}
       {images && images.length > 0 && (
         <div className="m__images">
           {images.map((image, index) => (
@@ -466,7 +470,7 @@ export const Message = memo(function Message({
           {artifactError && <div className="m__artifact-error" role="status">{artifactError}</div>}
         </>
       ) : text || !selectionNotes?.length ? (
-        <span className="m__plain">{text}</span>
+        role === "user" ? <UserMessageBody text={text} density={density} /> : <span className="m__plain">{text}</span>
       ) : null}
       {showActionBar && !editing && (
         <div className="m__bar nodrag">
@@ -479,7 +483,7 @@ export const Message = memo(function Message({
             </button>
           )}
           {canEdit && (
-            <button onClick={() => setEditing((v) => !v)} title={t("message.editResend")} aria-label={t("message.editResend")}>
+            <button onClick={() => { setDraft(text); setEditing(true); }} title={t("message.editResend")} aria-label={t("message.editResend")}>
               <Pencil size={13} />
             </button>
           )}
@@ -507,3 +511,46 @@ export const Message = memo(function Message({
     </div>
   );
 }, equalMessageProps);
+
+function UserMessageBody({ text, density }: { text: string; density: Density }) {
+  const { t } = useI18n();
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const id = useId();
+  useLayoutEffect(() => {
+    const element = textRef.current;
+    if (!element) return;
+    const measure = () => {
+      const lineHeight = parseFloat(getComputedStyle(element).lineHeight) || (density === "compact" ? 13 : 15) * 1.65;
+      setOverflows(element.scrollHeight > lineHeight * (density === "compact" ? 6 : 8) + 1);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [density, text]);
+
+  function toggle() {
+    const message = textRef.current?.closest<HTMLElement>(".m");
+    const scroll = message?.closest<HTMLElement>(".scroll, .card__body");
+    const top = message?.getBoundingClientRect().top;
+    setExpanded((current) => !current);
+    // Keep the question itself in place when collapsing a tall historical message.
+    if (expanded && scroll && top !== undefined) requestAnimationFrame(() => {
+      const height = scroll.getBoundingClientRect().height;
+      const scale = scroll.clientHeight > 0 && height > 0 ? height / scroll.clientHeight : 1;
+      if (message) scroll.scrollTop += (message.getBoundingClientRect().top - top) / scale;
+    });
+  }
+
+  return (
+    <div className="m__plain m__user-body" data-expanded={expanded}>
+      <span className="m__user-text" ref={textRef} id={id}>{text}</span>
+      {overflows && <button type="button" className="m__expand nodrag" aria-expanded={expanded} aria-controls={id} onClick={toggle}>
+        {expanded ? t("message.collapseText") : t("message.expandText")}
+        {expanded ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}
+      </button>}
+    </div>
+  );
+}

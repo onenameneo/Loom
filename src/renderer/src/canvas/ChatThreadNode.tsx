@@ -22,6 +22,7 @@ import { selectNodeApproval, selectNodeLiveTurn, useWorkspaceStore } from "../wo
 import { selectNodeTodoPlan } from "../workspace/store";
 import { TodoProgressPanel } from "../composer/TodoProgressPanel";
 import { ComposerTelemetryLine } from "../composer/ComposerTelemetryLine";
+import { QuestionNavigation } from "./QuestionNavigation";
 import { useNodeMetrics } from "../composer/useNodeMetrics";
 import { useI18n } from "../i18n/I18nProvider";
 
@@ -96,6 +97,8 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
   const branch = useContext(BranchContext);
   const cardRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
+  const historyReadingRef = useRef(false);
   const bodyScrollTopRef = useRef(0);
   const resizeScrollStateRef = useRef<{ active: boolean; top: number; atLatest: boolean }>({ active: false, top: 0, atLatest: true });
   const footRef = useRef<HTMLDivElement>(null);
@@ -236,6 +239,8 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
 
   useEffect(() => {
     setInput(localStorage.getItem(`loom:draft:${id}`) ?? "");
+    historyReadingRef.current = false;
+    setAutoScroll(true);
     if (selectionNotesNodeRef.current !== id) {
       selectionNotesNodeRef.current = id;
       skipSelectionNotesSaveRef.current = true;
@@ -389,6 +394,8 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
 
   async function submit(text: string, images: ComposerImage[] = [], skillIds: string[] = [], mentions: FileMentionRef[] = [], submittedSelectionNotes: SelectionContextNote[] = []) {
     if (isBusy || (!text && images.length === 0 && mentions.length === 0 && submittedSelectionNotes.length === 0)) return { ok: false };
+    historyReadingRef.current = false;
+    setAutoScroll(true);
     const optimisticId = idRef.current++;
     setMsgs((m) => [...m, { id: optimisticId, role: "user", text, images, fileMentions: mentions, selectionNotes: submittedSelectionNotes }]);
     setInput("");
@@ -561,10 +568,12 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
     if (!el) return;
     bodyScrollTopRef.current = el.scrollTop;
     setTb(null);
-    setAutoScroll(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
+    setAutoScroll(!historyReadingRef.current && el.scrollHeight - el.scrollTop - el.clientHeight < 24);
   }
 
   const renderItems = useMemo(() => groupTurnTimelineMessages(msgs), [msgs]);
+  const questions = useMemo(() => msgs.filter((message) => message.role === "user"), [msgs]);
+  const questionNumbers = useMemo(() => new Map(questions.map((message, index) => [message.id, index + 1])), [questions]);
 
   const seedText = String(data.seed?.text ?? "");
   const seedPreview = seedText.length > 42 ? `${seedText.slice(0, 42)}…` : seedText;
@@ -623,6 +632,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
       canEdit={message.role === "user" && !isBusy}
       sourceSeq={message.seq}
       messageSeq={message.seq}
+      questionNumber={questionNumbers.get(message.id)}
       onBranch={handleMessageBranch}
       onRegenerate={regenerate}
       onEditResendWithSeq={editResend}
@@ -794,6 +804,14 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
         </div>
       )}
 
+      <QuestionNavigation
+        questions={isResizing ? [] : questions}
+        scrollRef={bodyRef}
+        threadRef={threadRef}
+        resetKey={id}
+        onNavigate={() => { historyReadingRef.current = true; setAutoScroll(false); }}
+      />
+
       <div
         className="card__body nodrag nowheel"
         ref={bodyRef}
@@ -807,7 +825,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
             <strong>{msgs.length ? t("node.messageCount", { count: msgs.length }) : t("node.noMessages")}</strong>
           </div>
         ) : (
-          <>
+          <div className="card__thread" ref={threadRef}>
           {data.seed && (
             <button
               className="seed seed--chip nodrag"
@@ -841,7 +859,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
               renderMessage={(message) => renderMessage(message, true)}
               onOpenChild={data.onOpenChild}
             />
-          ) : <Fragment key={item.message.id}>{renderMessage(item.message)}</Fragment>)}
+          ) : <Fragment key={`${id}:message:${item.message.seq ?? `local-${item.message.id}`}`}>{renderMessage(item.message)}</Fragment>)}
 
           {agentLoading && !renderItems.some((item) => item.kind === "process" && item.current) && <div className="thinking" role="status" aria-live="polite"><span className="dot">·</span> {t("chat.thinking")}</div>}
 
@@ -866,7 +884,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
               </div>
             </div>
           )}
-          </>
+          </div>
         )}
       </div>
 
@@ -877,6 +895,7 @@ export const ChatThreadNode = memo(function ChatThreadNode(props: any) {
           aria-label={t("node.backToLatest")}
           title={t("node.backToLatest")}
           onClick={() => {
+            historyReadingRef.current = false;
             setAutoScroll(true);
             requestAnimationFrame(() => {
               const el = bodyRef.current;
